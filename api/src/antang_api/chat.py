@@ -53,6 +53,7 @@ from antang_api.schemas.chat import (
     AgentActivityEvent,
     ChatStreamEvent,
     ChatSource,
+    LiveHeartRateReading,
     MessageCompletedEvent,
     MessageFailedEvent,
     MessageStartedEvent,
@@ -536,6 +537,7 @@ async def stream_chat_run(
     companion_memory: CompanionMemory,
     user_id: UUID,
     prepared_run: PreparedChatRun,
+    live_heart_rate: LiveHeartRateReading | None = None,
 ) -> AsyncIterator[ChatStreamEvent]:
     """准备上下文、执行 Core Agent，并持续产生聊天流事件。"""
 
@@ -603,11 +605,28 @@ async def stream_chat_run(
             },
             ensure_ascii=False,
         )
+        live_heart_rate_context = ""
+        if live_heart_rate is not None:
+            measured_at = live_heart_rate.measured_at
+            if measured_at.tzinfo is None:
+                # 手机没带时区时按用户自己的时区解释，不凭空当成 UTC。
+                measured_at = measured_at.replace(
+                    tzinfo=ZoneInfo(care_settings.timezone),
+                )
+            live_heart_rate_context = json.dumps(
+                {
+                    "beats_per_minute": live_heart_rate.beats_per_minute,
+                    "measured_at": measured_at.isoformat(),
+                    "device_name": live_heart_rate.device_name,
+                },
+                ensure_ascii=False,
+            )
         rendered_system_prompt = render_core_system_prompt(
             health_profile_context,
             companion_memory_context=companion_memory_context,
             care_plan_context=care_plan_context,
             current_time_context=current_time_context,
+            live_heart_rate_context=live_heart_rate_context,
         )
 
         prepared_context = await prepare_chat_context(

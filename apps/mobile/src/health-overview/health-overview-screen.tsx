@@ -36,6 +36,7 @@ import {
   type HealthFactValue,
   type PersonalValue,
 } from '../health-profile/health-profile-inputs';
+import { LiveHeartRatePanel } from '../live-heart-rate/LiveHeartRatePanel';
 import { colors as brandColors, typefaces } from '../ui/theme';
 
 export type HealthOverviewScreenProps = {
@@ -682,6 +683,8 @@ export function HealthOverviewScreen({
               onRetract={retractFact}
               onSave={saveFact}
             />
+
+            <LiveHeartRatePanel />
 
             <SectionHeader
               description="心率展示最近 6 小时趋势，其他项目为服务器保存的最近观测。"

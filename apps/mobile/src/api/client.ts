@@ -75,6 +75,17 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : '发生了未知错误';
 }
 
+/**
+ * 发送消息时手机正在收到的实时心率广播中最近的一条读数。
+ * 请求体里对应后端的下划线字段 beats_per_minute / measured_at / device_name。
+ */
+export type LiveHeartRateReading = {
+  beatsPerMinute: number;
+  /** ISO 8601 时间字符串。 */
+  measuredAt: string;
+  deviceName: string | null;
+};
+
 async function responseJson(response: FetchResponse): Promise<unknown> {
   try {
     return await response.json();
@@ -586,6 +597,7 @@ export class ApiClient {
     attachmentId: string | null,
     onEvent: (event: ChatStreamEvent) => void,
     signal?: AbortSignal,
+    liveHeartRate?: LiveHeartRateReading | null,
   ): Promise<void> {
     const response = await this.authorizedFetch('/api/v1/chat/messages', {
       method: 'POST',
@@ -593,6 +605,13 @@ export class ApiClient {
         client_message_id: clientMessageId,
         content,
         attachment_id: attachmentId,
+        live_heart_rate: liveHeartRate === undefined || liveHeartRate === null
+          ? null
+          : {
+            beats_per_minute: liveHeartRate.beatsPerMinute,
+            measured_at: liveHeartRate.measuredAt,
+            device_name: liveHeartRate.deviceName,
+          },
       }),
       signal,
       headers: { Accept: 'application/x-ndjson' },

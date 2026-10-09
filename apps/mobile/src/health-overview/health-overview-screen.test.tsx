@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -10,7 +11,17 @@ import { act, create } from 'react-test-renderer';
 
 import { ApiError, type ApiClient } from '../api/client';
 import type { HealthProfile } from '../api/types';
+import { LiveHeartRateProvider } from '../live-heart-rate/LiveHeartRateProvider';
 import { HealthOverviewScreen, sourceLabel } from './health-overview-screen';
+
+/** 档案页里的实时心率卡片从共享 Provider 取 controller，渲染时补上这层 Provider。 */
+function screenElement(element: ReactElement) {
+  return <LiveHeartRateProvider active>{element}</LiveHeartRateProvider>;
+}
+
+function createScreen(element: ReactElement) {
+  return create(screenElement(element));
+}
 
 jest.mock('expo-crypto', () => ({
   randomUUID: jest.fn(() => '019b9999-9999-7999-8999-999999999999'),
@@ -121,7 +132,7 @@ describe('HealthOverviewScreen', () => {
     let tree: ReturnType<typeof create>;
 
     await act(async () => {
-      tree = create(<HealthOverviewScreen api={api} onClose={onClose} />);
+      tree = createScreen(<HealthOverviewScreen api={api} onClose={onClose} />);
     });
 
     expect(api.getHealthProfile).toHaveBeenCalledWith(expect.any(AbortSignal));
@@ -174,7 +185,7 @@ describe('HealthOverviewScreen', () => {
     let tree: ReturnType<typeof create>;
 
     await act(async () => {
-      tree = create(
+      tree = createScreen(
         <HealthOverviewScreen api={api} onClose={jest.fn()} />,
       );
     });
@@ -223,7 +234,7 @@ describe('HealthOverviewScreen', () => {
     let tree: ReturnType<typeof create>;
 
     await act(async () => {
-      tree = create(
+      tree = createScreen(
         <HealthOverviewScreen
           api={api}
           onClose={jest.fn()}
@@ -285,7 +296,7 @@ describe('HealthOverviewScreen', () => {
     const onClose = jest.fn();
     let tree: ReturnType<typeof create>;
     await act(async () => {
-      tree = create(
+      tree = createScreen(
         <HealthOverviewScreen api={api} onClose={onClose} wearableSyncCompletedAt={null} />,
       );
     });
@@ -298,11 +309,13 @@ describe('HealthOverviewScreen', () => {
 
     await act(async () => {
       tree!.update(
-        <HealthOverviewScreen
-          api={api}
-          onClose={onClose}
-          wearableSyncCompletedAt="2026-09-26T12:06:00Z"
-        />,
+        screenElement(
+          <HealthOverviewScreen
+            api={api}
+            onClose={onClose}
+            wearableSyncCompletedAt="2026-09-26T12:06:00Z"
+          />,
+        ),
       );
     });
     expect(api.getHealthProfile).toHaveBeenCalledTimes(2);
@@ -315,7 +328,7 @@ describe('HealthOverviewScreen', () => {
     const onSyncWearable = jest.fn().mockRejectedValue(new Error('Health Connect 读取失败'));
     let tree: ReturnType<typeof create>;
     await act(async () => {
-      tree = create(
+      tree = createScreen(
         <HealthOverviewScreen
           api={api}
           onClose={jest.fn()}
@@ -341,7 +354,7 @@ describe('HealthOverviewScreen', () => {
     let tree: ReturnType<typeof create>;
 
     await act(async () => {
-      tree = create(
+      tree = createScreen(
         <HealthOverviewScreen api={api} onClose={jest.fn()} />,
       );
     });
@@ -388,7 +401,7 @@ describe('HealthOverviewScreen', () => {
     let tree: ReturnType<typeof create>;
 
     await act(async () => {
-      tree = create(<HealthOverviewScreen api={api} onClose={jest.fn()} />);
+      tree = createScreen(<HealthOverviewScreen api={api} onClose={jest.fn()} />);
     });
     act(() =>
       tree!.root.findByProps({ accessibilityLabel: '编辑身高' }).props.onPress(),
@@ -460,7 +473,7 @@ describe('HealthOverviewScreen', () => {
     let tree: ReturnType<typeof create>;
 
     await act(async () => {
-      tree = create(<HealthOverviewScreen api={api} onClose={jest.fn()} />);
+      tree = createScreen(<HealthOverviewScreen api={api} onClose={jest.fn()} />);
     });
     act(() =>
       tree!.root.findByProps({ accessibilityLabel: '新增健康情况' }).props.onPress(),
@@ -562,7 +575,7 @@ describe('HealthOverviewScreen', () => {
     let tree: ReturnType<typeof create>;
 
     await act(async () => {
-      tree = create(<HealthOverviewScreen api={api} onClose={jest.fn()} />);
+      tree = createScreen(<HealthOverviewScreen api={api} onClose={jest.fn()} />);
     });
     act(() =>
       tree!.root.findByProps({ accessibilityLabel: '填写性别' }).props.onPress(),
@@ -624,7 +637,7 @@ describe('HealthOverviewScreen', () => {
     let tree: ReturnType<typeof create>;
 
     await act(async () => {
-      tree = create(<HealthOverviewScreen api={api} onClose={jest.fn()} />);
+      tree = createScreen(<HealthOverviewScreen api={api} onClose={jest.fn()} />);
     });
     act(() =>
       tree!.root.findByProps({ accessibilityLabel: '新增健康情况' }).props.onPress(),
@@ -689,7 +702,7 @@ describe('HealthOverviewScreen', () => {
     let tree: ReturnType<typeof create>;
 
     await act(async () => {
-      tree = create(<HealthOverviewScreen api={api} onClose={jest.fn()} />);
+      tree = createScreen(<HealthOverviewScreen api={api} onClose={jest.fn()} />);
     });
     act(() =>
       tree!.root.findByProps({ accessibilityLabel: '新增健康情况' }).props.onPress(),
@@ -750,7 +763,7 @@ describe('HealthOverviewScreen', () => {
     let tree: ReturnType<typeof create>;
 
     await act(async () => {
-      tree = create(<HealthOverviewScreen api={api} onClose={jest.fn()} />);
+      tree = createScreen(<HealthOverviewScreen api={api} onClose={jest.fn()} />);
     });
     act(() =>
       tree!.root.findByProps({ accessibilityLabel: '填写性别' }).props.onPress(),

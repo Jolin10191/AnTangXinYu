@@ -1,12 +1,19 @@
+import type { ReactElement } from 'react';
 import { act, create } from 'react-test-renderer';
 import { Modal, Pressable, Text, View } from 'react-native';
 
 import type { ApiClient } from '../api/client';
 import type { WearableDashboard, WearableDashboardSource } from '../api/types';
+import { LiveHeartRateProvider } from '../live-heart-rate/LiveHeartRateProvider';
 import { HealthDashboardScreen } from './HealthDashboardScreen';
 
 jest.mock('react-native-chart-kit', () => ({ LineChart: () => null }));
 void [Modal, Pressable, Text, View];
+
+/** 看板里的实时心率卡片从共享 Provider 取 controller，渲染时补上这层 Provider。 */
+function createScreen(element: ReactElement) {
+  return create(<LiveHeartRateProvider active>{element}</LiveHeartRateProvider>);
+}
 
 function source(sourcePackage: string, steps: number): WearableDashboardSource {
   return {
@@ -52,7 +59,7 @@ test('shows saved server history and separates Zepp from Gadgetbridge', async ()
   let tree: ReturnType<typeof create>;
 
   await act(async () => {
-    tree = create(
+    tree = createScreen(
       <HealthDashboardScreen api={api} importPreview={null} onClose={jest.fn()} refreshKey="" visible />,
     );
   });

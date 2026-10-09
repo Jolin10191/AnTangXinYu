@@ -31,7 +31,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ApiClient, ApiError, errorMessage } from '../api/client';
+import { ApiClient, ApiError, errorMessage, type LiveHeartRateReading } from '../api/client';
 import type {
   ChatAttachment,
   ChatMessage,
@@ -55,6 +55,11 @@ import { useHealthConnect } from '../health-connect/use-health-connect';
 import { useGadgetbridge } from '../health-connect/useGadgetbridge';
 import { HealthOverviewScreen } from '../health-overview';
 import { HealthDashboardScreen } from '../health/HealthDashboardScreen';
+import {
+  LiveHeartRateProvider,
+  useLiveHeartRateController,
+} from '../live-heart-rate/LiveHeartRateProvider';
+import type { LiveHeartRateController } from '../live-heart-rate/use-live-heart-rate';
 import { AppMenu, type ConversationAnchor } from '../navigation/app-menu';
 import { useNotifications } from '../notifications/use-notifications';
 import { CareSettingsModal } from '../proactive-care/care-settings-modal';
@@ -95,7 +100,33 @@ function conversationGroup(value: string): string {
   return `${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
+/**
+ * 只有此刻真的在收心率广播时才把读数带给后端；其余情况明确不带，
+ * 后端也就不会把任何数字当成实时值。
+ */
+function currentLiveHeartRate(
+  controller: LiveHeartRateController,
+): LiveHeartRateReading | null {
+  if (controller.phase !== 'streaming' || controller.latest === null) return null;
+  return {
+    beatsPerMinute: controller.latest.beatsPerMinute,
+    // 原生模块给的是手机收到这一帧的时刻（epoch 毫秒）。
+    measuredAt: new Date(controller.latest.measuredAt).toISOString(),
+    deviceName: controller.latest.name,
+  };
+}
+
 export function ChatScreen({ api, user, onSignedOut }: Props) {
+  // 实时心率会话挂在聊天页根组件上，切换健康看板、对话和健康档案都不会断开。
+  return (
+    <LiveHeartRateProvider active>
+      <ChatScreenContent api={api} onSignedOut={onSignedOut} user={user} />
+    </LiveHeartRateProvider>
+  );
+}
+
+function ChatScreenContent({ api, user, onSignedOut }: Props) {
+  const liveHeartRate = useLiveHeartRateController();
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
   const [draft, setDraft] = useState('');
   const [historyReady, setHistoryReady] = useState(false);
@@ -373,6 +404,7 @@ export function ChatScreen({ api, user, onSignedOut }: Props) {
           uploadedAttachment?.id ?? null,
           onEvent,
           signal,
+          currentLiveHeartRate(liveHeartRate),
         ),
     );
   }

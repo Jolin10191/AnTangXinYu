@@ -45,6 +45,7 @@ from antang_api.schemas.chat import (
     AttachmentUploadResponse,
     ChatAttachmentResponse,
     ChatMessageResponse,
+    LiveHeartRateReading,
     MessageHistoryResponse,
     SendMessageRequest,
     encode_stream_event,
@@ -154,6 +155,7 @@ def _stream_response(
     session: AsyncSession,
     user: User,
     prepared_run: PreparedChatRun,
+    live_heart_rate: LiveHeartRateReading | None = None,
 ) -> StreamingResponse:
     model = cast(BaseChatModel, http_request.app.state.chat_model)
     agent = cast(CoreAgentGraph, http_request.app.state.core_agent)
@@ -172,6 +174,7 @@ def _stream_response(
             companion_memory=companion_memory,
             user_id=user.id,
             prepared_run=prepared_run,
+            live_heart_rate=live_heart_rate,
         ):
             yield encode_stream_event(event)
 
@@ -225,7 +228,13 @@ async def send_message(
             content={"code": "attachment_unavailable", "message": str(error)},
         )
 
-    return _stream_response(http_request, session, user, prepared_run)
+    return _stream_response(
+        http_request,
+        session,
+        user,
+        prepared_run,
+        request.live_heart_rate,
+    )
 
 
 @router.post("/messages/{failed_assistant_message_id}/retry", response_model=None)

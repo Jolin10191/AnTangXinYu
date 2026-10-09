@@ -137,7 +137,17 @@ export async function prepareHealthConnect(
   if (Platform.OS !== 'android') {
     throw new Error('Health Connect 首版只支持 Android');
   }
-  const sdkStatus = await gateway.getSdkStatus();
+  // 没装 Health Connect 的手机上，这两个原生调用会直接失败，错误信息是英文的
+  // “Binding to service failed”。这里换成准确的中文，原始错误挂在 cause 上。
+  let sdkStatus: number;
+  try {
+    sdkStatus = await gateway.getSdkStatus();
+  } catch (cause) {
+    throw new Error(
+      '这台设备没有安装或无法连接 Health Connect，无法读取 Health Connect 记录。',
+      { cause },
+    );
+  }
   if (sdkStatus !== SDK_AVAILABLE) {
     throw new Error(
       sdkStatus === 2
@@ -145,7 +155,16 @@ export async function prepareHealthConnect(
         : '这台设备不支持 Health Connect',
     );
   }
-  if (!(await gateway.initialize())) {
+  let initialized: boolean;
+  try {
+    initialized = await gateway.initialize();
+  } catch (cause) {
+    throw new Error(
+      '这台设备没有安装或无法连接 Health Connect，无法读取 Health Connect 记录。',
+      { cause },
+    );
+  }
+  if (!initialized) {
     throw new Error('Health Connect 初始化失败');
   }
   if (requestPermissions) await gateway.requestReadPermissions();
