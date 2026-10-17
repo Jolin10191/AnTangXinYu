@@ -421,6 +421,13 @@ function ChatScreenContent({ api, user, onSignedOut }: Props) {
     }
   }
 
+  function accountDeleted() {
+    setShowMenu(false);
+    streamController.current?.abort();
+    healthConnect.stop();
+    onSignedOut();
+  }
+
   function cancelCurrentResponse() {
     streamController.current?.abort();
   }
@@ -974,6 +981,7 @@ function ChatScreenContent({ api, user, onSignedOut }: Props) {
           onDisableBackgroundHealth={healthConnect.disableBackground}
           onEnableBackgroundHealth={healthConnect.enableBackground}
           onLogout={() => void logout()}
+          onAccountDeleted={accountDeleted}
           onRequestNotificationPermission={notifications.requestPermission}
           visible
         />

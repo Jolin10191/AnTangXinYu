@@ -293,13 +293,16 @@ export class ApiClient {
   }
 
   async register(username: string, password: string): Promise<User> {
-    return this.authenticate('/api/v1/auth/register', username, password);
+    return this.authenticate('/api/v1/auth/register', username, password, {
+      consent_accepted: true,
+    });
   }
 
   private async authenticate(
     path: string,
     username: string,
     password: string,
+    extra: Record<string, unknown> = {},
   ): Promise<User> {
     const version = this.advanceSession();
     await this.mutateTokens(version, () => this.tokenStore.clear());
@@ -307,7 +310,7 @@ export class ApiClient {
       this.url(path),
       this.jsonInit({
         method: 'POST',
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, ...extra }),
       }),
     );
     this.assertSessionVersion(version);
@@ -342,6 +345,17 @@ export class ApiClient {
     if (response.status === 401) return this.expireSession(logoutVersion);
     if (!response.ok) throw await this.apiError(response);
     await this.mutateTokens(logoutVersion, () => this.tokenStore.clear());
+  }
+
+  async deleteAccount(password: string): Promise<void> {
+    const version = this.sessionVersion;
+    const response = await this.authorizedFetch('/api/v1/auth/account', {
+      method: 'DELETE',
+      body: JSON.stringify({ password }),
+    });
+    this.assertSessionVersion(version);
+    if (!response.ok) throw await this.apiError(response);
+    await this.mutateTokens(version, () => this.tokenStore.clear());
   }
 
   async getMessages(before: string | null = null): Promise<MessageHistory> {

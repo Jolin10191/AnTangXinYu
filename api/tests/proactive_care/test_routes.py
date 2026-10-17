@@ -30,6 +30,7 @@ async def register(client: AsyncClient, prefix: str) -> dict[str, Any]:
         json={
             "username": f"{prefix[:19]}_{uuid4().hex[:12]}",
             "password": "correct-password",
+            "consent_accepted": True,
         },
     )
     assert response.status_code == 201

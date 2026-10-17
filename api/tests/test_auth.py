@@ -52,7 +52,7 @@ async def test_register_login_and_duplicate_username(
 
     register_response = await client.post(
         "/api/v1/auth/register",
-        json={"username": username, "password": password},
+        json={"username": username, "password": password, "consent_accepted": True},
     )
 
     assert register_response.status_code == 201
@@ -66,7 +66,11 @@ async def test_register_login_and_duplicate_username(
 
     duplicate_response = await client.post(
         "/api/v1/auth/register",
-        json={"username": username.upper(), "password": password},
+        json={
+            "username": username.upper(),
+            "password": password,
+            "consent_accepted": True,
+        },
     )
 
     assert duplicate_response.status_code == 409
@@ -96,7 +100,7 @@ async def test_access_refresh_and_logout_lifecycle(
     username = unique_username("session")
     register_response = await client.post(
         "/api/v1/auth/register",
-        json={"username": username, "password": "correct-password"},
+        json={"username": username, "password": "correct-password", "consent_accepted": True},
     )
     auth = register_response.json()
 
@@ -229,6 +233,7 @@ async def test_legacy_access_token_refreshes_without_forcing_a_new_login(
         json={
             "username": unique_username("legacy_access"),
             "password": "correct-password",
+            "consent_accepted": True,
         },
     )
     auth = response.json()
@@ -277,6 +282,7 @@ async def test_registration_rejects_password_shorter_than_eight_characters(
         json={
             "username": unique_username("password"),
             "password": "1234567",
+            "consent_accepted": True,
         },
     )
 
@@ -294,6 +300,7 @@ async def test_access_token_session_must_belong_to_the_same_user(
         json={
             "username": unique_username("token_owner_a"),
             "password": "correct-password",
+            "consent_accepted": True,
         },
     )
     second = await client.post(
@@ -301,6 +308,7 @@ async def test_access_token_session_must_belong_to_the_same_user(
         json={
             "username": unique_username("token_owner_b"),
             "password": "correct-password",
+            "consent_accepted": True,
         },
     )
     first_user_id = UUID(first.json()["user"]["id"])
@@ -330,7 +338,7 @@ async def test_delete_account_removes_every_row_the_user_owns(
 
     register_response = await client.post(
         "/api/v1/auth/register",
-        json={"username": username, "password": password},
+        json={"username": username, "password": password, "consent_accepted": True},
     )
     assert register_response.status_code == 201
     auth = register_response.json()
@@ -427,3 +435,17 @@ async def test_delete_account_removes_every_row_the_user_owns(
         (WearableObservation, observation_id),
     ):
         assert await db_session.get(model, key) is None, model.__tablename__
+
+
+async def test_registration_requires_consent(
+    client: AsyncClient,
+) -> None:
+    """没有勾选知情同意时注册会被拒绝，前端不能绕过这一步。"""
+
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={"username": unique_username("no_consent"), "password": "correct-password"},
+    )
+
+    assert response.status_code == 422
+    assert "知情同意" in response.text

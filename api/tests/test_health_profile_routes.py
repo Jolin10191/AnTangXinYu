@@ -53,7 +53,7 @@ async def test_registration_creates_profile_and_authenticated_profile_api(
         username = f"route_{uuid4().hex[:16]}"
         registered = await client.post(
             "/api/v1/auth/register",
-            json={"username": username, "password": "correct-password"},
+            json={"username": username, "password": "correct-password", "consent_accepted": True},
         )
         assert registered.status_code == 201
         auth = registered.json()
@@ -107,6 +107,7 @@ async def test_weight_clarification_card_returns_fixed_options_and_applies_jin(
             json={
                 "username": f"card_route_{uuid4().hex[:12]}",
                 "password": "correct-password",
+                "consent_accepted": True,
             },
         )
         auth = registered.json()
@@ -219,6 +220,7 @@ async def test_manual_personal_change_is_idempotent_and_revision_checked(
             json={
                 "username": f"manual_route_{uuid4().hex[:12]}",
                 "password": "correct-password",
+                "consent_accepted": True,
             },
         )
         auth = registered.json()
@@ -280,6 +282,7 @@ async def test_wearable_import_route_rejects_payload_change_for_same_sync_id(
             json={
                 "username": f"wearable_route_{uuid4().hex[:12]}",
                 "password": "correct-password",
+                "consent_accepted": True,
             },
         )
         headers = {"Authorization": f"Bearer {registered.json()['access_token']}"}
@@ -335,6 +338,7 @@ async def test_card_conflict_shape_and_cross_user_access_are_stable(
                 json={
                     "username": f"card_owner_{uuid4().hex[:10]}",
                     "password": "correct-password",
+                    "consent_accepted": True,
                 },
             )
         ).json()
@@ -344,6 +348,7 @@ async def test_card_conflict_shape_and_cross_user_access_are_stable(
                 json={
                     "username": f"card_other_{uuid4().hex[:10]}",
                     "password": "correct-password",
+                    "consent_accepted": True,
                 },
             )
         ).json()

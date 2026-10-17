@@ -6,6 +6,7 @@ from pydantic import (
     ConfigDict,
     StringConstraints,
     field_validator,
+    model_validator,
 )
 
 Username = Annotated[
@@ -27,6 +28,13 @@ class UsernameRequest(BaseModel):
 
 class RegisterRequest(UsernameRequest):
     password: Password
+    consent_accepted: bool = False
+
+    @model_validator(mode="after")
+    def require_consent(self) -> "RegisterRequest":
+        if not self.consent_accepted:
+            raise ValueError("注册前必须阅读并同意知情同意与隐私说明")
+        return self
 
 
 class LoginRequest(UsernameRequest):
