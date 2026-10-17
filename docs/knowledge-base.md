@@ -57,12 +57,32 @@ py -3 api/scripts/build_knowledge_chunks.py \
 **换成 DeepSeek 官方 key 时一定要注意**：DeepSeek 不提供 `bge-m3`，
 必须同时把 `KNOWLEDGE_EMBEDDING_*` 指向仍然提供该模型的服务，否则每次检索都会失败。
 
-**本地推理目前跑不起来**：这台服务器 7.4 GB 内存、没有 swap，Hindsight 容器里已经加载了
-`bge-m3` 与 `bge-reranker-v2-m3`（进程 RSS 约 3.9 GB）。再起一个进程加载同一份 2.3 GB 权重
-有 OOM 风险，所以"完全本地化"要等加 swap 或升内存，届时只需要起一个 OpenAI 兼容的
-本地嵌入服务，再把上面三个变量指过去。
+**本地推理已经可用**：`compose.server.yaml` 里有一个 `local-embeddings` 旁路服务
+（`infra/local-embeddings/server.py`），它复用 hindsight 镜像里已经装好的
+`torch` / `transformers` / `sentence-transformers`，权重直接读 hindsight 已经下载好的缓存卷
+（`antang-prod_hindsight_model_cache`），不下载任何模型。启用方式：
 
-## 二、灌库
+```
+KNOWLEDGE_EMBEDDING_BASE_URL=http://local-embeddings:8080/v1
+KNOWLEDGE_EMBEDDING_API_KEY=local-sidecar
+KNOWLEDGE_EMBEDDING_MODEL=bge-m3
+```
+
+之后 `docker compose ... up -d --no-deps --force-recreate api proactive-care-worker`。
+模型是**懒加载**的，没有检索请求时这个服务只占约 50 MB；第一次检索会多花约 8 秒，之后
+单次约 0.25 秒（同一段文本走中转站要 1–4 秒）。
+
+**不需要重建索引**：同一段文本走本地与走中转站得到的向量，实测余弦为 0.999999–1.000000
+（4 个中英文样本），说明两者是同一个向量空间。
+
+**内存前提**：这台机器 7.4 GB 内存，原本没有 swap，而 hindsight 已占用约 2.2 GB、加载模型后
+本地嵌入服务实测约 750 MB。为此新增了 4 GB swapfile（`/swapfile`，`vm.swappiness=10`），
+它不改变正在运行的服务的任何行为，只在内存尖峰时防止 OOM 杀掉 api。**升到 16 GB 内存之后
+可以把 swap 去掉**。
+
+**回退方式**：删掉这三个变量（或注释掉）后重建 api 容器，检索立即回到中转站，索引无需改动。
+
+## 三、灌库
 
 `api/scripts/load_knowledge.py` 在 api 容器内执行，因为它要连数据库：
 
@@ -76,7 +96,7 @@ docker exec -e PYTHONIOENCODING=utf-8 antang-prod-api-1 \
 灌库是**全量替换**：先删 `knowledge_documents`（片段靠外键级联删除），再按
 `(folder, title)` 分组写入。输出 `done: documents=N chunks=M`。
 
-## 三、检索
+## 四、检索
 
 `api/src/antang_api/knowledge/search.py`：
 
@@ -94,7 +114,7 @@ docker exec -e PYTHONIOENCODING=utf-8 antang-prod-api-1 \
 召回率高于任何近似索引，而且不用给生产库换镜像。接口留在 `search_knowledge()` 一处，
 以后片段量涨到十万级再换成 pgvector 只需要改这个文件。
 
-## 四、工具与出处
+## 五、工具与出处
 
 `api/src/antang_api/tools/knowledge.py` 注册 `search_diabetes_knowledge`，参数是
 `query`（2–120 字）与 `top_k`（1–8，默认 5），返回
@@ -108,13 +128,13 @@ docker exec -e PYTHONIOENCODING=utf-8 antang-prod-api-1 \
 任何不在本次 `web_fetch` 结果里的 `[Sn]` 判为不存在的来源并让整轮对话失败，所以知识库和
 网页检索必须用两套互不冒充的出处格式——这一点写在 `agents/core.py` 的 `SYSTEM_PROMPT` 里。
 
-## 五、新增工具的硬性要求
+## 六、新增工具的硬性要求
 
 新工具必须在 `api/src/antang_api/chat.py` 的 `TOOL_ACTIVITY_PHASES` 里登记活动阶段，
 否则调用时 `chat.py` 会抛 `工具缺少活动阶段配置：<工具名>`，整个对话直接失败。
 `api/tests/test_chat_service.py::test_new_tools_reuse_stable_activity_phases` 覆盖这条约束。
 
-## 六、当前语料
+## 七、当前语料
 
 32 份文档、6733 个片段（其中 1146 个带印刷页码），来源包括《中国1型糖尿病诊治指南（2021版）》
 《中国糖尿病防治指南（2024版）》《ADA Standards of Care in Diabetes—2026》《成人1型糖尿病的
