@@ -1,13 +1,15 @@
-"""把指南与共识的 PDF 转成带页码的知识库片段（离线构建，不碰数据库）。
+"""Build the medical knowledge index for the Antang backend.
 
-第一步：PDF -> 按页切分 -> bge-m3 向量 -> JSONL；
-第二步由 ``load_knowledge.py`` 在 api 容器里把 JSONL 灌进数据库。
+Stage 1: PDF -> page-accurate chunks -> bge-m3 embeddings -> JSONL.
 
-    py -3 build_knowledge_chunks.py --source D:\\corpus --out D:\\kb --dry
-    py -3 build_knowledge_chunks.py --source D:\\corpus --out D:\\kb
+Run from anywhere:
 
-需要本机装有 pymupdf，并能访问 ``--base-url`` 指向的 OpenAI 兼容服务。
-``--key-file`` 是一个只放密钥的文件。
+    py -3 kb_build.py --dry                 # parse only, no embeddings
+    py -3 kb_build.py --limit 2             # first two documents
+    py -3 kb_build.py                       # everything
+
+The output is a single JSONL file plus a manifest; nothing here touches the
+production database.  The loader (`kb_load.py`) does that separately.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import json
 import re
 import sys
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -42,8 +45,18 @@ BATCH = 16
 PAGE_NUMBER_LINE = re.compile(
     r"^[\s\u00b7\u2022\-\u2013\u2014_/]*\d{1,4}[\s\u00b7\u2022\-\u2013\u2014_/]*$"
 )
-PAGE_LABEL_LINE = re.compile(r"^(第\s*\d{1,4}\s*页|Page\s*\d{1,4}(\s*of\s*\d{1,4})?)$", re.IGNORECASE)
+PAGE_LABEL_LINE = re.compile(r"^(绗琝s*\d{1,4}\s*椤祙Page\s*\d{1,4}(\s*of\s*\d{1,4})?)$", re.IGNORECASE)
 CODE_NAME = re.compile(r"^dc26s\d+[a-z]*$", re.IGNORECASE)
+
+# A line repeated on at least this share of a document's pages is a running
+# header/footer, not content.
+RUNNING_MIN_RATIO = 0.40
+RUNNING_MIN_LEN = 8
+RUNNING_MAX_LEN = 120
+
+FOLIO_LINE = re.compile(r"^[\s\u00b7\u2022\-\u2013\u2014_.]*(\d{1,4})[\s\u00b7\u2022\-\u2013\u2014_.]*$")
+FOLIO_MIN_RATIO = 0.50
+FOLIO_TOLERANCE = 2
 
 
 @dataclass
@@ -52,6 +65,9 @@ class Doc:
     title: str
     folder: str
     pages: list[str] = field(default_factory=list)
+    printed: list[int | None] = field(default_factory=list)
+    stripped_lines: int = 0
+    printed_offset: int | None = None
 
 
 @dataclass
@@ -61,18 +77,93 @@ class Chunk:
     page: int
     ordinal: int
     text: str
+    printed_page: int | None = None
     sha256: str = ""
 
     def finalise(self) -> "Chunk":
         self.sha256 = hashlib.sha256(self.text.encode("utf-8")).hexdigest()
         return self
 
+    def as_json(self) -> dict[str, object]:
+        return {
+            "title": self.title,
+            "folder": self.folder,
+            "page": self.page,
+            "printed_page": self.printed_page,
+            "ordinal": self.ordinal,
+            "text": self.text,
+            "sha256": self.sha256,
+        }
 
-def clean_page(raw: str) -> str:
+
+def page_lines(raw: str) -> list[str]:
+    return [line.strip() for line in raw.splitlines() if line.strip()]
+
+
+def collect_running_lines(raw_pages: list[str]) -> set[str]:
+    """Return lines that repeat on most pages of one document.
+
+    Scans every line, not just the page edges: running heads drift to the
+    middle of the text on some layouts, and body prose never repeats a whole
+    line verbatim across dozens of pages.
+    """
+    counts: Counter[str] = Counter()
+    useful = 0
+    for raw in raw_pages:
+        lines = page_lines(raw)
+        if not lines:
+            continue
+        useful += 1
+        for line in set(lines):
+            if RUNNING_MIN_LEN <= len(line) <= RUNNING_MAX_LEN:
+                counts[line] += 1
+    if not useful:
+        return set()
+    threshold = max(2, int(useful * RUNNING_MIN_RATIO))
+    return {line for line, count in counts.items() if count >= threshold}
+
+
+def detect_folio(raw: str) -> int | None:
+    """Read the printed page number from a page footer, if one is printed."""
+    lines = page_lines(raw)
+    for line in reversed(lines[-4:]):
+        match = FOLIO_LINE.match(line)
+        if match:
+            number = int(match.group(1))
+            if 1 <= number <= 9999:
+                return number
+    return None
+
+
+def printed_offset(folios: list[int | None]) -> int | None:
+    """Offset from PDF page index to printed page, or None when unreadable.
+
+    Guides typeset for a journal start at e.g. printed 1143 while the PDF page
+    is 1. The offset is constant, so reading it once per document is enough;
+    median keeps the occasional stray number (a year, a DOI fragment) out.
+    """
+    pairs = [
+        (index, number)
+        for index, number in enumerate(folios, start=1)
+        if number is not None
+    ]
+    if len(pairs) < max(4, int(len(folios) * FOLIO_MIN_RATIO)):
+        return None
+    offsets = sorted(number - index for index, number in pairs)
+    offset = offsets[len(offsets) // 2]
+    agreeing = sum(1 for index, number in pairs if abs(number - (index + offset)) <= FOLIO_TOLERANCE)
+    if agreeing < len(pairs) * 0.8:
+        return None
+    return offset
+
+
+def clean_page(raw: str, running: set[str] | None = None) -> str:
     kept: list[str] = []
     for line in raw.splitlines():
         stripped = line.strip()
         if not stripped:
+            continue
+        if running and stripped in running:
             continue
         if PAGE_NUMBER_LINE.match(stripped) or PAGE_LABEL_LINE.match(stripped):
             continue
@@ -126,9 +217,18 @@ def load_doc(path: Path) -> Doc:
     relative = path.relative_to(KNOWLEDGE_DIR)
     doc = Doc(path=path, title="", folder=relative.parts[0] if relative.parts else "root")
     with pymupdf.open(path) as pdf:
-        for page in pdf:
-            doc.pages.append(clean_page(page.get_text("text")))
+        raw_pages = [page.get_text("text") for page in pdf]
+
+    running = collect_running_lines(raw_pages)
+    offset = printed_offset([detect_folio(raw) for raw in raw_pages])
+
+    for index, raw in enumerate(raw_pages, start=1):
+        doc.pages.append(clean_page(raw, running))
+        doc.printed.append(index + offset if offset is not None else None)
+
     doc.title = guess_title(path, doc.pages[0] if doc.pages else "")
+    doc.stripped_lines = len(running)
+    doc.printed_offset = offset
     return doc
 
 
@@ -136,24 +236,30 @@ def chunk_doc(doc: Doc) -> list[Chunk]:
     chunks: list[Chunk] = []
     pending = ""
     pending_page = 0
+    pending_printed: int | None = None
 
     for index, page_text in enumerate(doc.pages, start=1):
         if not page_text:
             continue
         merged = f"{pending}\n{page_text}" if pending else page_text
         page_no = pending_page or index
+        printed = pending_printed if pending_page else doc.printed[index - 1]
         if len(merged) < TINY_PAGE_CHARS:
             pending = merged
             pending_page = page_no
+            pending_printed = printed
             continue
         pending = ""
         pending_page = 0
+        pending_printed = None
         for ordinal, piece in enumerate(split_text(merged)):
-            chunks.append(Chunk(doc.title, doc.folder, page_no, ordinal, piece).finalise())
+            chunks.append(
+                Chunk(doc.title, doc.folder, page_no, ordinal, piece, printed).finalise()
+            )
 
     if pending.strip():
         chunks.append(
-            Chunk(doc.title, doc.folder, pending_page or 1, 0, pending.strip()).finalise()
+            Chunk(doc.title, doc.folder, pending_page or 1, 0, pending.strip(), pending_printed).finalise()
         )
     return chunks
 
@@ -287,6 +393,7 @@ def main() -> None:
                     "title": chunk.title,
                     "folder": chunk.folder,
                     "page": chunk.page,
+                    "printed_page": chunk.printed_page,
                     "ordinal": chunk.ordinal,
                     "sha256": chunk.sha256,
                     "text": chunk.text,

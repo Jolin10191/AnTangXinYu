@@ -43,9 +43,14 @@ def _render_match(match: KnowledgeMatch) -> dict[str, object]:
     text = match.text.strip()
     if len(text) > MAX_KNOWLEDGE_CHUNK_CHARS:
         text = text[:MAX_KNOWLEDGE_CHUNK_CHARS].rstrip() + "…"
+    # 期刊排版的文件里 PDF 页和印刷页不同，读者只能按印刷页翻，所以优先给
+    # printed_page；没有印刷页码时才退回 PDF 页并说明是哪一种。
+    cite_page = match.printed_page if match.printed_page is not None else match.page
     return {
         "title": match.title,
-        "page": match.page,
+        "page": cite_page,
+        "page_kind": "printed" if match.printed_page is not None else "pdf",
+        "pdf_page": match.page,
         "text": text,
         "score": round(match.score, 4),
     }
@@ -65,7 +70,9 @@ def build_knowledge_search_tool(
         用户询问糖尿病的医学常识、指南推荐、指标范围（例如血糖、糖化
         血红蛋白、血压血脂的目标值）、低血糖的处理与预防、饮食与运动原则、
         胰岛素与器械使用时，先用它找依据，不要凭记忆给出指南编号或数值。
-        每条结果都带有来源标题和页码，回答时把出处写成“《标题》第 N 页”。
+        每条结果都带有来源标题和页码：page_kind 为 printed 时 page 是期刊上
+        印的页码，为 pdf 时 page 是文件页码，两种情况都直接引用 page 这个数。
+        回答时把出处写成“《标题》第 N 页”。
         它不能查用户自己的手环数据（那要用设备数据读取工具），也不用于
         闲聊、时事或需要联网的最新信息。
         """

@@ -35,6 +35,7 @@ async def add_document(
     session: AsyncSession,
     title: str,
     chunks: list[tuple[int, str, list[float]]],
+    printed_pages: list[int | None] | None = None,
 ) -> None:
     document = KnowledgeDocument(
         folder="测试指南",
@@ -52,6 +53,9 @@ async def add_document(
             KnowledgeChunk(
                 document_id=document.id,
                 page=page,
+                printed_page=(
+                    printed_pages[ordinal] if printed_pages is not None else None
+                ),
                 ordinal=ordinal,
                 text=text,
                 text_sha256=f"{ordinal:064d}",
@@ -229,3 +233,77 @@ def test_request_rejects_unknown_arguments() -> None:
 def test_request_rejects_out_of_range_top_k() -> None:
     with pytest.raises(ValidationError):
         KnowledgeSearchRequest.model_validate({"query": "低血糖", "top_k": 99})
+
+
+async def test_tool_cites_the_printed_page_of_a_journal_layout(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """期刊 PDF 第 19 页是印刷第 1161 页，引用必须给读者能翻到的那一页。"""
+
+    await add_document(
+        db_session,
+        "中国1型糖尿病诊治指南（2021版）",
+        [(19, "成人糖化血红蛋白控制目标为 7.0% 以下。", unit_vector(0))],
+        printed_pages=[1161],
+    )
+
+    async def fake_embed(text: str) -> list[float]:
+        return unit_vector(0)
+
+    monkeypatch.setattr(knowledge_search, "embed_query", fake_embed)
+
+    tool = build_knowledge_search_tool(session_factory_for(db_session))
+    payload = await tool_coroutine(tool)(
+        KnowledgeSearchRequest(query="成人糖化血红蛋白目标")
+    )
+
+    assert isinstance(payload, dict)
+    results = cast("list[dict[str, object]]", payload["results"])
+    assert results[0]["page"] == 1161
+    assert results[0]["page_kind"] == "printed"
+    assert results[0]["pdf_page"] == 19
+
+
+async def test_chinese_question_prefers_chinese_chunks(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """中文语料只占一成，中文提问时英文片段不能把中文指南挤出去。"""
+
+    await add_document(
+        db_session,
+        "standards-of-care-2026",
+        [
+            (
+                202,
+                "GLP-1 receptor agonists are not indicated for type 1 diabetes.",
+                mixed_vector(0.720, 0.694),
+            )
+        ],
+    )
+    await add_document(
+        db_session,
+        "中国糖尿病防治指南（2024版）",
+        [
+            (
+                27,
+                "司美格鲁肽目前未获批用于 1 型糖尿病。",
+                mixed_vector(0.700, 0.714),
+            )
+        ],
+    )
+
+    async def fake_embed(text: str) -> list[float]:
+        return unit_vector(0)
+
+    monkeypatch.setattr(knowledge_search, "embed_query", fake_embed)
+
+    matches = await knowledge_search.search_knowledge(
+        db_session,
+        "司美格鲁肽能用于1型糖尿病吗",
+        top_k=2,
+    )
+
+    assert [match.title for match in matches] == ["中国糖尿病防治指南（2024版）", "standards-of-care-2026"]
+    assert matches[1].score == pytest.approx(0.72, abs=1e-4)

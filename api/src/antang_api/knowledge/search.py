@@ -22,6 +22,22 @@ from antang_api.models import KnowledgeChunk, KnowledgeDocument
 # 低于该余弦相似度的片段与问题无关，不交给模型，避免它把无关条文当依据。
 MIN_KNOWLEDGE_SCORE = 0.32
 
+# 语料里中文指南只占约一成，英文 ADA 占九成。用中文提问时英文片段会把中文
+# 指南挤出去，所以同语种的片段在排序时加一点权重：小到不会把无关片段拉进
+# 来（原始分数仍要过 MIN_KNOWLEDGE_SCORE），大到能分开分数贴近的两种语料。
+LANGUAGE_BONUS = 0.04
+_HAN_FLOOR = 0.5
+
+
+def _han_ratio(text: str) -> float:
+    """文本里汉字占非空白字符的比例，用来判断片段语种。"""
+
+    meaningful = [character for character in text if not character.isspace()]
+    if not meaningful:
+        return 0.0
+    han = sum(1 for character in meaningful if "\u4e00" <= character <= "\u9fff")
+    return han / len(meaningful)
+
 
 @dataclass(frozen=True)
 class KnowledgeMatch:
@@ -29,6 +45,7 @@ class KnowledgeMatch:
 
     title: str
     page: int
+    printed_page: int | None
     text: str
     score: float
 
@@ -38,7 +55,9 @@ class _Index:
     fingerprint: tuple[int, object]
     titles: tuple[str, ...]
     pages: tuple[int, ...]
+    printed_pages: tuple[int | None, ...]
     texts: tuple[str, ...]
+    chinese: NDArray[np.bool_]
     matrix: NDArray[np.float32]
 
 
@@ -64,6 +83,7 @@ async def _build_index(
             select(
                 KnowledgeDocument.title,
                 KnowledgeChunk.page,
+                KnowledgeChunk.printed_page,
                 KnowledgeChunk.text,
                 KnowledgeChunk.embedding,
             )
@@ -77,7 +97,9 @@ async def _build_index(
             fingerprint=fingerprint,
             titles=(),
             pages=(),
+            printed_pages=(),
             texts=(),
+            chinese=np.zeros(0, dtype=np.bool_),
             matrix=np.zeros((0, KNOWLEDGE_EMBEDDING_DIM), dtype=np.float32),
         )
 
@@ -101,7 +123,11 @@ async def _build_index(
         fingerprint=fingerprint,
         titles=tuple(row.title for row in rows),
         pages=tuple(int(row.page) for row in rows),
+        printed_pages=tuple(
+            int(row.printed_page) if row.printed_page is not None else None for row in rows
+        ),
         texts=tuple(row.text for row in rows),
+        chinese=np.array([_han_ratio(row.text) >= _HAN_FLOOR for row in rows], dtype=np.bool_),
         matrix=(matrix / norms[:, None]).astype(np.float32),
     )
 
@@ -151,12 +177,17 @@ async def search_knowledge(
         raise RuntimeError("检索问题的向量为零向量")
     scores = index.matrix @ (vector / norm)
 
+    if _han_ratio(query) >= _HAN_FLOOR:
+        ranking = scores + np.where(index.chinese, LANGUAGE_BONUS, 0.0).astype(np.float32)
+    else:
+        ranking = scores
+
     limit = min(top_k, len(scores))
     if limit < len(scores):
-        candidates = np.argpartition(-scores, limit - 1)[:limit]
+        candidates = np.argpartition(-ranking, limit - 1)[:limit]
     else:
         candidates = np.arange(len(scores))
-    ordered = candidates[np.argsort(-scores[candidates])]
+    ordered = candidates[np.argsort(-ranking[candidates])]
 
     matches: list[KnowledgeMatch] = []
     for position in ordered:
@@ -167,6 +198,7 @@ async def search_knowledge(
             KnowledgeMatch(
                 title=index.titles[position],
                 page=index.pages[position],
+                printed_page=index.printed_pages[position],
                 text=index.texts[position],
                 score=score,
             )

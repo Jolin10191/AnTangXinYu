@@ -74,6 +74,9 @@ class KnowledgeChunk(Base):
         ForeignKey("knowledge_documents.id", ondelete="CASCADE"), index=True
     )
     page: Mapped[int] = mapped_column(Integer)
+    # 期刊排版的文件里 PDF 页与印刷页不同（PDF 第 19 页可能是印刷第 1161 页），
+    # 模型引用时必须给读者能翻到的那个页码，所以两者都留着。
+    printed_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ordinal: Mapped[int] = mapped_column(Integer)
     text: Mapped[str] = mapped_column(Text)
     text_sha256: Mapped[str] = mapped_column(String(64))

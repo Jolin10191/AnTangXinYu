@@ -60,6 +60,9 @@ async def _flush(
         {
             "document_id": document.id,
             "page": int(record["page"]),
+            "printed_page": (
+                int(record["printed_page"]) if record.get("printed_page") is not None else None
+            ),
             "ordinal": int(record["ordinal"]),
             "text": record["text"],
             "text_sha256": record["sha256"],
