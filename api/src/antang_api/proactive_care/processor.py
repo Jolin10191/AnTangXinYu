@@ -31,6 +31,10 @@ from antang_api.database import (
     session_factory as default_session_factory,
 )
 from antang_api.health_profile.service import load_health_profile_snapshot
+from antang_api.psychosocial import (
+    read_latest_assessment,
+    render_guidance,
+)
 from antang_api.models import (
     AgentRun,
     AgentRunStatus,
@@ -511,6 +515,10 @@ class ProactiveCareProcessor:
                     else None
                 ),
                 "companion_memory": "",
+                # 主动关怀也要按同一个人的恐惧程度与察觉能力调整说法。
+                "psychosocial_guidance": render_guidance(
+                    await read_latest_assessment(session, task.user_id),
+                ),
             }
 
             root_run = AgentRun(

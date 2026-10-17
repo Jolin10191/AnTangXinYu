@@ -33,10 +33,16 @@ from antang_api.health_profile.wearable_service import (
     read_wearable_observations,
 )
 from antang_api.proactive_care.service import record_health_import
+from antang_api.psychosocial import (
+    PsychosocialProfile,
+    read_latest_assessment_row,
+    record_assessment,
+)
 from antang_api.models import (
     HealthProfileChange,
     ProfileChangeMode,
     ProfileChangeStatus,
+    PsychosocialAssessment,
     User,
     WearableRecordType,
 )
@@ -53,6 +59,8 @@ from antang_api.schemas.health_profile import (
     ProfileCardDecisionResponse,
     ProfileCardResponse,
     ProfileCardsResponse,
+    PsychosocialAssessmentRequest,
+    PsychosocialProfileResponse,
     WearableImportRequest,
     WearableImportResponse,
     WearableDashboardResponse,
@@ -391,3 +399,59 @@ async def get_wearable_dashboard(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> WearableDashboardResponse:
     return await read_wearable_dashboard(session, user_id=user.id)
+
+
+def _psychosocial_response(row: PsychosocialAssessment) -> PsychosocialProfileResponse:
+    profile = PsychosocialProfile(
+        fear_behavior_percent=row.hfs_behavior_percent,
+        fear_worry_percent=row.hfs_worry_percent,
+        gold_score=row.gold_score,
+    )
+    return PsychosocialProfileResponse(
+        assessed_at=row.assessed_at,
+        instrument=row.instrument,
+        fear_percent=profile.fear_percent,
+        fear_high=profile.fear_high,
+        gold_score=profile.gold_score,
+        awareness=profile.awareness,
+        quadrant=profile.quadrant,
+        weekly_contact_limit=profile.weekly_contact_limit,
+    )
+
+
+@router.get(
+    "/psychosocial-assessment",
+    response_model=PsychosocialProfileResponse | None,
+)
+async def get_psychosocial_assessment(
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> PsychosocialProfileResponse | None:
+    row = await read_latest_assessment_row(session, user.id)
+    if row is None:
+        return None
+    return _psychosocial_response(row)
+
+
+@router.post(
+    "/psychosocial-assessment",
+    response_model=PsychosocialProfileResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def record_psychosocial_assessment(
+    request: PsychosocialAssessmentRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> PsychosocialProfileResponse:
+    row = await record_assessment(
+        session,
+        user_id=user.id,
+        fear_behavior_percent=request.hfs_behavior_percent,
+        fear_worry_percent=request.hfs_worry_percent,
+        gold_score=request.gold_score,
+        instrument=request.instrument,
+        assessed_at=request.assessed_at,
+    )
+    response = _psychosocial_response(row)
+    await session.commit()
+    return response

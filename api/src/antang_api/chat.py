@@ -60,6 +60,7 @@ from antang_api.schemas.chat import (
     TextDeltaEvent,
 )
 from antang_api.proactive_care.service import record_user_activity
+from antang_api.psychosocial import read_latest_assessment, render_guidance
 from antang_api.settings import settings
 
 
@@ -569,6 +570,10 @@ async def stream_chat_run(
             session,
             user_id,
         )
+        # 这一段决定「怎么说」：同一个风险提示对不同恐惧程度、不同察觉能力的人要换说法。
+        psychosocial_context = render_guidance(
+            await read_latest_assessment(session, user_id),
+        )
         companion_memory_context = await companion_memory.prepare_context(
             session,
             user_id,
@@ -628,6 +633,7 @@ async def stream_chat_run(
             care_plan_context=care_plan_context,
             current_time_context=current_time_context,
             live_heart_rate_context=live_heart_rate_context,
+            psychosocial_context=psychosocial_context,
         )
 
         prepared_context = await prepare_chat_context(

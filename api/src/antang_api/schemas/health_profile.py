@@ -10,6 +10,7 @@ from pydantic import (
     NonNegativeInt,
     PositiveInt,
     StringConstraints,
+    field_validator,
     model_validator,
 )
 
@@ -522,3 +523,46 @@ class HealthProfileResponse(BaseModel):
     health_facts: list[HealthFactSnapshot]
     wearable_latest: list[WearableLatestResponse]
     heart_rate_trend: list[HeartRateTrendPointResponse]
+
+
+class PsychosocialAssessmentRequest(BaseModel):
+    """一次 HFS-II 与 Gold score 评估的得分率。
+
+    存百分比而不是原始分，因为 HFS 有 33 题、13 题、9 题三个版本，分母不同。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    hfs_behavior_percent: Annotated[int, Field(ge=0, le=100)]
+    hfs_worry_percent: Annotated[int, Field(ge=0, le=100)]
+    gold_score: Annotated[int | None, Field(ge=1, le=7)] = None
+    instrument: Annotated[str, Field(max_length=64)] = "HFS-II"
+    assessed_at: datetime
+
+    @field_validator("assessed_at")
+    @classmethod
+    def require_offset(cls, value: datetime) -> datetime:
+        """不带时区的时间无法判断是哪一天，直接拒掉。"""
+
+        if value.tzinfo is None:
+            raise ValueError("assessed_at 必须带时区")
+        return value
+
+
+class PsychosocialProfileResponse(BaseModel):
+    """服务器给 App 看的档位；不返回量表原始题目与逐题答案。"""
+
+    assessed_at: datetime
+    instrument: str
+    fear_percent: int
+    fear_high: bool
+    gold_score: int | None
+    awareness: Literal["normal", "impaired", "unknown"]
+    quadrant: Literal[
+        "high_fear_normal_awareness",
+        "high_fear_impaired_awareness",
+        "low_fear_normal_awareness",
+        "low_fear_impaired_awareness",
+        "unknown_awareness",
+    ]
+    weekly_contact_limit: int

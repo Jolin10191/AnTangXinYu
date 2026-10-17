@@ -25,6 +25,7 @@ from antang_api.models.health_profile import (
     ProfileTargetType,
 )
 from antang_api.models.knowledge import KnowledgeChunk, KnowledgeDocument
+from antang_api.models.psychosocial import PsychosocialAssessment
 from antang_api.models.proactive_care import (
     CarePlan,
     CarePlanStatus,
@@ -77,6 +78,7 @@ __all__ = [
     "ProfileChangeStatus",
     "ProfileOperation",
     "ProfileTargetType",
+    "PsychosocialAssessment",
     "ProactiveCareSettings",
     "ProactiveCareTask",
     "ProactiveCareTaskKind",
