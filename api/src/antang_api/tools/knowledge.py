@@ -35,8 +35,8 @@ class KnowledgeSearchRequest(BaseModel):
     ]
     top_k: Annotated[
         int,
-        Field(default=5, ge=1, le=8, description="返回的片段数量，默认 5。"),
-    ]
+        Field(ge=1, le=8, description="返回的片段数量，默认 5。"),
+    ] = 5
 
 
 def _render_match(match: KnowledgeMatch) -> dict[str, object]:

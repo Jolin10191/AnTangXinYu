@@ -214,6 +214,7 @@ async def test_tool_explains_when_nothing_matches(
     tool = build_knowledge_search_tool(session_factory_for(db_session))
     payload = await tool_coroutine(tool)(KnowledgeSearchRequest(query="无关的问题"))
 
+    assert isinstance(payload, dict)
     assert payload["results"] == []
     assert "note" in payload
 
