@@ -533,8 +533,8 @@ class PsychosocialAssessmentRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    hfs_behavior_percent: Annotated[int, Field(ge=0, le=100)]
-    hfs_worry_percent: Annotated[int, Field(ge=0, le=100)]
+    fear_behavior_percent: Annotated[int, Field(ge=0, le=100)]
+    fear_worry_percent: Annotated[int, Field(ge=0, le=100)]
     gold_score: Annotated[int | None, Field(ge=1, le=7)] = None
     instrument: Annotated[str, Field(max_length=64)] = "HFS-II"
     assessed_at: datetime

@@ -30,12 +30,12 @@ class PsychosocialAssessment(Base):
     __tablename__ = "psychosocial_assessments"
     __table_args__ = (
         CheckConstraint(
-            "hfs_behavior_percent BETWEEN 0 AND 100",
-            name="ck_psychosocial_hfs_behavior",
+            "fear_behavior_percent BETWEEN 0 AND 100",
+            name="ck_psychosocial_fear_behavior",
         ),
         CheckConstraint(
-            "hfs_worry_percent BETWEEN 0 AND 100",
-            name="ck_psychosocial_hfs_worry",
+            "fear_worry_percent BETWEEN 0 AND 100",
+            name="ck_psychosocial_fear_worry",
         ),
         CheckConstraint(
             "gold_score IS NULL OR (gold_score BETWEEN 1 AND 7)",
@@ -50,8 +50,8 @@ class PsychosocialAssessment(Base):
         ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     # 低血糖恐惧的行为分量表（回避、过度检查）与担忧分量表（焦虑、夜间担心）。
-    hfs_behavior_percent: Mapped[int] = mapped_column(Integer)
-    hfs_worry_percent: Mapped[int] = mapped_column(Integer)
+    fear_behavior_percent: Mapped[int] = mapped_column(Integer)
+    fear_worry_percent: Mapped[int] = mapped_column(Integer)
     # Gold 计分法：1 表示总能察觉低血糖，7 表示从来察觉不到，>= 4 视为感知受损。
     gold_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     instrument: Mapped[str] = mapped_column(String(64))

@@ -1375,6 +1375,82 @@ export function parseHealthProfileChangeResult(
   };
 }
 
+export type PsychosocialQuadrant =
+  | 'high_fear_normal_awareness'
+  | 'high_fear_impaired_awareness'
+  | 'low_fear_normal_awareness'
+  | 'low_fear_impaired_awareness'
+  | 'unknown_awareness';
+
+export type PsychosocialAwareness = 'normal' | 'impaired' | 'unknown';
+
+export type PsychosocialProfile = {
+  assessedAt: string;
+  instrument: string;
+  fearPercent: number;
+  fearHigh: boolean;
+  goldScore: number | null;
+  awareness: PsychosocialAwareness;
+  quadrant: PsychosocialQuadrant;
+  weeklyContactLimit: number;
+};
+
+export type PsychosocialAssessmentInput = {
+  fearBehaviorPercent: number;
+  fearWorryPercent: number;
+  goldScore: number | null;
+  instrument: string;
+  assessedAt: string;
+};
+
+const PSYCHOSOCIAL_QUADRANTS: readonly PsychosocialQuadrant[] = [
+  'high_fear_normal_awareness',
+  'high_fear_impaired_awareness',
+  'low_fear_normal_awareness',
+  'low_fear_impaired_awareness',
+  'unknown_awareness',
+];
+
+const PSYCHOSOCIAL_AWARENESS: readonly PsychosocialAwareness[] = [
+  'normal',
+  'impaired',
+  'unknown',
+];
+
+export function parsePsychosocialProfile(value: unknown): PsychosocialProfile | null {
+  if (value === null) return null;
+  const data = objectValue(value, 'psychosocial profile');
+  const instrument = stringValue(data.instrument, 'psychosocial profile.instrument');
+  const fearPercent = integerValue(data.fear_percent, 'psychosocial profile.fear_percent');
+  if (fearPercent < 0 || fearPercent > 100) {
+    throw new Error('psychosocial profile.fear_percent 超出 0-100');
+  }
+  const awareness = stringValue(data.awareness, 'psychosocial profile.awareness');
+  if (!PSYCHOSOCIAL_AWARENESS.includes(awareness as PsychosocialAwareness)) {
+    throw new Error('psychosocial profile.awareness 无效');
+  }
+  const quadrant = stringValue(data.quadrant, 'psychosocial profile.quadrant');
+  if (!PSYCHOSOCIAL_QUADRANTS.includes(quadrant as PsychosocialQuadrant)) {
+    throw new Error('psychosocial profile.quadrant 无效');
+  }
+  const goldScore = data.gold_score === null
+    ? null
+    : integerValue(data.gold_score, 'psychosocial profile.gold_score');
+  const weeklyContactLimit = integerValue(
+    data.weekly_contact_limit,
+    'psychosocial profile.weekly_contact_limit',
+  );
+  return {
+    assessedAt: zonedDateTimeValue(data.assessed_at, 'psychosocial profile.assessed_at'),
+    instrument,
+    fearPercent,
+    fearHigh: booleanValue(data.fear_high, 'psychosocial profile.fear_high'),
+    goldScore,
+    awareness: awareness as PsychosocialAwareness,
+    quadrant: quadrant as PsychosocialQuadrant,
+    weeklyContactLimit,
+  };
+}
 export function parseChatStreamEvent(value: unknown): ChatStreamEvent {
   const data = objectValue(value, 'stream event');
   const type = stringValue(data.type, 'stream event.type');

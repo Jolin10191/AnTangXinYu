@@ -37,8 +37,8 @@ async def read_latest_assessment(
     if row is None:
         return None
     return PsychosocialProfile(
-        fear_behavior_percent=row.hfs_behavior_percent,
-        fear_worry_percent=row.hfs_worry_percent,
+        fear_behavior_percent=row.fear_behavior_percent,
+        fear_worry_percent=row.fear_worry_percent,
         gold_score=row.gold_score,
     )
 
@@ -57,8 +57,8 @@ async def record_assessment(
 
     row = PsychosocialAssessment(
         user_id=user_id,
-        hfs_behavior_percent=fear_behavior_percent,
-        hfs_worry_percent=fear_worry_percent,
+        fear_behavior_percent=fear_behavior_percent,
+        fear_worry_percent=fear_worry_percent,
         gold_score=gold_score,
         instrument=instrument,
         assessed_at=assessed_at,

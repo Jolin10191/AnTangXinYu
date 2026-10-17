@@ -169,8 +169,8 @@ async def test_assessment_round_trip(db_session: AsyncSession) -> None:
             "/api/v1/health-profile/psychosocial-assessment",
             headers=headers,
             json={
-                "hfs_behavior_percent": 40,
-                "hfs_worry_percent": 60,
+                "fear_behavior_percent": 40,
+                "fear_worry_percent": 60,
                 "gold_score": 5,
                 "instrument": "HFS-II",
                 "assessed_at": assessed_at.isoformat(),
@@ -203,8 +203,8 @@ async def test_latest_assessment_wins_by_assessed_at(db_session: AsyncSession) -
                 "/api/v1/health-profile/psychosocial-assessment",
                 headers=headers,
                 json={
-                    "hfs_behavior_percent": 20,
-                    "hfs_worry_percent": 20,
+                    "fear_behavior_percent": 20,
+                    "fear_worry_percent": 20,
                     "gold_score": gold,
                     "assessed_at": (base + timedelta(days=offset)).isoformat(),
                 },
@@ -229,8 +229,8 @@ async def test_chat_reads_the_latest_assessment_of_that_user(
             "/api/v1/health-profile/psychosocial-assessment",
             headers=headers,
             json={
-                "hfs_behavior_percent": 70,
-                "hfs_worry_percent": 70,
+                "fear_behavior_percent": 70,
+                "fear_worry_percent": 70,
                 "gold_score": 6,
                 "assessed_at": datetime(2026, 10, 31, 9, 0, tzinfo=UTC).isoformat(),
             },
@@ -257,8 +257,8 @@ async def test_assessment_rejects_naive_time_and_unknown_fields(
             "/api/v1/health-profile/psychosocial-assessment",
             headers=headers,
             json={
-                "hfs_behavior_percent": 40,
-                "hfs_worry_percent": 40,
+                "fear_behavior_percent": 40,
+                "fear_worry_percent": 40,
                 "assessed_at": "2026-10-31T09:00:00",
             },
         )
@@ -268,8 +268,8 @@ async def test_assessment_rejects_naive_time_and_unknown_fields(
             "/api/v1/health-profile/psychosocial-assessment",
             headers=headers,
             json={
-                "hfs_behavior_percent": 40,
-                "hfs_worry_percent": 40,
+                "fear_behavior_percent": 40,
+                "fear_worry_percent": 40,
                 "assessed_at": "2026-10-31T09:00:00+00:00",
                 "diagnosis": "T1D",
             },
@@ -280,8 +280,8 @@ async def test_assessment_rejects_naive_time_and_unknown_fields(
             "/api/v1/health-profile/psychosocial-assessment",
             headers=headers,
             json={
-                "hfs_behavior_percent": 140,
-                "hfs_worry_percent": 40,
+                "fear_behavior_percent": 140,
+                "fear_worry_percent": 40,
                 "assessed_at": "2026-10-31T09:00:00+00:00",
             },
         )

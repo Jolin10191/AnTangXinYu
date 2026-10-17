@@ -17,6 +17,7 @@ import {
   parseWearableDashboard,
   parseMessageHistory,
   parseProactiveCareSettings,
+  parsePsychosocialProfile,
   parseTokenPair,
   parseUser,
   parseWearableImportResponse,
@@ -33,6 +34,8 @@ import {
   type HealthProfileChangeResult,
   type MessageHistory,
   type ProactiveCareSettings,
+  type PsychosocialAssessmentInput,
+  type PsychosocialProfile,
   type TokenPair,
   type User,
   type WearableImportResponse,
@@ -471,6 +474,35 @@ export class ApiClient {
     return parseHealthProfile(await responseJson(response));
   }
 
+  async getPsychosocialAssessment(): Promise<PsychosocialProfile | null> {
+    const response = await this.authorizedFetch(
+      '/api/v1/health-profile/psychosocial-assessment',
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parsePsychosocialProfile(await responseJson(response));
+  }
+
+  async recordPsychosocialAssessment(
+    input: PsychosocialAssessmentInput,
+  ): Promise<PsychosocialProfile> {
+    const response = await this.authorizedFetch(
+      '/api/v1/health-profile/psychosocial-assessment',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          fear_behavior_percent: input.fearBehaviorPercent,
+          fear_worry_percent: input.fearWorryPercent,
+          gold_score: input.goldScore,
+          instrument: input.instrument,
+          assessed_at: input.assessedAt,
+        }),
+      },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    const parsed = parsePsychosocialProfile(await responseJson(response));
+    if (parsed === null) throw new Error('服务器没有返回沟通方式评估结果');
+    return parsed;
+  }
   async getWearableDashboard(signal?: AbortSignal): Promise<WearableDashboard> {
     const response = await this.authorizedFetch(
       '/api/v1/health-profile/wearable-dashboard', { signal },

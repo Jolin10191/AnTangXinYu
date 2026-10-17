@@ -44,22 +44,41 @@ Gold score 缺失时不猜，落到 `unknown_awareness`，用默认接触频率�
 | `GET` | `/api/v1/health-profile/psychosocial-assessment` | 返回最新一次档位；没有则返回 `null` |
 | `POST` | `/api/v1/health-profile/psychosocial-assessment` | 写入一次评估，返回算出来的档位 |
 
-请求体只收六个字段：`hfs_behavior_percent`、`hfs_worry_percent`（0–100）、`gold_score`（1–7 或 `null`）、`instrument`、`assessed_at`（**必须带时区**）。`extra="forbid"`，多传一个字段就是 422——**不接收诊断、不接收逐题答案、不接收自由文本**。
+请求体只收六个字段：`fear_behavior_percent`、`fear_worry_percent`（0–100）、`gold_score`（1–7 或 `null`）、`instrument`、`assessed_at`（**必须带时区**）。`extra="forbid"`，多传一个字段就是 422——**不接收诊断、不接收逐题答案、不接收自由文本**。
 
 响应只给档位（`fear_percent`、`fear_high`、`awareness`、`quadrant`、`weekly_contact_limit`），**不返回量表原始分项**，避免 App 把它做成一个「恐惧指数排行榜」。
 
 ## 五、刻意不做的事
 
 - **不做实时情绪识别。** 不从心率、皮电推断情绪。单通道生理信号判别效度不足，做了就是编。
-- **不把量表当诊断。** HFS-II 是自评量表，不是临床诊断工具；这里只用来决定说话方式。
+- **不用自拟题目冒充标准化量表。** 见下一节。
+- **不把量表当诊断。** 自评量表不是临床诊断工具；这里只用来决定说话方式。
 - **不做随机关心。** 主动联系的时间是固定的、可预期的。随机的关心会把「检查」外包给系统，反而强化反复确认的行为——那正是低血糖恐惧的维持机制。
-- **不声称能降低恐惧。** 这套设计还没有疗效证据。判断它有没有用，只能靠 HFS-II 前后测；`psychosocial_assessments` 保留全部历史就是为了这件事。
+- **不声称能降低恐惧。** 这套设计还没有疗效证据。判断它有没有用，只能靠同一份量表的前后测；`psychosocial_assessments` 保留全部历史就是为了这件事。
+
+## 五之二、问卷从哪来
+
+`instrument` 字段决定这一行分数出自哪份问卷，目前只有一种取值：
+
+| `instrument` | 题目来源 | 能不能拿去发表 |
+|---|---|---|
+| `antang-behavior-v1` | 我们自己写的 6 条行为/担忧题 + 1 题察觉评分（Gold 计分法） | 不能，只能作为产品内部档位 |
+| `HFS-II` / `CHFS` / `PHFS-II` / `HFS-98` | 官方授权版本（**授权申请中**） | 能，需按条款引用 |
+
+为什么要分开两个值，而不是等授权到了再一起做：
+
+- 低血糖恐惧量表（HFS-II 及其儿童版 CHFS、家长版 PHFS-II、伴侣版 HFS-98）**题目受版权保护**，不能自拟、不能自行翻译后当正式量表用。自拟题目的分数与任何常模都不可比，`FEAR_HIGH_PERCENT = 50` 这个切点也就失去了依据。
+- 所以在授权到位之前，App 里问的是**我们自己措辞的行为清单**，界面上明确写「不是标准化量表，不作为诊断依据」；分数只用于决定沟通方式与联系频率。
+- 授权到位后，只需要换题目、换计分、把 `instrument` 写成正式名称，**表结构、接口和档位逻辑都不用动**。
+
+移动端入口在健康档案页的「沟通方式」卡片（`apps/mobile/src/psychosocial/PsychosocialSection.tsx`），可以跳过、可以重填；已有评估时只显示「每周主动联系约几次」和上次填写日期，**不显示分数**。
 
 ## 六、数据库
 
 `psychosocial_assessments` 表（迁移 `l59c4e8b2d71`）：
 
-- 存的是**百分比得分率**，不是原始分。HFS 有 33 题、13 题、9 题三个版本，分母不同，存原始分无法比较。
+- 存的是**百分比得分率**，不是原始分。同一份恐惧量表有 33 题、13 题、9 题三个版本，分母不同，存原始分无法比较。
+- 列名是 `fear_behavior_percent` / `fear_worry_percent`，不是 `hfs_*`：它们存的是「哪个 `instrument` 出的分」，用 `hfs_` 命名会让人误以为一定是 HFS-II 的原始分。
 - 三个 CheckConstraint 卡住范围（0–100、1–7），越界在数据库层就被拒。
 - `user_id` 上 `ON DELETE CASCADE`，注销账号时一并清掉。
 

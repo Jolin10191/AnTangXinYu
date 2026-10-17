@@ -403,8 +403,8 @@ async def get_wearable_dashboard(
 
 def _psychosocial_response(row: PsychosocialAssessment) -> PsychosocialProfileResponse:
     profile = PsychosocialProfile(
-        fear_behavior_percent=row.hfs_behavior_percent,
-        fear_worry_percent=row.hfs_worry_percent,
+        fear_behavior_percent=row.fear_behavior_percent,
+        fear_worry_percent=row.fear_worry_percent,
         gold_score=row.gold_score,
     )
     return PsychosocialProfileResponse(
@@ -446,8 +446,8 @@ async def record_psychosocial_assessment(
     row = await record_assessment(
         session,
         user_id=user.id,
-        fear_behavior_percent=request.hfs_behavior_percent,
-        fear_worry_percent=request.hfs_worry_percent,
+        fear_behavior_percent=request.fear_behavior_percent,
+        fear_worry_percent=request.fear_worry_percent,
         gold_score=request.gold_score,
         instrument=request.instrument,
         assessed_at=request.assessed_at,

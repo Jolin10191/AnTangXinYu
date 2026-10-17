@@ -127,6 +127,8 @@ describe('HealthOverviewScreen', () => {
   test('renders only real profile and wearable values with non-real-time context', async () => {
     const api = {
       getHealthProfile: jest.fn().mockResolvedValue(profile),
+      getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+      recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     const onClose = jest.fn();
     let tree: ReturnType<typeof create>;
@@ -181,6 +183,8 @@ describe('HealthOverviewScreen', () => {
   test('gives each empty section an honest next step', async () => {
     const api = {
       getHealthProfile: jest.fn().mockResolvedValue(emptyProfile),
+      getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+      recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     let tree: ReturnType<typeof create>;
 
@@ -229,6 +233,8 @@ describe('HealthOverviewScreen', () => {
         .fn()
         .mockResolvedValueOnce(profile)
         .mockResolvedValueOnce(refreshedProfile),
+      getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+      recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     const onSyncWearable = jest.fn().mockReturnValue(syncPromise);
     let tree: ReturnType<typeof create>;
@@ -292,6 +298,8 @@ describe('HealthOverviewScreen', () => {
     };
     const api = {
       getHealthProfile: jest.fn().mockResolvedValueOnce(stale).mockResolvedValueOnce(current),
+      getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+      recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     const onClose = jest.fn();
     let tree: ReturnType<typeof create>;
@@ -324,7 +332,11 @@ describe('HealthOverviewScreen', () => {
   });
 
   test('shows a Health Connect sync error instead of reloading stale readings', async () => {
-    const api = { getHealthProfile: jest.fn().mockResolvedValue(profile) } as unknown as ApiClient;
+    const api = {
+      getHealthProfile: jest.fn().mockResolvedValue(profile),
+      getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+      recordPsychosocialAssessment: jest.fn(),
+    } as unknown as ApiClient;
     const onSyncWearable = jest.fn().mockRejectedValue(new Error('Health Connect 读取失败'));
     let tree: ReturnType<typeof create>;
     await act(async () => {
@@ -350,6 +362,8 @@ describe('HealthOverviewScreen', () => {
         .fn()
         .mockRejectedValueOnce(new Error('网络暂时不可用'))
         .mockResolvedValueOnce(emptyProfile),
+      getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+      recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     let tree: ReturnType<typeof create>;
 
@@ -397,6 +411,8 @@ describe('HealthOverviewScreen', () => {
           },
         }),
       changeHealthProfile: jest.fn().mockResolvedValue({ status: 'applied' }),
+      getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+      recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     let tree: ReturnType<typeof create>;
 
@@ -469,6 +485,8 @@ describe('HealthOverviewScreen', () => {
         .mockResolvedValueOnce(editedAllergy)
         .mockResolvedValueOnce(emptyProfile),
       changeHealthProfile: jest.fn().mockResolvedValue({ status: 'applied' }),
+      getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+      recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     let tree: ReturnType<typeof create>;
 
@@ -571,6 +589,8 @@ describe('HealthOverviewScreen', () => {
           new ApiError('档案版本冲突', 409, 'health_profile_changed'),
         )
         .mockResolvedValueOnce({ status: 'applied' }),
+      getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+      recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     let tree: ReturnType<typeof create>;
 
@@ -633,6 +653,8 @@ describe('HealthOverviewScreen', () => {
         .mockRejectedValueOnce(new Error('刷新连接中断'))
         .mockResolvedValueOnce(savedProfile),
       changeHealthProfile: jest.fn().mockResolvedValue({ status: 'applied' }),
+      getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+      recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     let tree: ReturnType<typeof create>;
 
@@ -698,6 +720,8 @@ describe('HealthOverviewScreen', () => {
         .mockResolvedValueOnce(emptyProfile)
         .mockResolvedValueOnce({ ...emptyProfile, healthFacts: [allergy] }),
       changeHealthProfile,
+      getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+      recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     let tree: ReturnType<typeof create>;
 
@@ -759,6 +783,8 @@ describe('HealthOverviewScreen', () => {
         .mockResolvedValueOnce(refreshed)
         .mockResolvedValueOnce(saved),
       changeHealthProfile,
+      getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+      recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     let tree: ReturnType<typeof create>;
 
