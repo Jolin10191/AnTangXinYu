@@ -100,6 +100,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
                 app.state.chat_model = chat_model
                 app.state.core_tools = core_tools
+                # 注销账号要连带清掉 Hindsight 里的陪伴记忆，路由从这里取客户端。
+                app.state.hindsight_client = hindsight_client
                 app.state.companion_memory = CompanionMemory(
                     hindsight_client,
                     mode=settings.hindsight_mode,

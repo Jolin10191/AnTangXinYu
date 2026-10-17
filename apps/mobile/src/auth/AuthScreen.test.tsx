@@ -115,6 +115,23 @@ describe('AuthScreen', () => {
         .props.onChangeText('new-password');
     });
 
+    // 没勾选知情同意时不能提交注册。
+    expect(
+      tree!.root.findByProps({ accessibilityLabel: '创建安糖心语账号' }).props
+        .accessibilityState.disabled,
+    ).toBe(true);
+
+    act(() => {
+      tree!.root
+        .findByProps({ accessibilityLabel: '同意知情同意与隐私说明' })
+        .props.onPress();
+    });
+
+    expect(
+      tree!.root.findByProps({ accessibilityLabel: '创建安糖心语账号' }).props
+        .accessibilityState.disabled,
+    ).toBe(false);
+
     await act(async () => {
       tree!.root
         .findByProps({ accessibilityLabel: '创建安糖心语账号' })

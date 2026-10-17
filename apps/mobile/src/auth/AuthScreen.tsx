@@ -3,6 +3,7 @@ import { ArrowRight01Icon } from '@hugeicons/core-free-icons';
 import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Pressable,
   ScrollView,
@@ -22,6 +23,17 @@ import { colors, radii, spacing, typefaces } from '../ui/theme';
 type AuthMode = 'login' | 'register';
 type FocusedField = 'username' | 'password' | null;
 
+/**
+ * 注册前必须读到的内容。写的是这个原型实际做的事，不是通用模板：
+ * 它还没有上架、没有做临床验证，也不能用来做急救或用药决定。
+ */
+export const CONSENT_TEXT = [
+  '这是一个研究原型，由天津大学与天津医科大学总医院共同开展，不是医疗器械，也不能替代医生。',
+  '你在这里填写的健康档案、对话内容，以及你导入的手环数据，会保存到课题组自建的服务器上，只用于这项研究。',
+  '你可以随时停止使用。需要删除账号和全部数据时，联系课题组即可，我们会在核对身份后删除。',
+  '请不要用它做急救判断或调整胰岛素用量。出现严重低血糖、意识不清或其他紧急情况，请立即就医。',
+].join('\n\n');
+
 type Props = {
   api: ApiClient;
   initialMessage?: string;
@@ -35,10 +47,14 @@ export function AuthScreen({ api, initialMessage, onAuthenticated }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(initialMessage ?? null);
   const [focusedField, setFocusedField] = useState<FocusedField>(null);
+  const [consentGiven, setConsentGiven] = useState(false);
   const passwordInput = useRef<TextInput>(null);
 
   const canSubmit =
-    username.trim().length >= 3 && password.length >= 8 && !submitting;
+    username.trim().length >= 3 &&
+    password.length >= 8 &&
+    !submitting &&
+    (mode === 'login' || consentGiven);
 
   async function submit() {
     if (!canSubmit) return;
@@ -61,6 +77,7 @@ export function AuthScreen({ api, initialMessage, onAuthenticated }: Props) {
   function switchMode(nextMode: AuthMode) {
     setMode(nextMode);
     setPassword('');
+    setConsentGiven(false);
     setError(null);
   }
 
@@ -224,6 +241,40 @@ export function AuthScreen({ api, initialMessage, onAuthenticated }: Props) {
                 <View style={styles.errorDot} />
                 <Text selectable style={styles.error}>
                   {error}
+                </Text>
+              </View>
+            )}
+
+            {mode === 'register' && (
+              <View style={styles.consentRow}>
+                <Pressable
+                  accessibilityLabel={
+                    consentGiven ? '取消同意知情同意与隐私说明' : '同意知情同意与隐私说明'
+                  }
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: consentGiven }}
+                  hitSlop={8}
+                  onPress={() => setConsentGiven((given) => !given)}
+                  style={[
+                    styles.consentBox,
+                    consentGiven && styles.consentBoxChecked,
+                  ]}
+                >
+                  {consentGiven && <Text style={styles.consentTick}>✓</Text>}
+                </Pressable>
+                <Text selectable style={styles.consentText}>
+                  我已阅读并同意
+                  <Text
+                    accessibilityRole="link"
+                    onPress={() =>
+                      Alert.alert('知情同意与隐私说明', CONSENT_TEXT, [
+                        { text: '关闭' },
+                      ])
+                    }
+                    style={styles.consentLink}
+                  >
+                    知情同意与隐私说明
+                  </Text>
                 </Text>
               </View>
             )}
@@ -431,6 +482,43 @@ const styles = StyleSheet.create({
     fontFamily: typefaces.sans,
     fontSize: 14,
     lineHeight: 20,
+  },
+  consentRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.xs,
+  },
+  consentBox: {
+    width: 22,
+    height: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 7,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    backgroundColor: colors.paper,
+    marginTop: 1,
+  },
+  consentBoxChecked: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primary,
+  },
+  consentTick: {
+    color: colors.paper,
+    fontFamily: typefaces.sansMedium,
+    fontSize: 14,
+    lineHeight: 18,
+  },
+  consentText: {
+    flex: 1,
+    color: colors.muted,
+    fontFamily: typefaces.sans,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  consentLink: {
+    color: colors.primaryPressed,
+    fontFamily: typefaces.sansMedium,
   },
   submitButton: {
     flexDirection: 'row',

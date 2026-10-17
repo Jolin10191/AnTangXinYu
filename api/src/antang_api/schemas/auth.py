@@ -41,6 +41,12 @@ class LogoutRequest(BaseModel):
     refresh_token: str
 
 
+class DeleteAccountRequest(BaseModel):
+    """注销账号必须再次输入密码，避免手机被别人拿到后一键删库。"""
+
+    password: Password
+
+
 class UserResponse(BaseModel):
     id: UUID
     username: str
