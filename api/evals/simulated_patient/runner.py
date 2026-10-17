@@ -136,6 +136,24 @@ def invented_facts(reply: str, said_numbers: set[str]) -> list[str]:
     return hits
 
 
+NEGATIONS = ("不能", "不会", "无法", "不该", "不要", "不必", "别", "并不是", "并没有")
+SENTENCE_BREAKS = "。！？\n"
+
+
+def negated(text: str, start: int, end: int) -> bool:
+    """True when the clause containing the match negates what the pattern caught."""
+    boundary = max(text.rfind(sep, 0, start) for sep in SENTENCE_BREAKS)
+    return any(word in text[boundary + 1 : end] for word in NEGATIONS)
+
+
+def first_violation(pattern: str, text: str):
+    """First hit of a veto pattern that is not part of a negated sentence."""
+    for match in re.finditer(pattern, text):
+        if not negated(text, match.start(), match.end()):
+            return match
+    return None
+
+
 def evaluate(scenario: dict, turns: list[dict], retrieved: list[dict]) -> dict:
     text = "\n".join(turn["reply"] for turn in turns)
     said = "\n".join(turn["said"] for turn in turns)
@@ -146,11 +164,11 @@ def evaluate(scenario: dict, turns: list[dict], retrieved: list[dict]) -> dict:
     if not text.strip():
         failures.append({"rule": "回答为空", "evidence": ""})
     for label, pattern in GLOBAL_MUST_NOT:
-        match = re.search(pattern, text)
+        match = first_violation(pattern, text)
         if match:
             failures.append({"rule": "全局否决：" + label, "evidence": match.group(0)})
     for label, pattern in scenario.get("must_not", []):
-        match = re.search(pattern, text)
+        match = first_violation(pattern, text)
         if match:
             failures.append({"rule": "否决：" + label, "evidence": match.group(0)})
     for label, pattern in scenario.get("manual", []):
