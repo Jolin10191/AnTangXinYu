@@ -24,6 +24,7 @@ from antang_api.models.health_profile import (
     ProfileOperation,
     ProfileTargetType,
 )
+from antang_api.models.knowledge import KnowledgeChunk, KnowledgeDocument
 from antang_api.models.proactive_care import (
     CarePlan,
     CarePlanStatus,
@@ -68,6 +69,8 @@ __all__ = [
     "HealthFactStatus",
     "HealthFactType",
     "HealthProfileChange",
+    "KnowledgeChunk",
+    "KnowledgeDocument",
     "PersonalProfile",
     "PersonalProfileField",
     "ProfileChangeMode",

@@ -91,6 +91,7 @@ TOOL_ACTIVITY_PHASES: dict[str, ActivityPhase] = {
     "web_search": "searching",
     "web_fetch": "reading",
     "read_wearable_data": "reading",
+    "search_diabetes_knowledge": "reading",
     "delegate_health_profile": "organizing",
     "manage_care_plan": "organizing",
 }

@@ -12,6 +12,7 @@ from antang_api.agents.tool_middleware import ToolPersistenceMiddleware
 from antang_api.chat import recover_interrupted_chat_runs
 from antang_api.companion_memory import CompanionMemory
 from antang_api.database import engine, session_factory
+from antang_api.knowledge import warm_knowledge_index
 from antang_api.llm import (
     build_chat_model,
     build_non_streaming_model,
@@ -24,6 +25,7 @@ from antang_api.routers.proactive_care import router as proactive_care_router
 from antang_api.settings import settings
 from antang_api.tools import (
     build_care_plan_tool,
+    build_knowledge_search_tool,
     build_profile_tool,
     build_wearable_read_tool,
     build_web_tools,
@@ -50,6 +52,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         async with session_factory() as session:
             await recover_interrupted_chat_runs(session)
+            await warm_knowledge_index(session)
 
         async with AsyncPostgresSaver.from_conn_string(
             settings.langgraph_database_url
@@ -76,6 +79,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     session_factory=session_factory,
                 )
                 care_plan_tool = build_care_plan_tool(session_factory)
+                knowledge_tool = build_knowledge_search_tool(session_factory)
                 web_tools = build_web_tools(
                     tavily_client,
                     search_max_snippet_chars=(settings.tavily_search_max_snippet_chars),
@@ -84,6 +88,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 core_tools = (
                     *web_tools,
                     wearable_tool,
+                    knowledge_tool,
                     health_profile_delegate,
                     care_plan_tool,
                 )
