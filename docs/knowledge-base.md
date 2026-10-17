@@ -40,6 +40,28 @@ py -3 api/scripts/build_knowledge_chunks.py \
 
 `--dry` 只解析不向量化，用来核对页数与片段数。
 
+## 二、向量化走哪套配置
+
+检索时的向量化独立于对话模型，三个可选环境变量：
+
+| 变量 | 留空时 | 说明 |
+| --- | --- | --- |
+| `KNOWLEDGE_EMBEDDING_BASE_URL` | 沿用 `HACHIMI_BASE_URL` | OpenAI 兼容端点 |
+| `KNOWLEDGE_EMBEDDING_API_KEY` | 沿用 `HACHIMI_API_KEY` | 密钥 |
+| `KNOWLEDGE_EMBEDDING_MODEL` | `bge-m3` | 换模型必须重建整个索引，向量维度写死 1024 |
+
+**为什么要拆开**：同一个 key 目前同时承担对话、Hindsight 记忆抽取和知识库向量化，
+任何一处欠费会让三件事一起停（2026-10 出现过一次：对话报 `Insufficient user quota`）。
+拆开之后换对话钥匙不会连带弄坏检索，将来把检索换到别的供应商或本地模型也只是改这三个变量。
+
+**换成 DeepSeek 官方 key 时一定要注意**：DeepSeek 不提供 `bge-m3`，
+必须同时把 `KNOWLEDGE_EMBEDDING_*` 指向仍然提供该模型的服务，否则每次检索都会失败。
+
+**本地推理目前跑不起来**：这台服务器 7.4 GB 内存、没有 swap，Hindsight 容器里已经加载了
+`bge-m3` 与 `bge-reranker-v2-m3`（进程 RSS 约 3.9 GB）。再起一个进程加载同一份 2.3 GB 权重
+有 OOM 风险，所以"完全本地化"要等加 swap 或升内存，届时只需要起一个 OpenAI 兼容的
+本地嵌入服务，再把上面三个变量指过去。
+
 ## 二、灌库
 
 `api/scripts/load_knowledge.py` 在 api 容器内执行，因为它要连数据库：

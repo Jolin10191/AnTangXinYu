@@ -4,13 +4,14 @@ from typing import cast
 import numpy as np
 import pytest
 from langchain_core.tools import BaseTool, StructuredTool
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from antang_api.knowledge import search as knowledge_search
 from antang_api.knowledge.embeddings import KNOWLEDGE_EMBEDDING_DIM
 from antang_api.models import KnowledgeChunk, KnowledgeDocument
+from antang_api.settings import settings
 from antang_api.tools.knowledge import (
     MAX_KNOWLEDGE_CHUNK_CHARS,
     KnowledgeSearchRequest,
@@ -307,3 +308,22 @@ async def test_chinese_question_prefers_chinese_chunks(
 
     assert [match.title for match in matches] == ["中国糖尿病防治指南（2024版）", "standards-of-care-2026"]
     assert matches[1].score == pytest.approx(0.72, abs=1e-4)
+
+
+def test_embedding_settings_fall_back_to_the_chat_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "knowledge_embedding_base_url", "")
+    monkeypatch.setattr(settings, "knowledge_embedding_api_key", None)
+
+    assert settings.knowledge_embedding_openai_base_url == settings.hachimi_openai_base_url
+    assert (
+        settings.resolved_knowledge_embedding_api_key
+        == settings.hachimi_api_key.get_secret_value()
+    )
+
+
+def test_embedding_settings_can_use_a_separate_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "knowledge_embedding_base_url", "http://embeddings:9000/v1/")
+    monkeypatch.setattr(settings, "knowledge_embedding_api_key", SecretStr("local-key"))
+
+    assert settings.knowledge_embedding_openai_base_url == "http://embeddings:9000/v1"
+    assert settings.resolved_knowledge_embedding_api_key == "local-key"

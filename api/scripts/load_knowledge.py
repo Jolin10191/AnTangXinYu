@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from antang_api.database import engine, session_factory
 from antang_api.knowledge.embeddings import (
     KNOWLEDGE_EMBEDDING_DIM,
-    KNOWLEDGE_EMBEDDING_MODEL,
+    embedding_model,
 )
 from antang_api.models import KnowledgeChunk, KnowledgeDocument
 
@@ -50,7 +50,7 @@ async def _flush(
         title=title,
         page_count=max(int(record["page"]) for record in buffer),
         chunk_count=len(buffer),
-        embedding_model=KNOWLEDGE_EMBEDDING_MODEL,
+        embedding_model=embedding_model(),
         embedding_dim=KNOWLEDGE_EMBEDDING_DIM,
     )
     session.add(document)

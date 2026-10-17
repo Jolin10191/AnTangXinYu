@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     hachimi_timeout_seconds: float = Field(default=300, gt=0)
     hachimi_max_output_tokens: int = Field(default=4096, gt=0)
 
+    # 知识库检索的向量化独立于对话模型：留空时沿用 HACHIMI_*，填了就各走各的。
+    # 拆开的原因是同一个 key 同时承担对话、记忆抽取和向量化，任一处欠费会全线停摆。
+    knowledge_embedding_api_key: SecretStr | None = None
+    knowledge_embedding_base_url: str = ""
+    knowledge_embedding_model: str = "bge-m3"
+
     tavily_api_key: SecretStr = Field(min_length=1)
     # Tavily 没有承诺最终字符串的总上限；以下是项目自己的初始安全边界。
     tavily_search_max_snippet_chars: int = Field(default=2_000, gt=0)
@@ -95,6 +101,31 @@ class Settings(BaseSettings):
         if value.endswith(suffix):
             value = value[: -len(suffix)]
         return value
+
+    @property
+    def knowledge_embedding_openai_base_url(self) -> str:
+        """向量化服务的基础地址；没有单独配置时复用对话中转站。"""
+
+        configured = self.knowledge_embedding_base_url.strip()
+        if not configured:
+            return self.hachimi_openai_base_url
+        parsed = urlsplit(configured)
+        path = "/" + "/".join(part for part in parsed.path.split("/") if part)
+        value = urlunsplit((parsed.scheme, parsed.netloc, path, "", "")).rstrip("/")
+        suffix = "/chat/completions"
+        if value.endswith(suffix):
+            value = value[: -len(suffix)]
+        return value
+
+    @property
+    def resolved_knowledge_embedding_api_key(self) -> str:
+        """向量化用哪把钥匙：单独配了就用自己的，否则回退到对话钥匙。"""
+
+        if self.knowledge_embedding_api_key is not None:
+            value = self.knowledge_embedding_api_key.get_secret_value()
+            if value:
+                return value
+        return self.hachimi_api_key.get_secret_value()
 
     @model_validator(mode="after")
     def validate_hindsight(self) -> Self:
