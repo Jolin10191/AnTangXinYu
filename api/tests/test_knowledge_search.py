@@ -264,6 +264,7 @@ async def test_tool_cites_the_printed_page_of_a_journal_layout(
     assert results[0]["page"] == 1161
     assert results[0]["page_kind"] == "printed"
     assert results[0]["pdf_page"] == 19
+    assert results[0]["cite"] == "（《中国1型糖尿病诊治指南（2021版）》第 1161 页）"
 
 
 async def test_chinese_question_prefers_chinese_chunks(

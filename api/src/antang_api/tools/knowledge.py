@@ -48,6 +48,8 @@ def _render_match(match: KnowledgeMatch) -> dict[str, object]:
     cite_page = match.printed_page if match.printed_page is not None else match.page
     return {
         "title": match.title,
+        # 现成的出处串，模型整段复制比自己拼写更不容易写错页码。
+        "cite": f"（《{match.title}》第 {cite_page} 页）",
         "page": cite_page,
         "page_kind": "printed" if match.printed_page is not None else "pdf",
         "pdf_page": match.page,
