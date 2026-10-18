@@ -136,7 +136,19 @@ def invented_facts(reply: str, said_numbers: set[str]) -> list[str]:
     return hits
 
 
-NEGATIONS = ("不能", "不会", "无法", "不该", "不要", "不必", "别", "并不是", "并没有")
+# 否定与转折都算“这句话不是在劝他去测”：劝阻的说法常写成「复测反而更难踏实」。
+NEGATIONS = (
+    "不能",
+    "不会",
+    "无法",
+    "不该",
+    "不要",
+    "不必",
+    "别",
+    "并不是",
+    "并没有",
+    "反而",
+)
 SENTENCE_BREAKS = "。！？\n"
 
 
