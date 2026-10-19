@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# 本机出 release APK，并用固定的发布密钥签名。
+#
+# 为什么不用 debug keystore：换一台机器/换一个人出的包签名不同，Android 会拒绝覆盖安装
+# 已装的版本，更新链就断了。发布密钥只能有一份，存在仓库之外：
+#
+#   ANTANG_KEYSTORE=/path/to/antang-release.keystore
+#   ANTANG_KEYSTORE_PASSWORD_FILE=/path/to/keystore.properties
+#
+# properties 文件四行：storeFile / storePassword / keyAlias / keyPassword。
+# 签名通过 gradle 的 injected signing 参数传入，不修改 android/ 下任何生成文件，
+# 所以 expo prebuild --clean 之后依然有效。
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+mobile="$root/apps/mobile"
+
+: "${ANTANG_KEYSTORE:?缺少 ANTANG_KEYSTORE（发布密钥路径）}"
+: "${ANTANG_KEYSTORE_PASSWORD_FILE:?缺少 ANTANG_KEYSTORE_PASSWORD_FILE（密钥配置文件路径）}"
+
+read_value() {
+    awk -F= -v key="$1" '$1 ~ "^[[:space:]]*"key"[[:space:]]*$" {sub(/^[[:space:]]+/, "", $2); print $2; exit}' \
+        "$ANTANG_KEYSTORE_PASSWORD_FILE"
+}
+
+store_password="$(read_value storePassword)"
+key_alias="$(read_value keyAlias)"
+key_password="$(read_value keyPassword)"
+: "${store_password:?配置文件里没有 storePassword}"
+: "${key_alias:?配置文件里没有 keyAlias}"
+: "${key_password:?配置文件里没有 keyPassword}"
+
+arch="${ANDROID_ARCH:-arm64-v8a}"
+api_url="${EXPO_PUBLIC_API_URL:-https://82.157.48.200:8000}"
+
+echo "versionCode: $(cd "$root" && ./scripts/android-version --next)"
+echo "api url    : $api_url"
+echo "keystore   : $ANTANG_KEYSTORE"
+
+cd "$mobile"
+[ -d node_modules ] || npm ci
+npx --yes expo prebuild --platform android --no-install --clean
+cd android
+EXPO_PUBLIC_API_URL="$api_url" NODE_ENV=production \
+    ./gradlew assembleRelease \
+    -PreactNativeArchitectures="$arch" \
+    -Pandroid.injected.signing.store.file="$ANTANG_KEYSTORE" \
+    -Pandroid.injected.signing.store.password="$store_password" \
+    -Pandroid.injected.signing.key.alias="$key_alias" \
+    -Pandroid.injected.signing.key.password="$key_password" \
+    --console=plain
+
+apk="$mobile/android/app/build/outputs/apk/release/app-release.apk"
+echo "apk: $apk"

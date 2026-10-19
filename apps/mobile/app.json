@@ -13,6 +13,7 @@
     },
     "android": {
       "package": "com.antang.app",
+      "versionCode": 26101901,
       "googleServicesFile": "./google-services.json",
       "permissions": [
         "android.permission.health.READ_STEPS",
