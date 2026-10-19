@@ -93,3 +93,28 @@ JDK 17 / NDK 27.1.12297006 / CMake 3.22.1 → `expo prebuild` → `gradlew assem
 
 首次跑可能要调 NDK / CMake 版本，跑通一次之后就稳定了。
 
+### 怎么触发（目前）
+
+`workflow_dispatch` 要求工作流文件在**默认分支**上，而这个文件还在
+`feat/live-heart-rate`，所以在 Actions 页面里暂时看不到 "Run workflow" 按钮。
+两种可用方式：
+
+1. 打一个 `v*` 标签（`push: tags: v*` 会触发）——这是目前实际用的方式；
+2. 等 PR 合进 `master` 之后按钮才会出现。届时 secrets 要在**目标仓库**里再配一份
+   （fork 上那份只对 fork 的 run 生效）。
+
+### 首次跑通记录（2026-10-19）
+
+- run `39234647335`：install NDK/CMake → keystore → npm ci → prebuild → gradle →
+  artifact 全绿，约 13 分钟。
+- 产物：`app-release.apk` **48,951,657 字节**，
+  SHA-256 `61e5e915834f8a3e0a0a2979d0f02d2fbb2f3c414d2e45d9737160c3ec645922`，
+  `versionCode=26101901` / `versionName=1.0.0`。
+- 签名证书与本地同一条：`CN=Antang Xinyu, OU=GlucoMind, O=Tianjin University`，
+  SHA-256 `08f3754034a6596c5e5fc6749143eb77ef486e0f1156fca41104094ab1be0b0d`。
+  **这一点必须每次核对**：证书变了，老用户就只能卸载重装。
+- 踩过的坑：`android-actions/setup-android@v3` 内部会执行 `sdkmanager tools`，
+  而当前 SDK 仓库里已经没有 `tools` 这个包，job 在第一步就死。改成直接用
+  runner 自带 SDK 里的 `sdkmanager` 安装 NDK 27.1.12297006 与 CMake 3.22.1。
+
+
