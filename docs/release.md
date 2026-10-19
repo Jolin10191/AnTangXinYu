@@ -61,9 +61,35 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\publish-apk.ps1 `
 - **不公布服务器 IP 之外的入口**：现在下载页是裸 IP + 自签/Let's Encrypt 证书，
   给患者用之前必须换成备案域名。
 
-## 六、还没做的
+## 六、应用内检查更新
 
-- CI 从 master 自动出包：GitHub Actions 需要 Android SDK 与签名密钥（作为 secrets），
-  配好之后"跑流水线即发布"，人不用碰命令行。目前是手动跑上面两步。
-- 应用内"检查更新"入口：版本清单已经就绪，App 侧只需读取、比较、弹窗，
-  这部分会和下一次重打包一起提交。
+侧边栏底部有「检查更新」一行，显示当前版本。点一下读 `latest.json`、比 `versionCode`：
+
+- 有新版 → 弹「有新版本」+ 包大小 + 说明，点「去下载」交给系统浏览器下载；
+- 已最新 → 弹「已是最新版本」；
+- 读不到清单 / 字段不全 → 直接报错，不假装"已是最新"。
+
+下载完仍由系统的安装器确认安装一次——Android 不允许普通应用静默装自己。
+清单字段缺一个就报错（`src/update/release.ts`），不用默认值糊过去。
+
+## 七、CI 出包
+
+`.github/workflows/android-release.yml`：手工触发，或推一个 `v*` 标签。Runner 上装
+JDK 17 / NDK 27.1.12297006 / CMake 3.22.1 → `expo prebuild` → `gradlew assembleRelease`
+（签名走同一把发布密钥）→ 上传 APK + `sha256.txt` + `version.txt`。
+
+需要先在仓库 Settings → Secrets and variables → Actions 里配 4 个值。
+运行 `gh-secrets-helper.ps1` 会把它们打印出来（粘完就关窗口，别留在聊天记录里）：
+
+| secret | 内容 |
+|---|---|
+| `ANTANG_KEYSTORE_BASE64` | 发布密钥文件的 base64 |
+| `ANTANG_KEYSTORE_PASSWORD` | 密钥库密码 |
+| `ANTANG_KEY_PASSWORD` | 密钥密码 |
+| `ANTANG_API_URL` | `https://82.157.48.200:8000` |
+
+**构建不等于发布**：流水线只产出 artifact，对外发布仍要人工跑 `publish-apk.ps1`。
+这样出包不会自动影响正在使用的用户。
+
+首次跑可能要调 NDK / CMake 版本，跑通一次之后就稳定了。
+
