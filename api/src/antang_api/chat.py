@@ -24,6 +24,7 @@ from antang_api.agents.core import (
     CoreAgentGraph,
     render_core_system_prompt,
 )
+from antang_api.agents.promises import unbacked_promise
 from antang_api.agents.runtime import AgentContext, ToolActivity
 from antang_api.citations import (
     VISIBLE_TURN_SEPARATOR,
@@ -446,6 +447,18 @@ async def _complete_chat_run(
     agent_run.input_tokens = input_tokens
     agent_run.output_tokens = output_tokens
     agent_run.finished_at = now
+
+    tool_names = set(
+        (
+            await session.execute(
+                select(AgentToolCall.tool_name).where(
+                    AgentToolCall.agent_run_id == agent_run.id
+                )
+            )
+        ).scalars()
+    )
+    if unbacked_promise(content, tool_names):
+        logger.warning("助手承诺了主动联系但这一轮没有调用计划工具")
 
     await session.commit()
 
