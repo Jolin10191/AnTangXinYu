@@ -32,10 +32,21 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
-
+      # 不装 android-actions/setup-android：它内部的 `sdkmanager tools` 在新 SDK
+      # 仓库里已经找不到 `tools` 包而直接失败。runner 自带 Android SDK，
+      # 直接用它的 sdkmanager 补 NDK 和 CMake。
       - name: Install NDK and CMake
-        run: sdkmanager "ndk;27.1.12297006" "cmake;3.22.1"
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -n 1)
+          fi
+          echo "using $SDKMANAGER"
+          yes | "$SDKMANAGER" --install "ndk;27.1.12297006" "cmake;3.22.1" > /tmp/sdkmanager.log 2>&1 || {
+            tail -n 40 /tmp/sdkmanager.log
+            exit 1
+          }
+          tail -n 5 /tmp/sdkmanager.log
 
       - name: Restore release keystore
         env:
