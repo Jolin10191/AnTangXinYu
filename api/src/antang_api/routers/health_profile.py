@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from antang_api.behavioral import read_fear_summary
 from antang_api.database import get_session
 from antang_api.health_profile.errors import (
     HealthProfileChangedError,
@@ -48,6 +49,8 @@ from antang_api.models import (
 )
 from antang_api.routers.auth import get_current_user
 from antang_api.schemas.health_profile import (
+    BeliefNodeResponse,
+    FearSummaryResponse,
     HealthProfileChangeRequest,
     HealthProfileChangeResponse,
     HealthProfileResponse,
@@ -455,3 +458,43 @@ async def record_psychosocial_assessment(
     response = _psychosocial_response(row)
     await session.commit()
     return response
+
+
+@router.get("/fear-summary", response_model=FearSummaryResponse)
+async def get_fear_summary(
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    days: Annotated[int, Query(ge=7, le=90)] = 28,
+) -> FearSummaryResponse:
+    """显性分数与行为代理的对照，供 App 在心理社会卡片下展示。"""
+
+    summary = await read_fear_summary(session, user_id=user.id, days=days)
+    assessment = (
+        _psychosocial_response(summary.assessment_row)
+        if summary.assessment_row is not None
+        else None
+    )
+    return FearSummaryResponse(
+        window_start=summary.window_start,
+        window_end=summary.window_end,
+        behavior_counts=summary.behavior_counts,
+        behavior_total=summary.behavior_total,
+        monitoring_weekly=summary.monitoring_weekly,
+        avoidance_weekly=summary.avoidance_weekly,
+        beliefs=[
+            BeliefNodeResponse(
+                belief_code=node.belief_code,
+                label=node.label,
+                mentions=node.mentions,
+                reframes=node.reframes,
+                denials=node.denials,
+                latest_quote=node.latest_quote,
+                latest_detected_at=node.latest_detected_at,
+                resolved=node.resolved,
+            )
+            for node in summary.beliefs
+        ],
+        assessment=assessment,
+        discrepancy=summary.discrepancy,
+        discrepancy_note=summary.discrepancy_note,
+    )

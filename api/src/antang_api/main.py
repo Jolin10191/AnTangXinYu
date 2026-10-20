@@ -24,6 +24,7 @@ from antang_api.routers.health_profile import router as health_profile_router
 from antang_api.routers.proactive_care import router as proactive_care_router
 from antang_api.settings import settings
 from antang_api.tools import (
+    build_behavior_tools,
     build_care_plan_tool,
     build_knowledge_search_tool,
     build_profile_tool,
@@ -79,6 +80,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     session_factory=session_factory,
                 )
                 care_plan_tool = build_care_plan_tool(session_factory)
+                behavior_tools = build_behavior_tools(session_factory)
                 knowledge_tool = build_knowledge_search_tool(session_factory)
                 web_tools = build_web_tools(
                     tavily_client,
@@ -91,6 +93,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     knowledge_tool,
                     health_profile_delegate,
                     care_plan_tool,
+                    *behavior_tools,
                 )
                 tool_middleware = ToolPersistenceMiddleware(
                     session_factory,

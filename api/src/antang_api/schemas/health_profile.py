@@ -566,3 +566,41 @@ class PsychosocialProfileResponse(BaseModel):
         "unknown_awareness",
     ]
     weekly_contact_limit: int
+
+
+class BeliefNodeResponse(BaseModel):
+    """信念图里的一个节点在窗口内的观测统计。"""
+
+    belief_code: str
+    label: str
+    mentions: int
+    reframes: int
+    denials: int
+    latest_quote: str
+    latest_detected_at: datetime
+    resolved: bool
+
+
+class FearSummaryResponse(BaseModel):
+    """显性分数与行为代理的对照结果。
+
+    behavior_counts 的键是行为类型，值是窗口内的总次数。
+    discrepancy 只表达「两路证据一致不一致」，不是诊断。
+    """
+
+    window_start: datetime
+    window_end: datetime
+    behavior_counts: dict[str, int]
+    behavior_total: int
+    monitoring_weekly: float
+    avoidance_weekly: float
+    beliefs: list[BeliefNodeResponse]
+    assessment: PsychosocialProfileResponse | None
+    discrepancy: Literal[
+        "aligned",
+        "implicit_higher",
+        "explicit_higher",
+        "unknown",
+    ]
+    discrepancy_note: str
+

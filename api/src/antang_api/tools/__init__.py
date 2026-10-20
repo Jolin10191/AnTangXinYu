@@ -1,3 +1,4 @@
+from antang_api.tools.behavior import build_behavior_tools
 from antang_api.tools.care_plan import build_care_plan_tool
 from antang_api.tools.health_profile import build_profile_tool
 from antang_api.tools.knowledge import build_knowledge_search_tool
@@ -6,6 +7,7 @@ from antang_api.tools.web import WebToolError, build_web_tools
 
 __all__ = [
     "WebToolError",
+    "build_behavior_tools",
     "build_care_plan_tool",
     "build_knowledge_search_tool",
     "build_profile_tool",

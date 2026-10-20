@@ -1,4 +1,11 @@
 from antang_api.models.agent_tool_call import AgentToolCall, AgentToolCallStatus
+from antang_api.models.behavior import (
+    BEHAVIOR_KINDS,
+    BELIEF_OCCURRENCES,
+    HYPOGLYCEMIA_BELIEFS,
+    FearBehaviorLog,
+    HypoglycemiaBeliefEvent,
+)
 from antang_api.models.chat import (
     AgentRun,
     AgentRunStatus,
@@ -53,6 +60,11 @@ __all__ = [
     "AgentToolCallStatus",
     "AgentRun",
     "AgentRunStatus",
+    "BEHAVIOR_KINDS",
+    "BELIEF_OCCURRENCES",
+    "FearBehaviorLog",
+    "HYPOGLYCEMIA_BELIEFS",
+    "HypoglycemiaBeliefEvent",
     "LoginSession",
     "Message",
     "MessageAttachment",
