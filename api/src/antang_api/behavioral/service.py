@@ -1,6 +1,7 @@
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 from uuid import UUID
 
 from sqlalchemy import select
@@ -25,7 +26,7 @@ MONITORING_KINDS: tuple[str, ...] = ("extra_check", "night_check")
 # 这是先验阈值，用于把不一致提示出来，不是诊断标准；样本足够后要重新标定。
 AVOIDANCE_WEEKLY_THRESHOLD = 2.0
 
-Discrepancy = str  # aligned | implicit_higher | explicit_higher | unknown
+Discrepancy = Literal["aligned", "implicit_higher", "explicit_higher", "unknown"]
 
 _BELIEF_LABELS = dict(HYPOGLYCEMIA_BELIEFS)
 
