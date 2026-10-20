@@ -55,6 +55,7 @@ import { useHealthConnect } from '../health-connect/use-health-connect';
 import { useGadgetbridge } from '../health-connect/useGadgetbridge';
 import { HealthOverviewScreen } from '../health-overview';
 import { HealthDashboardScreen } from '../health/HealthDashboardScreen';
+import { GlucoseScreen } from '../glucose/GlucoseScreen';
 import {
   LiveHeartRateProvider,
   useLiveHeartRateController,
@@ -136,6 +137,7 @@ function ChatScreenContent({ api, user, onSignedOut }: Props) {
   const [showHealthOverview, setShowHealthOverview] = useState(false);
   // ===== 新增：健康看板 =====
   const [showDashboard, setShowDashboard] = useState(false);
+  const [showGlucose, setShowGlucose] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [showReportPicker, setShowReportPicker] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -1002,6 +1004,33 @@ function ChatScreenContent({ api, user, onSignedOut }: Props) {
         />
       </Modal>
 
+      <Modal
+        animationType="slide"
+        onRequestClose={() => setShowGlucose(false)}
+        presentationStyle="fullScreen"
+        visible={showGlucose}
+      >
+        <View style={{ flex: 1, backgroundColor: '#F4F6F5' }}>
+          <View
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'flex-end',
+              paddingHorizontal: 20,
+              paddingTop: 16,
+            }}
+          >
+            <Pressable
+              accessibilityLabel="关闭血糖记录"
+              accessibilityRole="button"
+              onPress={() => setShowGlucose(false)}
+            >
+              <Text style={{ fontSize: 15, color: '#0F766E' }}>关闭</Text>
+            </Pressable>
+          </View>
+          <GlucoseScreen api={api} />
+        </View>
+      </Modal>
+
       {/* ===== 新增：健康看板 Modal ===== */}
       <HealthDashboardScreen
         api={api}
@@ -1026,6 +1055,11 @@ function ChatScreenContent({ api, user, onSignedOut }: Props) {
         onOpenDashboard={() => {
           setShowMenu(false);
           setShowDashboard(true);
+        }}
+        // ===== 新增：血糖记录入口 =====
+        onOpenGlucose={() => {
+          setShowMenu(false);
+          setShowGlucose(true);
         }}
         onSelectConversation={(messageId) => {
           setTargetMessageId(messageId);

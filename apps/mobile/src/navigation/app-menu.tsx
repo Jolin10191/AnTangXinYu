@@ -36,6 +36,7 @@ type Props = {
   onOpenHealth: () => void;
   onOpenSettings: () => void;
   onOpenDashboard?: () => void;
+  onOpenGlucose?: () => void;
   onSelectConversation: (messageId: string) => void;
   username: string;
   visible: boolean;
@@ -119,6 +120,7 @@ export function AppMenu({
   onOpenHealth,
   onOpenSettings,
   onOpenDashboard = () => { },
+  onOpenGlucose = () => { },
   onSelectConversation,
   username,
   visible,
@@ -220,6 +222,26 @@ export function AppMenu({
             <View style={styles.healthCopy}>
               <Text style={styles.healthTitle}>健康看板</Text>
               <Text style={styles.healthHint}>查看近 30 天已保存的手环记录</Text>
+            </View>
+            <AppIcon color={colors.muted} icon={ArrowRight01Icon} size={20} />
+          </Pressable>
+
+          {/* ===== 新增：血糖记录入口 ===== */}
+          <Pressable
+            accessibilityLabel="血糖记录"
+            accessibilityRole="button"
+            onPress={onOpenGlucose}
+            style={({ pressed }) => [
+              styles.healthEntry,
+              pressed && styles.healthEntryPressed,
+            ]}
+          >
+            <View style={styles.healthIcon}>
+              <AppIcon color={colors.primaryPressed} icon={ChartLineData01Icon} size={26} />
+            </View>
+            <View style={styles.healthCopy}>
+              <Text style={styles.healthTitle}>血糖记录</Text>
+              <Text style={styles.healthHint}>记一条血糖，看看近 7 天</Text>
             </View>
             <AppIcon color={colors.muted} icon={ArrowRight01Icon} size={20} />
           </Pressable>
