@@ -8,7 +8,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from antang_api.models import (
-    BEHAVIOR_KINDS,
     HYPOGLYCEMIA_BELIEFS,
     FearBehaviorLog,
     HypoglycemiaBeliefEvent,
