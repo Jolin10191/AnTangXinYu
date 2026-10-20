@@ -24,6 +24,7 @@ from antang_api.agents.proactive_care import (
     extract_proactive_result,
 )
 from antang_api.agents.runtime import AgentContext
+from antang_api.behavioral import read_fear_summary, render_behavior_context
 from antang_api.companion_memory import CompanionMemory
 from antang_api.context import count_input_tokens
 from antang_api.database import (
@@ -518,6 +519,10 @@ class ProactiveCareProcessor:
                 # 主动关怀也要按同一个人的恐惧程度与察觉能力调整说法。
                 "psychosocial_guidance": render_guidance(
                     await read_latest_assessment(session, task.user_id),
+                ),
+                # 否则主动消息不知道「这个人最近每晚查三次血糖」，关怀会踩空。
+                "behavior_context": render_behavior_context(
+                    await read_fear_summary(session, user_id=task.user_id),
                 ),
             }
 
