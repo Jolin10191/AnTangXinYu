@@ -1662,6 +1662,7 @@ export type GlucoseReading = {
   context: string;
   source: string;
   note: string | null;
+  revokedAt: string | null;
   createdAt: string;
 };
 
@@ -1704,6 +1705,7 @@ function glucoseString(source: Record<string, unknown>, key: string): string {
 export function parseGlucoseReading(value: unknown): GlucoseReading {
   const data = glucoseObject(value);
   const note = data.note;
+  const revoked = data.revoked_at;
   return {
     id: glucoseString(data, "id"),
     valueMgDl: glucoseNumber(data, "value_mg_dl"),
@@ -1711,6 +1713,7 @@ export function parseGlucoseReading(value: unknown): GlucoseReading {
     context: glucoseString(data, "context"),
     source: glucoseString(data, "source"),
     note: typeof note === "string" ? note : null,
+    revokedAt: typeof revoked === "string" ? revoked : null,
     createdAt: glucoseString(data, "created_at"),
   };
 }
