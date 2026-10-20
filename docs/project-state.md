@@ -16,13 +16,12 @@
 | 注销账号 / 注册强制知情同意 | 上线 | — |
 | 加密备份（gpg AES256）+ fail2ban | 上线 | 服务器 `systemctl status antang-backup.timer` |
 | 低血糖恐惧四象限 → 主动联系频率（3/4/2/5/3 次每周） | 上线 | `psychosocial_assessments` 表 |
+| 行为通道与信念图谱（`fear_behavior_logs`、`hypoglycemia_belief_events`、`log_fear_behavior` / `record_hypoglycemia_belief` 工具、`GET /health-profile/fear-summary`） | 上线 | 迁移 `n61e6a4f9d82`；对话时自动喂进提示词 |
 | 发布链路（versionCode 单调、固定签名、latest.json、CI 出包） | 上线 | `curl https://<host>/download/latest.json` |
 
 ## 二、代码已合入分支，尚未部署到生产
 
-- 行为通道与信念图谱（`fear_behavior_logs`、`hypoglycemia_belief_events`、两个记录工具、`GET /fear-summary`）。
-  迁移 `n61e6a4f9d82` 尚未在生产库执行 → **部署前必须跑迁移**，否则工具调用会报错。
-- 分支：`feat/live-heart-rate`，PR #9。
+（暂无。分支 `feat/live-heart-rate`，PR #9 仍未合并。）
 
 ## 三、未做（按优先级，含卡点）
 
@@ -30,11 +29,9 @@
 2. **认知重构话术**：卡在临床同事给可接受边界；现在图谱只「记」不「改」。
 3. **分级暴露方案**：卡在需要医生定强度/时长/血糖下限。
 4. **语音输入（方案 A：ASR 侧车 + `/transcribe`，不存音频）**：后端与移动端都没开始。需新增 `RECORD_AUDIO` 权限与新原生依赖 → 必须重打 APK。
-5. **信念图谱进入提示词**：现在模型只能「写」和「查接口」，对话时并不会自动看到「这个人反复提到哪几条信念」。
-6. **红队回归**：上一轮 33/36（2026-10 中旬）。此后改过提示词（cite 字段、否定/转折判定、夜间安抚规则、主动关怀承诺规则），**尚未重跑**，当前分数未知。
-7. **App 内「检查更新」入口**：技术方案已定（读 `latest.json` 比 versionCode），未实现。
-8. **SSH 换强密码并告知组里**：口令登录仍开放。
-
+5. **红队回归**：上一轮 33/36（2026-10 中旬）。此后改过提示词（cite 字段、否定/转折判定、夜间安抚规则、主动关怀承诺规则、行为/信念上下文），**尚未重跑**，当前分数未知。
+6. **App 内「检查更新」入口**：技术方案已定（读 `latest.json` 比 versionCode），未实现。
+7. **SSH 换强密码并告知组里**：口令登录仍开放。
 ## 四、外部依赖（不在我们手里）
 
 - HFS-II / CHFS / PHFS-II / HFS-98 量表授权（HFS-Global，个案审批）→ 到位后才换 `instrument`、才做年龄匹配分流。
