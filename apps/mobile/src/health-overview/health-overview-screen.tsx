@@ -37,6 +37,7 @@ import {
   type PersonalValue,
 } from '../health-profile/health-profile-inputs';
 import { LiveHeartRatePanel } from '../live-heart-rate/LiveHeartRatePanel';
+import { FearBehaviorSection } from '../fear/FearBehaviorSection';
 import { PsychosocialSection } from '../psychosocial/PsychosocialSection';
 import { colors as brandColors, typefaces } from '../ui/theme';
 
@@ -44,6 +45,7 @@ export type HealthOverviewScreenProps = {
   api: Pick<
     ApiClient,
     | 'changeHealthProfile'
+    | 'getFearSummary'
     | 'getHealthProfile'
     | 'getPsychosocialAssessment'
     | 'recordPsychosocialAssessment'
@@ -694,6 +696,8 @@ export function HealthOverviewScreen({
             <LiveHeartRatePanel />
 
             <PsychosocialSection api={api} />
+
+            <FearBehaviorSection api={api} />
 
             <SectionHeader
               description="心率展示最近 6 小时趋势，其他项目为服务器保存的最近观测。"

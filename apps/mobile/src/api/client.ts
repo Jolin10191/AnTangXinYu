@@ -9,6 +9,7 @@ import { consumeChatStream } from './ndjson';
 import {
   parseAuthResult,
   parseAttachmentUpload,
+  parseFearSummary,
   parseHealthProfile,
   parseHealthProfileCardDecision,
   parseHealthProfileChangeResult,
@@ -24,6 +25,7 @@ import {
   readErrorPayload,
   type ChatStreamEvent,
   type ChatAttachment,
+  type FearSummary,
   type HealthProfile,
   type HealthConnectRecordIdsPage,
   type WearableDashboard,
@@ -503,6 +505,16 @@ export class ApiClient {
     if (parsed === null) throw new Error('服务器没有返回沟通方式评估结果');
     return parsed;
   }
+
+  async getFearSummary(signal?: AbortSignal): Promise<FearSummary> {
+    const response = await this.authorizedFetch(
+      '/api/v1/health-profile/fear-summary',
+      { signal },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseFearSummary(await responseJson(response));
+  }
+
   async getWearableDashboard(signal?: AbortSignal): Promise<WearableDashboard> {
     const response = await this.authorizedFetch(
       '/api/v1/health-profile/wearable-dashboard', { signal },

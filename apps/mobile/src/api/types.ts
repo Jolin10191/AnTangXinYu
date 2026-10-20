@@ -1451,6 +1451,132 @@ export function parsePsychosocialProfile(value: unknown): PsychosocialProfile | 
     weeklyContactLimit,
   };
 }
+
+export type FearDiscrepancy =
+  | 'aligned'
+  | 'implicit_higher'
+  | 'explicit_higher'
+  | 'unknown';
+
+export const FEAR_DISCREPANCIES: readonly FearDiscrepancy[] = [
+  'aligned',
+  'implicit_higher',
+  'explicit_higher',
+  'unknown',
+];
+
+/** 信念图里的一个节点在窗口内的观测统计。 */
+export type HypoglycemiaBeliefNode = {
+  beliefCode: string;
+  label: string;
+  mentions: number;
+  reframes: number;
+  denials: number;
+  latestQuote: string;
+  latestDetectedAt: string;
+  resolved: boolean;
+};
+
+/**
+ * 显性分数（量表）与内隐行为代理（聊天里记录的次数）的对照结果。
+ *
+ * `discrepancy` 只表达「两路证据一致不一致」，不是诊断。
+ */
+export type FearSummary = {
+  windowStart: string;
+  windowEnd: string;
+  behaviorCounts: Record<string, number>;
+  behaviorTotal: number;
+  monitoringWeekly: number;
+  avoidanceWeekly: number;
+  beliefs: HypoglycemiaBeliefNode[];
+  assessment: PsychosocialProfile | null;
+  discrepancy: FearDiscrepancy;
+  discrepancyNote: string;
+};
+
+function nonNegativeNumber(value: unknown, name: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw new Error(`${name} 必须是非负数`);
+  }
+  return value;
+}
+
+/** 允许空字符串的文本字段：说明性文案在「没有可比的两路证据」时会是空的。 */
+function textValue(value: unknown, name: string): string {
+  if (typeof value !== 'string') throw new Error(`${name} 必须是字符串`);
+  return value;
+}
+
+function beliefNodes(value: unknown, name: string): HypoglycemiaBeliefNode[] {
+  if (!Array.isArray(value)) throw new Error(`${name} 必须是数组`);
+  return value.map((item, index) => {
+    const label = `${name}[${index}]`;
+    const data = objectValue(item, label);
+    return {
+      beliefCode: stringValue(data.belief_code, `${label}.belief_code`),
+      label: stringValue(data.label, `${label}.label`),
+      mentions: integerValue(data.mentions, `${label}.mentions`),
+      reframes: integerValue(data.reframes, `${label}.reframes`),
+      denials: integerValue(data.denials, `${label}.denials`),
+      latestQuote: stringValue(data.latest_quote, `${label}.latest_quote`),
+      latestDetectedAt: zonedDateTimeValue(
+        data.latest_detected_at,
+        `${label}.latest_detected_at`,
+      ),
+      resolved: booleanValue(data.resolved, `${label}.resolved`),
+    };
+  });
+}
+
+export function parseFearSummary(value: unknown): FearSummary {
+  const data = objectValue(value, 'fear summary');
+  const rawCounts = objectValue(
+    data.behavior_counts,
+    'fear summary.behavior_counts',
+  );
+  const behaviorCounts: Record<string, number> = {};
+  for (const [kind, count] of Object.entries(rawCounts)) {
+    behaviorCounts[kind] = integerValue(
+      count,
+      `fear summary.behavior_counts.${kind}`,
+    );
+  }
+  const discrepancy = stringValue(data.discrepancy, 'fear summary.discrepancy');
+  if (!FEAR_DISCREPANCIES.includes(discrepancy as FearDiscrepancy)) {
+    throw new Error('fear summary.discrepancy 无效');
+  }
+  return {
+    windowStart: zonedDateTimeValue(
+      data.window_start,
+      'fear summary.window_start',
+    ),
+    windowEnd: zonedDateTimeValue(data.window_end, 'fear summary.window_end'),
+    behaviorCounts,
+    behaviorTotal: integerValue(
+      data.behavior_total,
+      'fear summary.behavior_total',
+    ),
+    monitoringWeekly: nonNegativeNumber(
+      data.monitoring_weekly,
+      'fear summary.monitoring_weekly',
+    ),
+    avoidanceWeekly: nonNegativeNumber(
+      data.avoidance_weekly,
+      'fear summary.avoidance_weekly',
+    ),
+    beliefs: beliefNodes(data.beliefs, 'fear summary.beliefs'),
+    assessment:
+      data.assessment === undefined || data.assessment === null
+        ? null
+        : parsePsychosocialProfile(data.assessment),
+    discrepancy: discrepancy as FearDiscrepancy,
+    discrepancyNote: textValue(
+      data.discrepancy_note,
+      'fear summary.discrepancy_note',
+    ),
+  };
+}
 export function parseChatStreamEvent(value: unknown): ChatStreamEvent {
   const data = objectValue(value, 'stream event');
   const type = stringValue(data.type, 'stream event.type');

@@ -10,9 +10,25 @@ import {
 import { act, create } from 'react-test-renderer';
 
 import { ApiError, type ApiClient } from '../api/client';
-import type { HealthProfile } from '../api/types';
+import type { FearSummary, HealthProfile } from '../api/types';
 import { LiveHeartRateProvider } from '../live-heart-rate/LiveHeartRateProvider';
 import { HealthOverviewScreen, sourceLabel } from './health-overview-screen';
+
+/** 档案页里的「行为记录」卡片默认是空记录，避免每个用例都要写一份。 */
+function emptyFearSummary(): FearSummary {
+  return {
+    windowStart: '2026-10-03T09:00:00+08:00',
+    windowEnd: '2026-10-31T09:00:00+08:00',
+    behaviorCounts: {},
+    behaviorTotal: 0,
+    monitoringWeekly: 0,
+    avoidanceWeekly: 0,
+    beliefs: [],
+    assessment: null,
+    discrepancy: 'unknown',
+    discrepancyNote: '',
+  };
+}
 
 /** 档案页里的实时心率卡片从共享 Provider 取 controller，渲染时补上这层 Provider。 */
 function screenElement(element: ReactElement) {
@@ -127,6 +143,7 @@ describe('HealthOverviewScreen', () => {
   test('renders only real profile and wearable values with non-real-time context', async () => {
     const api = {
       getHealthProfile: jest.fn().mockResolvedValue(profile),
+      getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
@@ -183,6 +200,7 @@ describe('HealthOverviewScreen', () => {
   test('gives each empty section an honest next step', async () => {
     const api = {
       getHealthProfile: jest.fn().mockResolvedValue(emptyProfile),
+      getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
@@ -233,6 +251,7 @@ describe('HealthOverviewScreen', () => {
         .fn()
         .mockResolvedValueOnce(profile)
         .mockResolvedValueOnce(refreshedProfile),
+      getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
@@ -298,6 +317,7 @@ describe('HealthOverviewScreen', () => {
     };
     const api = {
       getHealthProfile: jest.fn().mockResolvedValueOnce(stale).mockResolvedValueOnce(current),
+      getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
@@ -334,6 +354,7 @@ describe('HealthOverviewScreen', () => {
   test('shows a Health Connect sync error instead of reloading stale readings', async () => {
     const api = {
       getHealthProfile: jest.fn().mockResolvedValue(profile),
+      getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
@@ -362,6 +383,7 @@ describe('HealthOverviewScreen', () => {
         .fn()
         .mockRejectedValueOnce(new Error('网络暂时不可用'))
         .mockResolvedValueOnce(emptyProfile),
+      getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
@@ -411,6 +433,7 @@ describe('HealthOverviewScreen', () => {
           },
         }),
       changeHealthProfile: jest.fn().mockResolvedValue({ status: 'applied' }),
+      getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
@@ -485,6 +508,7 @@ describe('HealthOverviewScreen', () => {
         .mockResolvedValueOnce(editedAllergy)
         .mockResolvedValueOnce(emptyProfile),
       changeHealthProfile: jest.fn().mockResolvedValue({ status: 'applied' }),
+      getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
@@ -589,6 +613,7 @@ describe('HealthOverviewScreen', () => {
           new ApiError('档案版本冲突', 409, 'health_profile_changed'),
         )
         .mockResolvedValueOnce({ status: 'applied' }),
+      getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
@@ -653,6 +678,7 @@ describe('HealthOverviewScreen', () => {
         .mockRejectedValueOnce(new Error('刷新连接中断'))
         .mockResolvedValueOnce(savedProfile),
       changeHealthProfile: jest.fn().mockResolvedValue({ status: 'applied' }),
+      getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
@@ -720,6 +746,7 @@ describe('HealthOverviewScreen', () => {
         .mockResolvedValueOnce(emptyProfile)
         .mockResolvedValueOnce({ ...emptyProfile, healthFacts: [allergy] }),
       changeHealthProfile,
+      getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
@@ -783,6 +810,7 @@ describe('HealthOverviewScreen', () => {
         .mockResolvedValueOnce(refreshed)
         .mockResolvedValueOnce(saved),
       changeHealthProfile,
+      getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
