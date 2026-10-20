@@ -10,6 +10,9 @@ import {
   parseAuthResult,
   parseAttachmentUpload,
   parseFearSummary,
+  parseGlucoseReading,
+  parseGlucoseReadings,
+  parseGlucoseSummary,
   parseHealthProfile,
   parseHealthProfileCardDecision,
   parseHealthProfileChangeResult,
@@ -26,6 +29,8 @@ import {
   type ChatStreamEvent,
   type ChatAttachment,
   type FearSummary,
+  type GlucoseReading,
+  type GlucoseSummary,
   type HealthProfile,
   type HealthConnectRecordIdsPage,
   type WearableDashboard,
@@ -718,5 +723,54 @@ export class ApiClient {
     );
 
     await this.consumeChatResponse(response, onEvent);
+  }
+
+  async createGlucoseReading(input: {
+    valueMgDl: number;
+    measuredAt: string;
+    context: string;
+    note?: string | null;
+  }): Promise<GlucoseReading> {
+    const response = await this.authorizedFetch(
+      "/api/v1/health-profile/glucose-readings",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          value_mg_dl: input.valueMgDl,
+          measured_at: input.measuredAt,
+          context: input.context,
+          note: input.note ?? null,
+        }),
+      },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseGlucoseReading(await responseJson(response));
+  }
+
+  async getGlucoseReadings(days = 14, signal?: AbortSignal): Promise<GlucoseReading[]> {
+    const response = await this.authorizedFetch(
+      `/api/v1/health-profile/glucose-readings?days=${days}`,
+      { signal },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseGlucoseReadings(await responseJson(response));
+  }
+
+  async getGlucoseSummary(days = 7, signal?: AbortSignal): Promise<GlucoseSummary> {
+    const response = await this.authorizedFetch(
+      `/api/v1/health-profile/glucose-readings/summary?days=${days}`,
+      { signal },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseGlucoseSummary(await responseJson(response));
+  }
+
+  async revokeGlucoseReading(id: string): Promise<void> {
+    const response = await this.authorizedFetch(
+      `/api/v1/health-profile/glucose-readings/${id}`,
+      { method: "DELETE" },
+    );
+    if (!response.ok) throw await this.apiError(response);
   }
 }

@@ -1655,3 +1655,79 @@ export function readErrorPayload(value: unknown): {
             : undefined,
   };
 }
+export type GlucoseReading = {
+  id: string;
+  valueMgDl: number;
+  measuredAt: string;
+  context: string;
+  source: string;
+  note: string | null;
+  createdAt: string;
+};
+
+export type GlucoseSummary = {
+  days: number;
+  count: number;
+  averageMgDl: number | null;
+  minimumMgDl: number | null;
+  maximumMgDl: number | null;
+  below70Count: number;
+};
+
+function glucoseObject(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("血糖数据格式不正确");
+  }
+  return value as Record<string, unknown>;
+}
+
+function glucoseNumber(source: Record<string, unknown>, key: string): number {
+  const value = source[key];
+  if (typeof value !== "number") throw new Error(`血糖数据缺少 ${key}`);
+  return value;
+}
+
+function glucoseNullableNumber(
+  source: Record<string, unknown>,
+  key: string,
+): number | null {
+  const value = source[key];
+  return typeof value === "number" ? value : null;
+}
+
+function glucoseString(source: Record<string, unknown>, key: string): string {
+  const value = source[key];
+  if (typeof value !== "string") throw new Error(`血糖数据缺少 ${key}`);
+  return value;
+}
+
+export function parseGlucoseReading(value: unknown): GlucoseReading {
+  const data = glucoseObject(value);
+  const note = data.note;
+  return {
+    id: glucoseString(data, "id"),
+    valueMgDl: glucoseNumber(data, "value_mg_dl"),
+    measuredAt: glucoseString(data, "measured_at"),
+    context: glucoseString(data, "context"),
+    source: glucoseString(data, "source"),
+    note: typeof note === "string" ? note : null,
+    createdAt: glucoseString(data, "created_at"),
+  };
+}
+
+export function parseGlucoseReadings(value: unknown): GlucoseReading[] {
+  if (!Array.isArray(value)) throw new Error("血糖列表格式不正确");
+  return value.map(parseGlucoseReading);
+}
+
+export function parseGlucoseSummary(value: unknown): GlucoseSummary {
+  const data = glucoseObject(value);
+  return {
+    days: glucoseNumber(data, "days"),
+    count: glucoseNumber(data, "count"),
+    averageMgDl: glucoseNullableNumber(data, "average_mg_dl"),
+    minimumMgDl: glucoseNullableNumber(data, "minimum_mg_dl"),
+    maximumMgDl: glucoseNullableNumber(data, "maximum_mg_dl"),
+    below70Count: glucoseNumber(data, "below_70_count"),
+  };
+}
