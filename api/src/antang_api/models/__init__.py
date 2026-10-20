@@ -6,6 +6,7 @@ from antang_api.models.behavior import (
     FearBehaviorLog,
     HypoglycemiaBeliefEvent,
 )
+from antang_api.models.glucose import GLUCOSE_CONTEXTS, GLUCOSE_SOURCES, GlucoseReading
 from antang_api.models.chat import (
     AgentRun,
     AgentRunStatus,
@@ -63,6 +64,9 @@ __all__ = [
     "BEHAVIOR_KINDS",
     "BELIEF_OCCURRENCES",
     "FearBehaviorLog",
+    "GLUCOSE_CONTEXTS",
+    "GLUCOSE_SOURCES",
+    "GlucoseReading",
     "HYPOGLYCEMIA_BELIEFS",
     "HypoglycemiaBeliefEvent",
     "LoginSession",

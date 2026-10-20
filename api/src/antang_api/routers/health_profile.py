@@ -9,6 +9,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from antang_api.behavioral import read_fear_summary
 from antang_api.database import get_session
+from antang_api.health_profile.glucose import (
+    list_glucose_readings,
+    record_glucose_reading,
+    revoke_glucose_reading,
+    summarize_glucose,
+)
+from antang_api.schemas.glucose import (
+    GlucoseReadingCreate,
+    GlucoseReadingResponse,
+    GlucoseSummaryResponse,
+)
 from antang_api.health_profile.errors import (
     HealthProfileChangedError,
     HealthProfileInvariantError,
@@ -498,3 +509,67 @@ async def get_fear_summary(
         discrepancy=summary.discrepancy,
         discrepancy_note=summary.discrepancy_note,
     )
+
+
+@router.post(
+    "/glucose-readings",
+    response_model=GlucoseReadingResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_glucose_reading(
+    payload: GlucoseReadingCreate,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> GlucoseReadingResponse:
+    """录入一条血糖读数。患者手工填写，报告解析将来也走这里。"""
+
+    reading = await record_glucose_reading(
+        session,
+        user_id=user.id,
+        value_mg_dl=payload.value_mg_dl,
+        measured_at=payload.measured_at,
+        context=payload.context,
+        note=payload.note,
+    )
+    await session.commit()
+    return GlucoseReadingResponse.model_validate(reading)
+
+
+@router.get("/glucose-readings", response_model=list[GlucoseReadingResponse])
+async def get_glucose_readings(
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    days: Annotated[int, Query(ge=1, le=90)] = 14,
+) -> list[GlucoseReadingResponse]:
+    """按时间倒序返回最近的读数，已撤回的不返回。"""
+
+    readings = await list_glucose_readings(session, user_id=user.id, days=days)
+    return [GlucoseReadingResponse.model_validate(item) for item in readings]
+
+
+@router.get("/glucose-readings/summary", response_model=GlucoseSummaryResponse)
+async def get_glucose_summary(
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    days: Annotated[int, Query(ge=1, le=90)] = 7,
+) -> GlucoseSummaryResponse:
+    """窗口内的读数统计，供界面展示条数与区间。"""
+
+    summary = await summarize_glucose(session, user_id=user.id, days=days)
+    return GlucoseSummaryResponse.model_validate(summary)
+
+
+@router.delete("/glucose-readings/{reading_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_glucose_reading(
+    reading_id: UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    """撤回一条读数：数据不再被读取，但保留"记录过又撤回"这个事实。"""
+
+    revoked = await revoke_glucose_reading(
+        session, user_id=user.id, reading_id=reading_id
+    )
+    if revoked is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="没有这条血糖记录")
+    await session.commit()
