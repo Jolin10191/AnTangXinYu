@@ -13,10 +13,35 @@ from antang_api.knowledge import KnowledgeMatch, search_knowledge
 
 MAX_KNOWLEDGE_TOOL_RESULT_CHARS = 6_000
 MAX_KNOWLEDGE_CHUNK_CHARS = 700
+# 给「还有几条没展示」这句说明留出空间，免得裁剪后反而超出上限。
+RESULT_NOTE_RESERVE_CHARS = 200
 
 
-class KnowledgeToolResultTooLargeError(RuntimeError):
-    """知识库检索结果超过固定上限；正常参数下不会触发。"""
+def _encoded_length(payload: dict[str, object]) -> int:
+    return len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+
+
+def _fit_within_limit(query: str, rendered: list[dict[str, object]]) -> dict[str, object]:
+    """按相关度顺序保留能放进上限的片段，并说明还有几条被省略。
+
+    上限是固定的，超了就丢掉排后面的片段而不是让整轮对话失败：检索工具
+    返回几条都能用，失败一次却会让用户拿不到任何回答。
+    """
+
+    kept: list[dict[str, object]] = []
+    for item in rendered:
+        trial = {"query": query, "results": [*kept, item]}
+        if _encoded_length(trial) > MAX_KNOWLEDGE_TOOL_RESULT_CHARS - RESULT_NOTE_RESERVE_CHARS:
+            break
+        kept.append(item)
+
+    payload: dict[str, object] = {"query": query, "results": kept}
+    dropped = len(rendered) - len(kept)
+    if not kept:
+        payload["note"] = "知识库没有返回能在长度上限内展示的片段，请换一个更具体的问题。"
+    elif dropped:
+        payload["note"] = f"只展示相关度最高的 {len(kept)} 条，另有 {dropped} 条因长度上限未展示。"
+    return payload
 
 
 class KnowledgeSearchRequest(BaseModel):
@@ -86,18 +111,12 @@ def build_knowledge_search_tool(
                 top_k=request.top_k,
             )
 
-        payload: dict[str, object] = {
-            "query": request.query,
-            "results": [_render_match(match) for match in matches],
-        }
+        payload = _fit_within_limit(
+            request.query,
+            [_render_match(match) for match in matches],
+        )
         if not matches:
             payload["note"] = "知识库没有检索到足够相关的片段。"
-
-        encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-        if len(encoded) > MAX_KNOWLEDGE_TOOL_RESULT_CHARS:
-            raise KnowledgeToolResultTooLargeError(
-                "知识库检索结果超过固定上限，请缩小问题范围或减少片段数量"
-            )
         return payload
 
     return search_diabetes_knowledge

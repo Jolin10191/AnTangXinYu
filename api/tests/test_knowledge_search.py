@@ -14,7 +14,10 @@ from antang_api.models import KnowledgeChunk, KnowledgeDocument
 from antang_api.settings import settings
 from antang_api.tools.knowledge import (
     MAX_KNOWLEDGE_CHUNK_CHARS,
+    MAX_KNOWLEDGE_TOOL_RESULT_CHARS,
     KnowledgeSearchRequest,
+    _encoded_length,
+    _fit_within_limit,
     build_knowledge_search_tool,
 )
 
@@ -328,3 +331,24 @@ def test_embedding_settings_can_use_a_separate_provider(monkeypatch: pytest.Monk
 
     assert settings.knowledge_embedding_openai_base_url == "http://embeddings:9000/v1"
     assert settings.resolved_knowledge_embedding_api_key == "local-key"
+
+
+def test_oversized_results_are_trimmed_instead_of_failing() -> None:
+    rendered = [
+        {
+            "title": "中国1型糖尿病诊治指南（2021版）",
+            "page": index,
+            "page_kind": "printed",
+            "text": "血糖目标" * 100,
+            "cite": f"（《中国1型糖尿病诊治指南（2021版）》第 {index} 页）",
+        }
+        for index in range(20)
+    ]
+
+    payload = _fit_within_limit("睡前血糖目标", rendered)
+
+    kept = payload["results"]
+    assert isinstance(kept, list)
+    assert 0 < len(kept) < len(rendered)
+    assert "未展示" in str(payload["note"])
+    assert _encoded_length(payload) <= MAX_KNOWLEDGE_TOOL_RESULT_CHARS
