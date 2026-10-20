@@ -72,6 +72,7 @@ def render_core_system_prompt(
     current_time_context: str = "",
     live_heart_rate_context: str = "",
     psychosocial_context: str = "",
+    behavior_context: str = "",
 ) -> str:
     """把服务器筛选过的用户上下文附在稳定提示词之后。"""
 
@@ -90,6 +91,9 @@ def render_core_system_prompt(
     if psychosocial_context.strip():
         # 这一段决定「怎么说」，不是「说什么」；它是内部指令，不要原样复述给用户。
         rendered_prompt = f"{rendered_prompt}\n\n{psychosocial_context}"
+    if behavior_context.strip():
+        # 行为与信念同样是内部依据：用于决定追问什么，不是给用户看的统计报表。
+        rendered_prompt = f"{rendered_prompt}\n\n{behavior_context}"
     if live_heart_rate_context.strip():
         rendered_prompt = (
             f"{rendered_prompt}\n\n"

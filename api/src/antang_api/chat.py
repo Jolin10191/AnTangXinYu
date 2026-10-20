@@ -62,6 +62,7 @@ from antang_api.schemas.chat import (
 )
 from antang_api.proactive_care.service import record_user_activity
 from antang_api.psychosocial import read_latest_assessment, render_guidance
+from antang_api.behavioral import read_fear_summary, render_behavior_context
 from antang_api.settings import settings
 
 
@@ -589,6 +590,10 @@ async def stream_chat_run(
         psychosocial_context = render_guidance(
             await read_latest_assessment(session, user_id),
         )
+        # 行为与信念是「这个人实际做了什么、相信什么」，用来决定追问方向。
+        behavior_context = render_behavior_context(
+            await read_fear_summary(session, user_id=user_id, days=28),
+        )
         companion_memory_context = await companion_memory.prepare_context(
             session,
             user_id,
@@ -649,6 +654,7 @@ async def stream_chat_run(
             current_time_context=current_time_context,
             live_heart_rate_context=live_heart_rate_context,
             psychosocial_context=psychosocial_context,
+            behavior_context=behavior_context,
         )
 
         prepared_context = await prepare_chat_context(

@@ -5,7 +5,12 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from antang_api.behavioral import read_fear_summary, record_behavior, record_belief
+from antang_api.behavioral import (
+    read_fear_summary,
+    record_behavior,
+    record_belief,
+    render_behavior_context,
+)
 from antang_api.models import PsychosocialAssessment, User
 from antang_api.tools.behavior import BeliefRequest, FearBehaviorRequest
 
@@ -153,6 +158,56 @@ async def test_belief_events_become_a_node_and_track_resolution(
     assert second.beliefs[0].reframes == 1
     assert second.beliefs[0].resolved is True
     assert second.beliefs[0].label == "低血糖会让我昏迷、没人发现"
+
+
+async def test_behavior_context_is_empty_without_records(
+    db_session: AsyncSession,
+) -> None:
+    user = await _user(db_session, "empty-context")
+    summary = await read_fear_summary(db_session, user_id=user.id, days=28, now=NOW)
+    assert render_behavior_context(summary) == ""
+
+
+async def test_behavior_context_names_beliefs_and_forbids_reporting_counts(
+    db_session: AsyncSession,
+) -> None:
+    user = await _user(db_session, "context")
+    await _assessment(
+        db_session,
+        user=user,
+        fear_behavior_percent=10,
+        fear_worry_percent=12,
+    )
+    record_behavior(
+        db_session,
+        user_id=user.id,
+        kind="exercise_avoidance",
+        occurred_at=NOW - timedelta(days=2),
+    )
+    record_behavior(
+        db_session,
+        user_id=user.id,
+        kind="exercise_avoidance",
+        occurred_at=NOW - timedelta(days=1),
+    )
+    record_belief(
+        db_session,
+        user_id=user.id,
+        belief_code="hypo_causes_coma",
+        quote="我怕运动完半夜低血糖昏迷",
+        detected_at=NOW - timedelta(days=3),
+    )
+    await db_session.flush()
+
+    context = render_behavior_context(
+        await read_fear_summary(db_session, user_id=user.id, days=7, now=NOW),
+    )
+
+    assert "运动回避 2 次" in context
+    assert "低血糖会让我昏迷、没人发现" in context
+    # 两路证据不一致时要提示，但不能让模型把次数复述给用户。
+    assert "两路证据不一致" in context
+    assert "不要在回复里报这些次数" in context
 
 
 async def test_beliefs_and_behaviors_do_not_leak_between_users(

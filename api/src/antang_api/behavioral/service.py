@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from antang_api.models import (
+    BEHAVIOR_KINDS,
     HYPOGLYCEMIA_BELIEFS,
     FearBehaviorLog,
     HypoglycemiaBeliefEvent,
@@ -222,6 +223,63 @@ async def read_fear_summary(
         discrepancy=discrepancy,
         discrepancy_note=note,
     )
+
+
+_BEHAVIOR_KIND_LABELS = {
+    "extra_check": "额外多测了一次血糖",
+    "night_check": "夜间反复确认血糖",
+    "comfort_meal": "因为担心而加餐",
+    "exercise_avoidance": "运动回避",
+    "insulin_hold": "自行减少胰岛素",
+}
+
+
+def render_behavior_context(summary: FearSummary) -> str:
+    """把窗口内的行为与信念压成一段内部提示，供对话侧使用。
+
+    三条约定的理由：
+    - 只写次数与用户原话，不写「该用户恐惧程度高」这类判断——判断不是这个系统的输出；
+    - 信念最多列三条，按提及次数降序、未松动的优先，避免长期占据上下文；
+    - 明确禁止在回复里复述这些数字，否则行为监测本身会变成新的焦虑来源。
+    """
+
+    if summary.behavior_total == 0 and not summary.beliefs:
+        return ""
+
+    lines = ["[近期行为与低血糖信念]", "以下是服务器统计的最近记录，只用于决定问什么、怎么问。"]
+
+    counted = [
+        (kind, count) for kind, count in summary.behavior_counts.items() if count > 0
+    ]
+    if counted:
+        detail = "、".join(
+            f"{_BEHAVIOR_KIND_LABELS.get(kind, kind)} {count} 次" for kind, count in counted
+        )
+        lines.append(f"近 {_window_days(summary)} 天记录到的行为：{detail}。")
+
+    active = [node for node in summary.beliefs if not node.resolved][:3]
+    if active:
+        lines.append("反复出现、还没松动的信念：")
+        lines.extend(f"- {node.label}（提到 {node.mentions} 次）" for node in active)
+
+    resolved = [node for node in summary.beliefs if node.resolved][:3]
+    if resolved:
+        labels = "、".join(node.label for node in resolved)
+        lines.append(f"已经松动或用户否认过的信念：{labels}。这些不要再当成仍然成立的前提。")
+
+    if summary.discrepancy in {"implicit_higher", "explicit_higher"}:
+        lines.append(f"两路证据不一致：{summary.discrepancy_note}")
+
+    lines.append(
+        "约束：不要在回复里报这些次数，也不要说「你在回避」；"
+        "先问清当时的情境，再把要不要调整交给用户决定。"
+    )
+    return "\n".join(lines)
+
+
+def _window_days(summary: FearSummary) -> int:
+    span = summary.window_end - summary.window_start
+    return max(1, round(span.total_seconds() / 86400))
 
 
 def _judge_discrepancy(

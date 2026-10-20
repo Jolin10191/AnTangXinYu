@@ -7,6 +7,7 @@ from antang_api.behavioral.service import (
     read_fear_summary,
     record_behavior,
     record_belief,
+    render_behavior_context,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "read_fear_summary",
     "record_behavior",
     "record_belief",
+    "render_behavior_context",
 ]
