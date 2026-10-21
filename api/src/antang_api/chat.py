@@ -24,7 +24,7 @@ from antang_api.agents.core import (
     CoreAgentGraph,
     render_core_system_prompt,
 )
-from antang_api.agents.promises import unbacked_promise
+from antang_api.agents.promises import promise_target, unbacked_promise
 from antang_api.agents.runtime import AgentContext, ToolActivity
 from antang_api.citations import (
     VISIBLE_TURN_SEPARATOR,
@@ -461,7 +461,13 @@ async def _complete_chat_run(
         ).scalars()
     )
     if unbacked_promise(content, tool_names):
-        logger.warning("助手承诺了主动联系但这一轮没有调用计划工具")
+        # 把承诺的时刻一并记下来：凌晨说的「明天十点」按用户的口径算，
+        # 否则事后排查时只看到「承诺过」，看不出它到底该在哪一刻发生。
+        target = promise_target(content, now=now)
+        logger.warning(
+            "助手承诺了主动联系但这一轮没有调用计划工具（承诺时刻=%s）",
+            target.isoformat() if target is not None else "无法解析",
+        )
 
     await session.commit()
 
