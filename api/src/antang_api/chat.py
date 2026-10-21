@@ -25,6 +25,7 @@ from antang_api.agents.core import (
     render_core_system_prompt,
 )
 from antang_api.agents.promises import promise_target, unbacked_promise
+from antang_api.agents.relative_day import describe_today
 from antang_api.agents.runtime import AgentContext, ToolActivity
 from antang_api.citations import (
     VISIBLE_TURN_SEPARATOR,
@@ -599,6 +600,13 @@ async def stream_chat_run(
         # 行为与信念是「这个人实际做了什么、相信什么」，用来决定追问方向。
         behavior_context = render_behavior_context(
             await read_fear_summary(session, user_id=user_id, days=28),
+        )
+        # 日期口径必须显式告诉模型：凌晨一点说的「明天」是用户口中的明天，
+        # 不是日历上的次日，否则承诺的回访会晚一整天。
+        behavior_context = "\n".join(
+            part
+            for part in (describe_today(datetime.now(UTC)), behavior_context)
+            if part
         )
         companion_memory_context = await companion_memory.prepare_context(
             session,
