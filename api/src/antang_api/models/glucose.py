@@ -58,6 +58,11 @@ class GlucoseReading(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None
     )
+    # 复盘只打一次标记：同一次低血糖问第二遍比不问更伤人，
+    # 而这个时间戳也让"问过没有"成为可查的事实，不靠记忆。
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

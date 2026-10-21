@@ -121,3 +121,41 @@ async def summarize_glucose(
         "maximum_mg_dl": int(row[3]) if row[3] is not None else None,
         "below_70_count": int(row[4] or 0),
     }
+
+
+async def pending_hypo_review(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+    now: datetime,
+    low_mg_dl: int = 70,
+    window: timedelta = timedelta(hours=24),
+) -> GlucoseReading | None:
+    """找出还在复盘窗口里、且没问过的那一条偏低记录。
+
+    只取最近一条：同一次事件问第二遍比不问更伤人，两条记录连着问更像审问。
+    """
+
+    statement = (
+        select(GlucoseReading)
+        .where(
+            GlucoseReading.user_id == user_id,
+            GlucoseReading.revoked_at.is_(None),
+            GlucoseReading.reviewed_at.is_(None),
+            GlucoseReading.value_mg_dl < low_mg_dl,
+            GlucoseReading.measured_at >= now - window,
+            GlucoseReading.measured_at <= now,
+        )
+        .order_by(GlucoseReading.measured_at.desc())
+        .limit(1)
+    )
+    return await session.scalar(statement)
+
+
+async def mark_hypo_reviewed(
+    session: AsyncSession, *, reading: GlucoseReading, now: datetime
+) -> None:
+    """标记这次偏低已经复盘过，避免反复追问。"""
+
+    reading.reviewed_at = now
+    await session.commit()
