@@ -15,6 +15,7 @@ from antang_api.models import (
 )
 from antang_api.psychosocial import FEAR_HIGH_PERCENT, PsychosocialProfile
 from antang_api.psychosocial import read_latest_assessment_row
+from antang_api.psychosocial.reframes import render_reframe_hint
 
 # 回避类行为：直接缩小生活范围。过度监测（反复检查、夜间确认）单独统计，
 # 因为它表达的是担忧而不是回避，两者在临床上不是一回事。
@@ -266,6 +267,12 @@ def render_behavior_context(summary: FearSummary) -> str:
     if resolved:
         labels = "、".join(node.label for node in resolved)
         lines.append(f"已经松动或用户否认过的信念：{labels}。这些不要再当成仍然成立的前提。")
+
+    repeated = [node for node in active if node.mentions >= 2]
+    if repeated:
+        hint = render_reframe_hint(repeated[0].belief_code, repeated[0].label)
+        if hint:
+            lines.append(hint)
 
     if summary.discrepancy in {"implicit_higher", "explicit_higher"}:
         lines.append(f"两路证据不一致：{summary.discrepancy_note}")

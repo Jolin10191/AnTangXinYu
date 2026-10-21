@@ -6,6 +6,8 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from antang_api.behavioral import (
+    BeliefNode,
+    FearSummary,
     read_fear_summary,
     record_behavior,
     record_belief,
@@ -256,3 +258,43 @@ def test_belief_request_rejects_unknown_code() -> None:
 def test_belief_request_rejects_empty_quote() -> None:
     with pytest.raises(ValidationError):
         BeliefRequest.model_validate({"belief_code": "hypo_is_fault", "quote": ""})
+
+def _summary_with(mentions: int) -> FearSummary:
+    now = datetime(2026, 10, 20, 12, tzinfo=timezone.utc)
+    return FearSummary(
+        window_start=now - timedelta(days=28),
+        window_end=now,
+        behavior_counts={"extra_check": 3},
+        behavior_total=3,
+        monitoring_weekly=0.75,
+        avoidance_weekly=0.0,
+        beliefs=[
+            BeliefNode(
+                belief_code="hypo_causes_coma",
+                label="低血糖会让我昏迷、没人发现",
+                mentions=mentions,
+                reframes=0,
+                denials=0,
+                latest_quote="总怕半夜低血糖昏过去没人知道",
+                latest_detected_at=now,
+            )
+        ],
+        discrepancy="unknown",
+        discrepancy_note="",
+        assessment=None,
+        assessment_row=None,
+    )
+
+
+def test_repeated_belief_comes_with_one_question() -> None:
+    rendered = render_behavior_context(_summary_with(3))
+
+    assert "[可以试着这样问]" in rendered
+    assert "夜里一个人睡" in rendered
+    assert rendered.count("先只问一句") == 1
+
+
+def test_single_mention_does_not_trigger_a_question() -> None:
+    rendered = render_behavior_context(_summary_with(1))
+
+    assert "[可以试着这样问]" not in rendered
