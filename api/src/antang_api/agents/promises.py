@@ -12,12 +12,16 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 
+from antang_api.agents.relative_day import resolve_relative_day
 from antang_api.tools.care_plan import CARE_PLAN_TOOL_NAME
 
 __all__ = [
     "CARE_PLAN_TOOL_NAME",
+    "CLOCK_PATTERN",
     "PROMISE_PATTERN",
+    "promise_target",
     "promises_follow_up",
     "unbacked_promise",
 ]
@@ -41,3 +45,89 @@ def unbacked_promise(text: str, tool_names: set[str] | list[str]) -> bool:
     if not promises_follow_up(text):
         return False
     return CARE_PLAN_TOOL_NAME not in set(tool_names)
+
+
+# 「十点 / 10 点 / 22:30 / 晚上八点」这类时刻说法。
+CLOCK_PATTERN = re.compile(
+    r"(?:(上午|下午|早上|明早|今晚|晚上|夜里|凌晨)\s*)?"
+    r"([0-9]{1,2}|[一二两三四五六七八九十]{1,3})"
+    r"\s*(?:[:：]\s*([0-9]{2})|点(?:半|([0-9]{1,2})分?)?)"
+)
+
+_CN_DIGITS = {
+    "一": 1,
+    "二": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+    "十": 10,
+}
+
+
+def _cn_number(token: str) -> int | None:
+    if token.isdigit():
+        return int(token)
+    if token in _CN_DIGITS:
+        return _CN_DIGITS[token]
+    if token.startswith("十") and len(token) == 2 and token[1] in _CN_DIGITS:
+        return 10 + _CN_DIGITS[token[1]]
+    if token.endswith("十") and len(token) == 2 and token[0] in _CN_DIGITS:
+        return _CN_DIGITS[token[0]] * 10
+    return None
+
+
+def promise_target(
+    text: str, *, now: datetime
+) -> datetime | None:
+    """把「明天十点来找你」换算成具体时刻。
+
+    关键在「明天」按用户口中的明天算：凌晨一点说的明天是天亮以后那一天。
+    算不出来、或者时刻已经过去，返回 None——守卫只对确定的情况告警。
+    """
+
+    promise = PROMISE_PATTERN.search(text)
+    if promise is None:
+        return None
+
+    clock = CLOCK_PATTERN.search(text[: promise.start()] or text)
+    if clock is None:
+        clock = CLOCK_PATTERN.search(text[promise.start() :])
+    if clock is None:
+        return None
+
+    hour = _cn_number(clock.group(2))
+    if hour is None:
+        return None
+
+    minute = 0
+    if clock.group(3):
+        minute = int(clock.group(3))
+    elif clock.group(4):
+        minute = int(clock.group(4))
+    elif clock.group(0).endswith("半"):
+        minute = 30
+
+    marker = clock.group(1) or ""
+    if marker in {"下午", "晚上", "今晚", "夜里"} and hour < 12:
+        hour += 12
+    if marker == "凌晨" and hour >= 12:
+        hour -= 12
+
+    offset_days = 1 if ("明天" in text or "明早" in text) else 0
+    if offset_days == 0 and marker in {"今晚", "明早"}:
+        offset_days = 1
+
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None
+
+    resolved = resolve_relative_day(
+        now, offset_days=offset_days, offset_seconds=hour * 3600 + minute * 60
+    )
+    if resolved <= now:
+        return None
+    return resolved
