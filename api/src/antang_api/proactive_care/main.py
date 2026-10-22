@@ -58,6 +58,8 @@ async def run_worker() -> None:
                         retain_user_turns=settings.hindsight_retain_user_turns,
                         recall_budget=settings.hindsight_recall_budget,
                         recall_max_tokens=settings.hindsight_recall_max_tokens,
+                        recall_timeout_seconds=settings.hindsight_recall_timeout_seconds,
+                        retain_timeout_seconds=settings.hindsight_retain_timeout_seconds,
                     ),
                     token_model=model,
                     model_name=settings.resolved_proactive_model_name,

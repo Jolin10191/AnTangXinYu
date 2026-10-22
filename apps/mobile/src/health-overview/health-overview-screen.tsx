@@ -45,6 +45,10 @@ export type HealthOverviewScreenProps = {
   api: Pick<
     ApiClient,
     | 'changeHealthProfile'
+    | 'deleteBeliefEvent'
+    | 'deleteFearBehaviorLog'
+    | 'getBeliefEvents'
+    | 'getFearBehaviorLogs'
     | 'getFearSummary'
     | 'getHealthProfile'
     | 'getPsychosocialAssessment'

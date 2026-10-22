@@ -6,10 +6,6 @@ import { consumeChatStream } from "./ndjson";
 import {
   parseAuthResult,
   parseAttachmentUpload,
-  parseFearSummary,
-  parseGlucoseReading,
-  parseGlucoseReadings,
-  parseGlucoseSummary,
   parseHealthProfile,
   parseHealthProfileCardDecision,
   parseHealthProfileChangeResult,
@@ -18,16 +14,12 @@ import {
   parseWearableDashboard,
   parseMessageHistory,
   parseProactiveCareSettings,
-  parsePsychosocialProfile,
   parseTokenPair,
   parseUser,
   parseWearableImportResponse,
   readErrorPayload,
   type ChatStreamEvent,
   type ChatAttachment,
-  type FearSummary,
-  type GlucoseReading,
-  type GlucoseSummary,
   type HealthProfile,
   type HealthConnectRecordIdsPage,
   type WearableDashboard,
@@ -38,8 +30,6 @@ import {
   type HealthProfileChangeResult,
   type MessageHistory,
   type ProactiveCareSettings,
-  type PsychosocialAssessmentInput,
-  type PsychosocialProfile,
   type TokenPair,
   type User,
   type WearableImportResponse,
@@ -53,6 +43,21 @@ import {
   parseUserOverview,
   type ApplicationStatus,
   type RegistrationOptions,
+  type PsychosocialProfile,
+  parsePsychosocialProfile,
+  type PsychosocialAssessmentInput,
+  type FearSummary,
+  parseFearSummary,
+  type FearBehaviorLog,
+  parseFearBehaviorLogs,
+  type BeliefEventRecord,
+  parseBeliefEvents,
+  parseTranscription,
+  type GlucoseReading,
+  parseGlucoseReading,
+  parseGlucoseReadings,
+  type GlucoseSummary,
+  parseGlucoseSummary,
 } from "./types";
 
 export type FetchFunction = (
@@ -61,6 +66,17 @@ export type FetchFunction = (
 ) => ReturnType<typeof expoFetch>;
 
 type FetchResponse = Awaited<ReturnType<typeof expoFetch>>;
+
+/**
+ * 发送消息时手机正在收到的实时心率广播中最近的一条读数。
+ * 请求体里对应后端的下划线字段 beats_per_minute / measured_at / device_name。
+ */
+export type LiveHeartRateReading = {
+  beatsPerMinute: number;
+  /** ISO 8601 时间字符串。 */
+  measuredAt: string;
+  deviceName: string | null;
+};
 
 export class ApiError extends Error {
   constructor(
@@ -90,17 +106,6 @@ export class SessionChangedError extends Error {
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "发生了未知错误";
 }
-
-/**
- * 发送消息时手机正在收到的实时心率广播中最近的一条读数。
- * 请求体里对应后端的下划线字段 beats_per_minute / measured_at / device_name。
- */
-export type LiveHeartRateReading = {
-  beatsPerMinute: number;
-  /** ISO 8601 时间字符串。 */
-  measuredAt: string;
-  deviceName: string | null;
-};
 
 async function responseJson(response: FetchResponse): Promise<unknown> {
   try {
@@ -488,17 +493,6 @@ export class ApiClient {
     await this.mutateTokens(logoutVersion, () => this.tokenStore.clear());
   }
 
-  async deleteAccount(password: string): Promise<void> {
-    const version = this.sessionVersion;
-    const response = await this.authorizedFetch('/api/v1/auth/account', {
-      method: 'DELETE',
-      body: JSON.stringify({ password }),
-    });
-    this.assertSessionVersion(version);
-    if (!response.ok) throw await this.apiError(response);
-    await this.mutateTokens(version, () => this.tokenStore.clear());
-  }
-
   async getMessages(before: string | null = null): Promise<MessageHistory> {
     const query =
       before === null
@@ -693,45 +687,6 @@ export class ApiClient {
     return parseWearableDashboard(await responseJson(response));
   }
 
-  async getPsychosocialAssessment(): Promise<PsychosocialProfile | null> {
-    const response = await this.authorizedFetch(
-      '/api/v1/health-profile/psychosocial-assessment',
-    );
-    if (!response.ok) throw await this.apiError(response);
-    return parsePsychosocialProfile(await responseJson(response));
-  }
-
-  async recordPsychosocialAssessment(
-    input: PsychosocialAssessmentInput,
-  ): Promise<PsychosocialProfile> {
-    const response = await this.authorizedFetch(
-      '/api/v1/health-profile/psychosocial-assessment',
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          fear_behavior_percent: input.fearBehaviorPercent,
-          fear_worry_percent: input.fearWorryPercent,
-          gold_score: input.goldScore,
-          instrument: input.instrument,
-          assessed_at: input.assessedAt,
-        }),
-      },
-    );
-    if (!response.ok) throw await this.apiError(response);
-    const parsed = parsePsychosocialProfile(await responseJson(response));
-    if (parsed === null) throw new Error('服务器没有返回沟通方式评估结果');
-    return parsed;
-  }
-
-  async getFearSummary(signal?: AbortSignal): Promise<FearSummary> {
-    const response = await this.authorizedFetch(
-      '/api/v1/health-profile/fear-summary',
-      { signal },
-    );
-    if (!response.ok) throw await this.apiError(response);
-    return parseFearSummary(await responseJson(response));
-  }
-
   async getWearableDashboard(signal?: AbortSignal): Promise<WearableDashboard> {
     const response = await this.authorizedFetch(
       "/api/v1/health-profile/wearable-dashboard",
@@ -878,8 +833,8 @@ export class ApiClient {
     signal?: AbortSignal,
     liveHeartRate?: LiveHeartRateReading | null,
   ): Promise<void> {
-    const response = await this.authorizedFetch("/api/v1/chat/messages", {
-      method: "POST",
+    const response = await this.authorizedFetch('/api/v1/chat/messages', {
+      method: 'POST',
       body: JSON.stringify({
         client_message_id: clientMessageId,
         content,
@@ -893,7 +848,7 @@ export class ApiClient {
           },
       }),
       signal,
-      headers: { Accept: "application/x-ndjson" },
+      headers: { Accept: 'application/x-ndjson' },
     });
 
     await this.consumeChatResponse(response, onEvent);
@@ -936,6 +891,113 @@ export class ApiClient {
     );
 
     await this.consumeChatResponse(response, onEvent);
+  }
+
+  async deleteAccount(password: string): Promise<void> {
+    const version = this.sessionVersion;
+    const response = await this.authorizedFetch('/api/v1/auth/account', {
+      method: 'DELETE',
+      body: JSON.stringify({ password }),
+    });
+    this.assertSessionVersion(version);
+    if (!response.ok) throw await this.apiError(response);
+    await this.mutateTokens(version, () => this.tokenStore.clear());
+  }
+
+  async getPsychosocialAssessment(): Promise<PsychosocialProfile | null> {
+    const response = await this.authorizedFetch(
+      '/api/v1/health-profile/psychosocial-assessment',
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parsePsychosocialProfile(await responseJson(response));
+  }
+
+  async recordPsychosocialAssessment(
+    input: PsychosocialAssessmentInput,
+  ): Promise<PsychosocialProfile> {
+    const response = await this.authorizedFetch(
+      '/api/v1/health-profile/psychosocial-assessment',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          fear_behavior_percent: input.fearBehaviorPercent,
+          fear_worry_percent: input.fearWorryPercent,
+          gold_score: input.goldScore,
+          instrument: input.instrument,
+          assessed_at: input.assessedAt,
+        }),
+      },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    const parsed = parsePsychosocialProfile(await responseJson(response));
+    if (parsed === null) throw new Error('服务器没有返回沟通方式评估结果');
+    return parsed;
+  }
+
+  async getFearSummary(signal?: AbortSignal): Promise<FearSummary> {
+    const response = await this.authorizedFetch(
+      '/api/v1/health-profile/fear-summary',
+      { signal },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseFearSummary(await responseJson(response));
+  }
+
+  async getFearBehaviorLogs(signal?: AbortSignal): Promise<FearBehaviorLog[]> {
+    const response = await this.authorizedFetch(
+      '/api/v1/health-profile/fear-behavior',
+      { signal },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseFearBehaviorLogs(await responseJson(response));
+  }
+
+  async getBeliefEvents(signal?: AbortSignal): Promise<BeliefEventRecord[]> {
+    const response = await this.authorizedFetch(
+      '/api/v1/health-profile/belief-events',
+      { signal },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseBeliefEvents(await responseJson(response));
+  }
+
+  async deleteFearBehaviorLog(id: string): Promise<void> {
+    const response = await this.authorizedFetch(
+      `/api/v1/health-profile/fear-behavior/${id}`,
+      { method: 'DELETE' },
+    );
+    if (!response.ok) throw await this.apiError(response);
+  }
+
+  async deleteBeliefEvent(id: string): Promise<void> {
+    const response = await this.authorizedFetch(
+      `/api/v1/health-profile/belief-events/${id}`,
+      { method: 'DELETE' },
+    );
+    if (!response.ok) throw await this.apiError(response);
+  }
+
+  async transcribeVoice(recording: {
+    mimeType: string;
+    name: string;
+    uri: string;
+  }): Promise<string> {
+    const form = new FormData();
+    const file = new File(recording.uri);
+    form.append(
+      'file',
+      {
+        bytes: () => file.bytes(),
+        name: recording.name,
+        type: recording.mimeType,
+      } as unknown as Blob,
+    );
+    const response = await this.authorizedFetch('/api/v1/voice/transcribe', {
+      method: 'POST',
+      body: form,
+    });
+    if (!response.ok) throw await this.apiError(response);
+    return parseTranscription(await responseJson(response));
   }
 
   async createGlucoseReading(input: {

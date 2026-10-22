@@ -600,6 +600,14 @@ async def _fail_chat_run(
     agent_run.error_message = str(error)
     agent_run.finished_at = now
 
+    if "quota" in str(error).lower():
+        # 中转站余额不足时回 403 insufficient_user_quota，患者这一轮一个字都收不到。
+        # 单独记一条，值班的人不用去翻 403 原文才知道该充值了。
+        logger.bind(
+            run_id=str(prepared_run.run_id),
+            user_id=str(agent_run.user_id),
+        ).warning("chat_run_out_of_quota")
+
     await session.execute(
         update(AgentToolCall)
         .where(

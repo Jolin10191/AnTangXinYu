@@ -29,3 +29,13 @@ if (
     "开发和预览需要连接本机后端，请使用 bash scripts/dev-mobile 启动本地联调。",
   );
 }
+
+/**
+ * 语音输入默认关着。
+ *
+ * 后端那套（转写 + 声音的粗状态）已经在线，但要把麦克风按钮放进包里，得先解决
+ * 两件没证据的事：m4a 的静音判定还在等 ffmpeg 方案，以及没人验证过语音真的让回应
+ * 更好（系统键盘自带的语音输入也能把话变成文字）。所以打测试包时显式写
+ * EXPO_PUBLIC_VOICE_INPUT=1 才开，默认的正式包不显示这颗按钮。
+ */
+export const VOICE_INPUT_ENABLED = process.env.EXPO_PUBLIC_VOICE_INPUT === "1";

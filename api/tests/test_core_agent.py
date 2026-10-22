@@ -163,6 +163,34 @@ def test_core_prompt_allows_one_time_reminders_with_relative_times() -> None:
     assert "不支持的普通倒计时或提醒" not in SYSTEM_PROMPT
 
 
+def test_core_prompt_handles_over_correction_without_blame() -> None:
+    assert "低血糖后的强烈饥饿是升糖激素在推" in SYSTEM_PROMPT
+    assert "“低→猛补→反弹高”这个循环" in SYSTEM_PROMPT
+    assert "不要夸“补得对”" in SYSTEM_PROMPT
+
+
+def test_core_prompt_checks_denial_instead_of_agreeing() -> None:
+    assert "不要附和这句话就直接收尾" in SYSTEM_PROMPT
+    assert "这是核对，不是揭穿" in SYSTEM_PROMPT
+    assert "说明你心态好" in SYSTEM_PROMPT
+    assert "不要用“大家”“很多人”这种泛指" in SYSTEM_PROMPT
+
+
+def test_core_prompt_does_not_turn_a_reassurance_check_into_a_reason() -> None:
+    assert "不要用“距离上次测已经有一阵子”当理由松口" in SYSTEM_PROMPT
+    assert "“睡前再确认一次就踏实了”" in SYSTEM_PROMPT
+
+
+def test_core_prompt_keeps_calls_and_repetition_out_of_the_reply() -> None:
+    assert "调用语法绝对不能出现在正文里" in SYSTEM_PROMPT
+    assert "`to=`" in SYSTEM_PROMPT
+    assert "一次回复只讲一遍" in SYSTEM_PROMPT
+    assert "不要把同一段内容重复两三次" in SYSTEM_PROMPT
+    assert "不要写给自己看的批注、推演或草稿" in SYSTEM_PROMPT
+    assert "不要用 Markdown 记号" in SYSTEM_PROMPT
+    assert "必须至少原样复制一个" in SYSTEM_PROMPT
+
+
 async def test_core_model_rejects_missing_dynamic_prompt() -> None:
     messages: list[AnyMessage] = [HumanMessage(content="你好")]
     request: ModelRequest[AgentContext | None] = ModelRequest(

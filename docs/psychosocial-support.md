@@ -90,3 +90,14 @@ bash api/scripts/test
 ```
 
 `api/tests/test_psychosocial.py` 覆盖：四象限映射（含两个边界值）、`fear_percent` 取均值、越界拒绝、`render_guidance` 不泄露分数、无评估时为空串、提示词顺序（`[当前健康档案]` 在 `[沟通方式参考]` 之前）、接口往返与「取最近一次」、无时区时间与未知字段被拒。
+
+## 八、低血糖之后的 24 小时复盘
+
+低血糖事件过后，最容易漏掉的一步是「补了什么、多久复测、当时多少」——下一次真的用得上的是这些事实，而不是「为什么又会低」。
+
+- **只在窗口内问一次**：`glucose_readings.reviewed_at` 为空、发生在最近 24 小时内、值 < 70 mg/dL 的最近一条，才会在这一轮对话里打开这个话题（`pending_hypo_review`）。同一次事件问第二遍比不问更伤人，两条记录连着问更像审问，所以一次只取一条。
+- **开场白分两种**：用户自己说过的低血糖用「你说的那次……」，系统从读数发现的用「刚才那一次偏低之后……」。两种措辞都不带数值判断，也不问原因、不给胰岛素剂量建议（与红队硬禁止项一致）。
+- **算「问过」的时刻是回答落库的时刻**：`reviewed_at` 与回答、AgentRun 状态在同一个事务里提交。失败或取消的轮次用户没收到问题，下次还得再问。
+- **只注入当轮、不写进用户档案**：这段提示词是「这一轮该做的动作」，不是用户资料，不能原样念给用户。
+
+验证：`api/tests/test_hypo_review.py`（阈值、窗口边界、两种开场白、提示词只在需要时出现）与 `api/tests/test_chat_service.py` 的 `test_stream_chat_run_opens_the_hypo_review_once` / `..._does_not_ask_about_a_reviewed_reading` / `test_failed_run_does_not_consume_the_hypo_review`。

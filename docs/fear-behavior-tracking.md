@@ -77,3 +77,41 @@ bash api/scripts/test          # 全量后端测试
 `api/tests/test_fear_behavior.py` 覆盖：五类行为的记录与回读、信念枚举越界拒绝、`occurrence` 只接受三个值、
 近 30 天过滤、按信念聚合的计数与最近时间、7 天回避阈值边界（1 次不算、2 次算）、外显与内隐四种组合、
 `fear-summary` 接口的往返、以及没有记录时返回空而报错。
+
+## 六、患者自己撤回
+
+这两张表记的东西（夜里起来查了几次血糖、说过“低血糖就是会死”）比血糖读数更敏感，所以患者要能自己删掉，
+而不是只能注销账号连带清空。
+
+- `DELETE /api/v1/health-profile/fear-behavior/{log_id}` → `204`
+- `DELETE /api/v1/health-profile/belief-events/{event_id}` → `204`
+
+两个接口都在 `behavioral/service.py`（`delete_behavior_log` / `delete_belief_event`），按 `user_id` 限定，
+记录不存在或不属于该用户都返回 `404`，不区分“没有”和“不是你的”。
+
+**为什么是硬删除**：血糖读数用 `revoked_at` 软撤回，因为复盘、趋势图要能解释“这条当时不在”。
+行为与信念没有这层时间线语义——一条被撤回的“额外检查 6 次”对任何下游都没有价值，留着只是风险。
+AGENTS.md 也要求删干净。代价是删了不可恢复，所以移动端删之前必须再确认一次。
+
+### 列表接口（2026-10-21 新增）
+
+只有 `DELETE /{id}` 删不了：汇总卡片给的是次数，患者看不到“是哪一条”。所以配了两个列表接口，
+带 `id`、中文说法和时间：
+
+- `GET /api/v1/health-profile/fear-behavior?days=28` → `[{id, kind, label, count, note, occurred_at}]`
+- `GET /api/v1/health-profile/belief-events?days=90` → `[{id, belief_code, label, quote, occurrence, detected_at}]`
+
+两个列表都按时间倒序（患者翻它是为了找刚刚那一条）。`label` 由服务端给：行为用
+`behavioral/service.py` 的 `BEHAVIOR_KIND_LABELS`，信念用 `_BELIEF_LABELS`——客户端不再各写一套词表，
+否则同一条记录在两个界面会叫两个名字。
+
+### App 侧（`apps/mobile/src/fear/FearBehaviorSection.tsx`）
+
+卡片下半部分「可以删掉的记录」逐条列出行为与信念，每条一个「删除」；点完变成「删掉这条？」+
+`删掉` / `取消` 两个按钮，确认后才发 `DELETE`，成功即从列表移除，并重新拉一次
+`GET /fear-summary` 让上面的次数跟着变（否则刚删掉的那几条还挂在“6 次”里）。
+删除失败时保留原记录并在卡片里说明原因，不做静默当成功。
+
+```bash
+bash api/scripts/test          # 含 tests/test_health_profile_routes.py 的撤回用例
+```
