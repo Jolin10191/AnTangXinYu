@@ -47,7 +47,17 @@ Gold score 缺失时不猜，落到 `unknown_awareness`，用默认接触频率�
 
 **题目由服务端下发**（`api/src/antang_api/psychosocial/instrument.py`）。以前题面写死在 App 里，换个题库就要重新打包、每个患者重装一次；授权到位那天要换的正是题目与计分，所以题面必须走接口。App 每次打开这一页拉一次，拿到的 `id` 原样回传；选项最大值也来自服务端，百分比按它折算，不在客户端写死「4」。
 
-请求体只收六个字段：`fear_behavior_percent`、`fear_worry_percent`（0–100）、`gold_score`（1–7 或 `null`）、`instrument`、`assessed_at`（**必须带时区**）。`extra="forbid"`，多传一个字段就是 422——**不接收诊断、不接收逐题答案、不接收自由文本**。
+**计分也在服务端**。请求体可以带 `answers: [{id, value}]`，服务端按当前题库算两个百分比（`score_answers()`）；不带 `answers` 时才沿用客户端算好的两个百分比，保证还没升级的 App 仍能提交。缺题、重复题、越界选项、不属于当前题库的题一律 422——档位决定每周联系次数，不能存一个算错的分。
+
+| 字段 | 说明 |
+|---|---|
+| `answers` | 逐题选择，推荐方式；服务端负责算分，换量表连计分都不用改客户端 |
+| `fear_behavior_percent` / `fear_worry_percent` | 0–100，旧客户端用；`answers` 存在时被忽略 |
+| `gold_score` | 1–7 或 `null` |
+| `instrument` | 题库 id，原样回传 |
+| `assessed_at` | **必须带时区** |
+
+`extra="forbid"`，多传一个字段就是 422——**不接收诊断、不接收自由文本**。
 
 响应只给档位（`fear_percent`、`fear_high`、`awareness`、`quadrant`、`weekly_contact_limit`），**不返回量表原始分项**，避免 App 把它做成一个「恐惧指数排行榜」。
 

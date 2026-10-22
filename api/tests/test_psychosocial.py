@@ -10,13 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from antang_api.agents.core import render_core_system_prompt
 from antang_api.database import get_session
-from antang_api.models import User
+from antang_api.models import PsychosocialAssessment, User
 from antang_api.psychosocial import (
     AWARENESS_IMPAIRED_GOLD,
     FEAR_HIGH_PERCENT,
     PsychosocialProfile,
     read_latest_assessment,
     render_guidance,
+    score_answers,
 )
 from antang_api.routers.auth import router as auth_router
 from antang_api.routers.health_profile import router as health_profile_router
@@ -193,6 +194,95 @@ async def test_assessment_round_trip(db_session: AsyncSession) -> None:
         assert latest.json()["quadrant"] == "high_fear_impaired_awareness"
 
 
+async def test_the_server_scores_the_answers_it_asked_for(db_session: AsyncSession) -> None:
+    """App 只上传逐题选择，百分比由服务端算：换量表连计分都不用改客户端。"""
+
+    async for client in _client(db_session):
+        headers, _ = await _register(client)
+        assessed_at = datetime(2026, 10, 31, 9, 0, tzinfo=UTC)
+        created = await client.post(
+            "/api/v1/health-profile/psychosocial-assessment",
+            headers=headers,
+            json={
+                "answers": [
+                    {"id": "repeat-test", "value": 4},
+                    {"id": "skip-exercise", "value": 2},
+                    {"id": "bedtime-snack", "value": 0},
+                    {"id": "night-worry", "value": 3},
+                    {"id": "alone-worry", "value": 1},
+                    {"id": "anxious-thought", "value": 0},
+                ],
+                "gold_score": 3,
+                "instrument": "antang-behavior-v1",
+                "assessed_at": assessed_at.isoformat(),
+            },
+        )
+        assert created.status_code == 201
+
+        row = await db_session.scalar(
+            select(PsychosocialAssessment).where(
+                PsychosocialAssessment.assessed_at == assessed_at
+            )
+        )
+        assert row is not None
+        # 行为 (4+2+0)/3/4 = 50%；担忧 (3+1+0)/3/4 = 33%。
+        assert row.fear_behavior_percent == 50
+        assert row.fear_worry_percent == 33
+
+
+async def test_partial_or_foreign_answers_are_refused(db_session: AsyncSession) -> None:
+    async for client in _client(db_session):
+        headers, _ = await _register(client)
+        path = "/api/v1/health-profile/psychosocial-assessment"
+        base = {
+            "gold_score": 3,
+            "assessed_at": datetime(2026, 10, 31, 9, 0, tzinfo=UTC).isoformat(),
+        }
+        complete = [
+            {"id": "repeat-test", "value": 1},
+            {"id": "skip-exercise", "value": 1},
+            {"id": "bedtime-snack", "value": 1},
+            {"id": "night-worry", "value": 1},
+            {"id": "alone-worry", "value": 1},
+            {"id": "anxious-thought", "value": 1},
+        ]
+
+        missing = await client.post(
+            path, headers=headers, json={**base, "answers": complete[:-1]}
+        )
+        assert missing.status_code == 422
+        assert "还有题没答" in missing.json()["detail"]
+
+        unknown = await client.post(
+            path,
+            headers=headers,
+            json={
+                **base,
+                "answers": [*complete, {"id": "not-in-instrument", "value": 1}],
+            },
+        )
+        assert unknown.status_code == 422
+        assert "没有这道题" in unknown.json()["detail"]
+
+        duplicate = await client.post(
+            path, headers=headers, json={**base, "answers": [*complete, complete[0]]}
+        )
+        assert duplicate.status_code == 422
+
+        out_of_range = await client.post(
+            path,
+            headers=headers,
+            json={
+                **base,
+                "answers": [{**complete[0], "value": 9}, *complete[1:]],
+            },
+        )
+        assert out_of_range.status_code == 422
+
+        neither = await client.post(path, headers=headers, json=base)
+        assert neither.status_code == 422
+
+
 async def test_latest_assessment_wins_by_assessed_at(db_session: AsyncSession) -> None:
     async for client in _client(db_session):
         headers, _ = await _register(client)
@@ -346,3 +436,22 @@ async def test_the_app_asks_the_server_what_to_ask(db_session: AsyncSession) -> 
         )
         assert created.status_code == 201
         assert created.json()["instrument"] == body["id"]
+
+def test_score_answers_refuses_incomplete_or_foreign_choices() -> None:
+    """缺题、越界都要报错：分档会影响联系频率，不能存一个算错的分。"""
+
+    with pytest.raises(ValueError, match="没有这道题"):
+        score_answers({"not-in-instrument": 1})
+    with pytest.raises(ValueError, match="还有题没答"):
+        score_answers({"repeat-test": 1})
+    with pytest.raises(ValueError, match="不在选项里"):
+        score_answers(
+            {
+                "repeat-test": 9,
+                "skip-exercise": 1,
+                "bedtime-snack": 1,
+                "night-worry": 1,
+                "alone-worry": 1,
+                "anxious-thought": 1,
+            }
+        )

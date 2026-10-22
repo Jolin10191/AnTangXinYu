@@ -58,6 +58,7 @@ from antang_api.psychosocial import (
     current_instrument,
     read_latest_assessment_row,
     record_assessment,
+    score_answers,
 )
 from antang_api.models import (
     HYPOGLYCEMIA_BELIEFS,
@@ -520,11 +521,27 @@ async def record_psychosocial_assessment(
     user: Annotated[User, Depends(get_patient_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> PsychosocialProfileResponse:
+    if request.answers is not None:
+        # 百分比由服务端按当前题库算：换量表只改服务端，装过的包不用动。
+        answer_ids = [answer.id for answer in request.answers]
+        if len(set(answer_ids)) != len(answer_ids):
+            raise HTTPException(status_code=422, detail="同一道题提交了两次")
+        try:
+            behavior_percent, worry_percent = score_answers(
+                {answer.id: answer.value for answer in request.answers}
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+    else:
+        behavior_percent = request.fear_behavior_percent
+        worry_percent = request.fear_worry_percent
+        if behavior_percent is None or worry_percent is None:
+            raise HTTPException(status_code=422, detail="要么带逐题答案，要么带两个百分比")
     row = await record_assessment(
         session,
         user_id=user.id,
-        fear_behavior_percent=request.fear_behavior_percent,
-        fear_worry_percent=request.fear_worry_percent,
+        fear_behavior_percent=behavior_percent,
+        fear_worry_percent=worry_percent,
         gold_score=request.gold_score,
         instrument=request.instrument,
         assessed_at=request.assessed_at,

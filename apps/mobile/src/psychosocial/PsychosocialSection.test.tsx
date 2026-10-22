@@ -233,6 +233,14 @@ describe('PsychosocialSection', () => {
     // 存的是服务端给的题库 id，不是 App 里写的字符串。
     expect(input.instrument).toBe('antang-behavior-v1');
     expect(typeof input.assessedAt).toBe('string');
+    // 逐题选择一起交上去，服务端按题库算分。
+    expect(input.answers).toHaveLength(6);
+    expect(
+      input.answers.every(
+        (answer: { id: string; value: number }) =>
+          typeof answer.id === 'string' && typeof answer.value === 'number',
+      ),
+    ).toBe(true);
   });
 
   it('没填完时保存按钮不可用', async () => {
