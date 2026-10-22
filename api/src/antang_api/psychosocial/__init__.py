@@ -1,3 +1,4 @@
+from antang_api.psychosocial.instrument import Instrument, current_instrument
 from antang_api.psychosocial.store import (
     read_latest_assessment,
     read_latest_assessment_row,
@@ -13,7 +14,9 @@ from antang_api.psychosocial.support import (
 __all__ = [
     "AWARENESS_IMPAIRED_GOLD",
     "FEAR_HIGH_PERCENT",
+    "Instrument",
     "PsychosocialProfile",
+    "current_instrument",
     "read_latest_assessment",
     "read_latest_assessment_row",
     "record_assessment",

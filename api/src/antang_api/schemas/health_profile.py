@@ -549,6 +549,35 @@ class PsychosocialAssessmentRequest(BaseModel):
         return value
 
 
+class InstrumentOptionResponse(BaseModel):
+    value: int
+    label: str
+
+
+class InstrumentQuestionResponse(BaseModel):
+    id: str
+    kind: Literal["behavior", "worry"]
+    text: str
+
+
+class PsychosocialInstrumentResponse(BaseModel):
+    """当前题库。
+
+    题目放服务端是为了换量表不用重打包，所以这里必须给全：说明、选项、题干、
+    以及那一道「能不能感觉到低血糖」的 Gold 题。
+    """
+
+    id: str
+    title: str
+    instructions: str
+    disclaimer: str
+    options: list[InstrumentOptionResponse]
+    questions: list[InstrumentQuestionResponse]
+    gold_label: str
+    gold_hint: str
+    gold_options: list[InstrumentOptionResponse]
+
+
 class PsychosocialProfileResponse(BaseModel):
     """服务器给 App 看的档位；不返回量表原始题目与逐题答案。"""
 
