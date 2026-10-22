@@ -46,6 +46,8 @@ import {
   type PsychosocialProfile,
   parsePsychosocialProfile,
   type PsychosocialAssessmentInput,
+  type PsychosocialInstrument,
+  parsePsychosocialInstrument,
   type FearSummary,
   parseFearSummary,
   type FearBehaviorLog,
@@ -902,6 +904,14 @@ export class ApiClient {
     this.assertSessionVersion(version);
     if (!response.ok) throw await this.apiError(response);
     await this.mutateTokens(version, () => this.tokenStore.clear());
+  }
+
+  async getPsychosocialInstrument(): Promise<PsychosocialInstrument> {
+    const response = await this.authorizedFetch(
+      '/api/v1/health-profile/psychosocial-instrument',
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parsePsychosocialInstrument(await responseJson(response));
   }
 
   async getPsychosocialAssessment(): Promise<PsychosocialProfile | null> {

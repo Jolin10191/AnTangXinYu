@@ -1687,6 +1687,99 @@ export type PsychosocialAssessmentInput = {
   assessedAt: string;
 };
 
+export type InstrumentOption = { value: number; label: string };
+
+export type InstrumentQuestion = {
+  id: string;
+  kind: 'behavior' | 'worry';
+  text: string;
+};
+
+/**
+ * 沟通方式自评的题库，由服务端给。
+ *
+ * 以前题目写死在这个 App 里，换量表（HFS-II 授权到位那天）就得重打包、每个患者
+ * 重新装一次。现在只改后端，装过的包不用动。
+ */
+export type PsychosocialInstrument = {
+  id: string;
+  title: string;
+  instructions: string;
+  disclaimer: string;
+  options: InstrumentOption[];
+  questions: InstrumentQuestion[];
+  goldLabel: string;
+  goldHint: string;
+  goldOptions: InstrumentOption[];
+};
+
+function parseInstrumentOptions(
+  value: unknown,
+  name: string,
+): InstrumentOption[] {
+  if (!Array.isArray(value)) throw new Error(`${name} 必须是数组`);
+  return value.map((item, index) => {
+    const label = `${name}[${index}]`;
+    const data = objectValue(item, label);
+    return {
+      value: integerValue(data.value, `${label}.value`),
+      label: textValue(data.label, `${label}.label`),
+    };
+  });
+}
+
+export function parsePsychosocialInstrument(
+  value: unknown,
+): PsychosocialInstrument {
+  const data = objectValue(value, 'psychosocial instrument');
+  const options = parseInstrumentOptions(
+    data.options,
+    'psychosocial instrument.options',
+  );
+  if (options.length < 2) throw new Error('psychosocial instrument.options 太少');
+  if (!Array.isArray(data.questions)) {
+    throw new Error('psychosocial instrument.questions 必须是数组');
+  }
+  const questions = data.questions.map((item, index) => {
+    const label = `psychosocial instrument.questions[${index}]`;
+    const question = objectValue(item, label);
+    const kind = stringValue(question.kind, `${label}.kind`);
+    if (kind !== 'behavior' && kind !== 'worry') {
+      throw new Error(`${label}.kind 无效`);
+    }
+    const parsedKind: InstrumentQuestion['kind'] = kind;
+    return {
+      id: stringValue(question.id, `${label}.id`),
+      kind: parsedKind,
+      text: textValue(question.text, `${label}.text`),
+    };
+  });
+  if (questions.length === 0) {
+    throw new Error('psychosocial instrument.questions 是空的');
+  }
+  const seen = new Set<string>();
+  for (const question of questions) {
+    if (seen.has(question.id)) {
+      throw new Error(`psychosocial instrument.questions 里 id 重复：${question.id}`);
+    }
+    seen.add(question.id);
+  }
+  return {
+    id: stringValue(data.id, 'psychosocial instrument.id'),
+    title: textValue(data.title, 'psychosocial instrument.title'),
+    instructions: textValue(data.instructions, 'psychosocial instrument.instructions'),
+    disclaimer: textValue(data.disclaimer, 'psychosocial instrument.disclaimer'),
+    options,
+    questions,
+    goldLabel: textValue(data.gold_label, 'psychosocial instrument.gold_label'),
+    goldHint: textValue(data.gold_hint, 'psychosocial instrument.gold_hint'),
+    goldOptions: parseInstrumentOptions(
+      data.gold_options,
+      'psychosocial instrument.gold_options',
+    ),
+  };
+}
+
 const PSYCHOSOCIAL_QUADRANTS: readonly PsychosocialQuadrant[] = [
   'high_fear_normal_awareness',
   'high_fear_impaired_awareness',

@@ -53,7 +53,9 @@ from antang_api.health_profile.wearable_service import (
 )
 from antang_api.proactive_care.service import record_health_import
 from antang_api.psychosocial import (
+    Instrument,
     PsychosocialProfile,
+    current_instrument,
     read_latest_assessment_row,
     record_assessment,
 )
@@ -78,12 +80,15 @@ from antang_api.schemas.health_profile import (
     HealthConnectRecordIdsResponse,
     HeartRateData,
     HeartRateTrendPointResponse,
+    InstrumentOptionResponse,
+    InstrumentQuestionResponse,
     ProfileCardAnswerRequest,
     ProfileCardDecisionRequest,
     ProfileCardDecisionResponse,
     ProfileCardResponse,
     ProfileCardsResponse,
     PsychosocialAssessmentRequest,
+    PsychosocialInstrumentResponse,
     PsychosocialProfileResponse,
     WearableImportRequest,
     WearableImportResponse,
@@ -432,6 +437,45 @@ async def get_wearable_dashboard(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> WearableDashboardResponse:
     return await read_wearable_dashboard(session, user_id=user.id)
+
+
+def _instrument_response(instrument: Instrument) -> PsychosocialInstrumentResponse:
+    return PsychosocialInstrumentResponse(
+        id=instrument.id,
+        title=instrument.title,
+        instructions=instrument.instructions,
+        disclaimer=instrument.disclaimer,
+        options=[
+            InstrumentOptionResponse(value=option.value, label=option.label)
+            for option in instrument.options
+        ],
+        questions=[
+            InstrumentQuestionResponse(id=question.id, kind=question.kind, text=question.text)
+            for question in instrument.questions
+        ],
+        gold_label=instrument.gold_label,
+        gold_hint=instrument.gold_hint,
+        gold_options=[
+            InstrumentOptionResponse(value=option.value, label=option.label)
+            for option in instrument.gold_options
+        ],
+    )
+
+
+@router.get(
+    "/psychosocial-instrument",
+    response_model=PsychosocialInstrumentResponse,
+)
+async def get_psychosocial_instrument(
+    user: Annotated[User, Depends(get_patient_user)],
+) -> PsychosocialInstrumentResponse:
+    """App 每次打开这一页时拉题库。
+
+    题目由服务端给，换量表（比如 HFS-II 授权到位）只发后端，不用重打安装包。
+    """
+
+    del user  # 登录即可读，题目内容与具体患者无关。
+    return _instrument_response(current_instrument())
 
 
 def _psychosocial_response(row: PsychosocialAssessment) -> PsychosocialProfileResponse:

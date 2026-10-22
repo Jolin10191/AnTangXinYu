@@ -41,8 +41,11 @@ Gold score 缺失时不猜，落到 `unknown_awareness`，用默认接触频率�
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
+| `GET` | `/api/v1/health-profile/psychosocial-instrument` | 返回当前题库：说明、选项、题干、Gold 题 |
 | `GET` | `/api/v1/health-profile/psychosocial-assessment` | 返回最新一次档位；没有则返回 `null` |
 | `POST` | `/api/v1/health-profile/psychosocial-assessment` | 写入一次评估，返回算出来的档位 |
+
+**题目由服务端下发**（`api/src/antang_api/psychosocial/instrument.py`）。以前题面写死在 App 里，换个题库就要重新打包、每个患者重装一次；授权到位那天要换的正是题目与计分，所以题面必须走接口。App 每次打开这一页拉一次，拿到的 `id` 原样回传；选项最大值也来自服务端，百分比按它折算，不在客户端写死「4」。
 
 请求体只收六个字段：`fear_behavior_percent`、`fear_worry_percent`（0–100）、`gold_score`（1–7 或 `null`）、`instrument`、`assessed_at`（**必须带时区**）。`extra="forbid"`，多传一个字段就是 422——**不接收诊断、不接收逐题答案、不接收自由文本**。
 
@@ -69,9 +72,9 @@ Gold score 缺失时不猜，落到 `unknown_awareness`，用默认接触频率�
 
 - 低血糖恐惧量表（HFS-II 及其儿童版 CHFS、家长版 PHFS-II、伴侣版 HFS-98）**题目受版权保护**，不能自拟、不能自行翻译后当正式量表用。自拟题目的分数与任何常模都不可比，`FEAR_HIGH_PERCENT = 50` 这个切点也就失去了依据。
 - 所以在授权到位之前，App 里问的是**我们自己措辞的行为清单**，界面上明确写「不是标准化量表，不作为诊断依据」；分数只用于决定沟通方式与联系频率。
-- 授权到位后，只需要换题目、换计分、把 `instrument` 写成正式名称，**表结构、接口和档位逻辑都不用动**。
+- 授权到位后，只需要把 `api/src/antang_api/psychosocial/instrument.py` 里的 `SELF_REPORT_INSTRUMENT` 换成正式题目、把 `instrument` 写成正式名称，**表结构、接口、移动端都不用动**（装过的包不用重装，下次打开这一页就会拿到新题库）。
 
-移动端入口在健康档案页的「沟通方式」卡片（`apps/mobile/src/psychosocial/PsychosocialSection.tsx`），可以跳过、可以重填；已有评估时只显示「每周主动联系约几次」和上次填写日期，**不显示分数**。
+移动端入口在健康档案页的「沟通方式」卡片（`apps/mobile/src/psychosocial/PsychosocialSection.tsx`）：题目、选项、说明、Gold 题全部来自上面的接口，组件里不再有题面常量；可以跳过、可以重填；已有评估时只显示「每周主动联系约几次」和上次填写日期，**不显示分数**。题库读不到时给出错误并收起填写入口，不会拿旧题面假装可用。
 
 ## 六、数据库
 
