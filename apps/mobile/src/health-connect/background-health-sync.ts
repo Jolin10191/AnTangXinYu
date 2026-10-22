@@ -50,7 +50,7 @@ export async function runBackgroundHealthSync(): Promise<'skipped' | 'synced'> {
   try {
     const sessionSignal = appClient.getSessionSignal();
     const currentUser = await appClient.me(sessionSignal);
-    if (currentUser.id !== userId) return 'skipped';
+    if (currentUser.id !== userId || currentUser.role !== 'patient') return 'skipped';
     await prepareHealthConnect(nativeHealthConnect, false);
     if (!(await isBackgroundReadAvailable())) return 'skipped';
     if (!(await nativeHealthConnect.hasBackgroundPermission())) return 'skipped';

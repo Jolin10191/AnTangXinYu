@@ -6,12 +6,21 @@ from pydantic import (
     ConfigDict,
     StringConstraints,
     field_validator,
+    model_validator,
 )
+from antang_api.models.user import UserRole
+from antang_api.models.clinician_application import ApplicationStatus
 
 Username = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=3, max_length=32)
 ]
 Password = Annotated[str, StringConstraints(min_length=8, max_length=128)]
+FullName = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)
+]
+Organization = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)
+]
 
 
 class UsernameRequest(BaseModel):
@@ -26,7 +35,22 @@ class UsernameRequest(BaseModel):
 
 
 class RegisterRequest(UsernameRequest):
+    model_config = ConfigDict(extra="forbid")
     password: Password
+    full_name: FullName | None = None
+    registration_kind: Literal["patient", "clinician"] = "patient"
+    organization: Organization | None = None
+    consent_accepted: bool = False
+
+    @model_validator(mode="after")
+    def validate_registration(self) -> "RegisterRequest":
+        if not self.consent_accepted:
+            raise ValueError("注册前必须阅读并同意知情同意与隐私说明")
+        if self.registration_kind == "clinician" and (
+            not self.full_name or not self.organization
+        ):
+            raise ValueError("医护注册申请须填写姓名和所属机构")
+        return self
 
 
 class LoginRequest(UsernameRequest):
@@ -41,11 +65,25 @@ class LogoutRequest(BaseModel):
     refresh_token: str
 
 
+class DeleteAccountRequest(BaseModel):
+    """注销账号必须再次输入密码，避免手机被别人拿到后一键删库。"""
+
+    password: Password
+
+
 class UserResponse(BaseModel):
     id: UUID
     username: str
+    role: UserRole
+    full_name: str | None = None
+    application_status: ApplicationStatus | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class AccountNameRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    full_name: FullName
 
 
 class TokenPair(BaseModel):

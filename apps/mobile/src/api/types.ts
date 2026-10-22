@@ -1,7 +1,49 @@
 export type User = {
   id: string;
   username: string;
+  role: "patient" | "clinician" | "researcher";
+  fullName?: string | null;
+  applicationStatus?: ApplicationStatus | null;
 };
+
+export type ApplicationStatus = "pending" | "approved" | "rejected";
+export type RegistrationOptions = {
+  consentAccepted: boolean;
+  fullName: string;
+  registrationKind: "patient" | "clinician";
+  organization?: string;
+};
+export type ClinicianApplication = {
+  id: string;
+  applicant: User;
+  fullName: string;
+  organization: string;
+  status: ApplicationStatus;
+  createdAt: string;
+  reviewedAt: string | null;
+  rejectionReason: string | null;
+};
+export type ApplicationsPage = {
+  applications: ClinicianApplication[];
+  nextAfter: string | null;
+};
+export type UserOverview = {
+  totalUsers: number;
+  patients: number;
+  clinicians: number;
+  collaborators: number;
+  pendingApplications: number;
+};
+
+export type PatientAccessGrant = {
+  id: string;
+  clinician: User;
+  grantedAt: string;
+  revokedAt: string | null;
+  available: boolean;
+};
+
+export type PatientPage = { patients: User[]; nextAfter: string | null };
 
 export type TokenPair = {
   accessToken: string;
@@ -14,8 +56,8 @@ export type AuthResult = {
   tokens: TokenPair;
 };
 
-export type MessageRole = 'user' | 'assistant';
-export type MessageStatus = 'generating' | 'completed' | 'failed' | 'cancelled';
+export type MessageRole = "user" | "assistant";
+export type MessageStatus = "generating" | "completed" | "failed" | "cancelled";
 
 export type ChatSource = {
   sourceId: string;
@@ -25,9 +67,9 @@ export type ChatSource = {
 
 export type ChatAttachment = {
   id: string;
-  kind: 'photo' | 'report';
+  kind: "photo" | "report";
   filename: string;
-  mimeType: 'application/pdf' | 'image/jpeg' | 'image/png';
+  mimeType: "application/pdf" | "image/jpeg" | "image/png";
   sizeBytes: number;
   localUri?: string;
 };
@@ -50,16 +92,16 @@ export type MessageHistory = {
 };
 
 export type ProactiveCareNotificationData = {
-  kind: 'routine_check_in' | 'plan_follow_up' | 'health_event';
+  kind: "routine_check_in" | "plan_follow_up" | "health_event";
   messageId: string;
   deliveryId: string;
 };
 
 export type RoutineCareCadence =
-  | 'disabled'
-  | 'daily'
-  | 'every_3_days'
-  | 'weekly';
+  | "disabled"
+  | "daily"
+  | "every_3_days"
+  | "weekly";
 
 export type ProactiveCareSettings = {
   routineCadence: RoutineCareCadence;
@@ -73,10 +115,10 @@ export type ProactiveCareSettings = {
 
 export type HealthProfileCard = {
   id: string;
-  kind: 'confirmation' | 'clarification';
-  targetType: 'personal_profile' | 'health_fact';
+  kind: "confirmation" | "clarification";
+  targetType: "personal_profile" | "health_fact";
   fieldName: string;
-  operation: 'set' | 'clear' | 'add' | 'update' | 'retract';
+  operation: "set" | "clear" | "add" | "update" | "retract";
   question: string;
   proposedValue: Record<string, unknown> | null;
   options: HealthProfileCardOption[];
@@ -96,31 +138,31 @@ export type HealthProfileCards = {
 
 export type HealthProfileCardDecision = {
   cardId: string;
-  status: 'applied' | 'rejected' | 'conflicted';
+  status: "applied" | "rejected" | "conflicted";
 };
 
 export type PersonalProfileField =
-  | 'sex'
-  | 'age_years'
-  | 'height_cm'
-  | 'weight_kg'
-  | 'resident_area'
-  | 'schedule_type'
-  | 'occupation';
+  | "sex"
+  | "age_years"
+  | "height_cm"
+  | "weight_kg"
+  | "resident_area"
+  | "schedule_type"
+  | "occupation";
 
-export type PersonalProfileUnit = 'years' | 'cm' | 'm' | 'kg' | 'jin' | 'lb';
+export type PersonalProfileUnit = "years" | "cm" | "m" | "kg" | "jin" | "lb";
 
 export type HealthProfileCustomAnswer =
   | {
-      targetType: 'personal_profile';
+      targetType: "personal_profile";
       value: string;
       unit?: PersonalProfileUnit;
     }
   | {
-      targetType: 'health_fact';
+      targetType: "health_fact";
       statement: string;
-      assertion: 'present' | 'absent';
-      temporalStatus: 'current' | 'past' | 'unknown';
+      assertion: "present" | "absent";
+      temporalStatus: "current" | "past" | "unknown";
     };
 
 export type HealthProfileCardAnswer =
@@ -141,17 +183,17 @@ export type PersonalProfile = {
 };
 
 export type HealthFactType =
-  | 'medical_history'
-  | 'allergy'
-  | 'severe_hypoglycemia_history'
-  | 'treatment';
+  | "medical_history"
+  | "allergy"
+  | "severe_hypoglycemia_history"
+  | "treatment";
 
 export type HealthFact = {
   id: string;
   factType: HealthFactType;
   statement: string;
-  assertion: 'present' | 'absent';
-  temporalStatus: 'current' | 'past' | 'unknown';
+  assertion: "present" | "absent";
+  temporalStatus: "current" | "past" | "unknown";
   effectiveStart: string | null;
   effectiveEnd: string | null;
   revision: number;
@@ -167,37 +209,37 @@ type HealthProfileChangeBase = {
 export type HealthProfileChange = HealthProfileChangeBase &
   (
     | {
-        targetType: 'personal_profile';
-        operation: 'set';
+        targetType: "personal_profile";
+        operation: "set";
         fieldName: PersonalProfileField;
         value: string;
         unit?: PersonalProfileUnit;
       }
     | {
-        targetType: 'personal_profile';
-        operation: 'clear';
+        targetType: "personal_profile";
+        operation: "clear";
         fieldName: PersonalProfileField;
       }
     | {
-        targetType: 'health_fact';
-        operation: 'add';
+        targetType: "health_fact";
+        operation: "add";
         factType: HealthFactType;
         statement: string;
-        assertion: HealthFact['assertion'];
-        temporalStatus: HealthFact['temporalStatus'];
+        assertion: HealthFact["assertion"];
+        temporalStatus: HealthFact["temporalStatus"];
       }
     | {
-        targetType: 'health_fact';
-        operation: 'update';
+        targetType: "health_fact";
+        operation: "update";
         targetId: string;
         factType: HealthFactType;
         statement: string;
-        assertion: HealthFact['assertion'];
-        temporalStatus: HealthFact['temporalStatus'];
+        assertion: HealthFact["assertion"];
+        temporalStatus: HealthFact["temporalStatus"];
       }
     | {
-        targetType: 'health_fact';
-        operation: 'retract';
+        targetType: "health_fact";
+        operation: "retract";
         targetId: string;
         factType: HealthFactType;
       }
@@ -205,10 +247,10 @@ export type HealthProfileChange = HealthProfileChangeBase &
 
 export type HealthProfileChangeResult = {
   changeId: string;
-  status: 'applied';
-  targetType: 'personal_profile' | 'health_fact';
+  status: "applied";
+  targetType: "personal_profile" | "health_fact";
   fieldName: string;
-  operation: HealthProfileCard['operation'];
+  operation: HealthProfileCard["operation"];
   targetId: string | null;
   resultRevision: number;
 };
@@ -217,14 +259,14 @@ export type SleepStage = {
   startTime: string;
   endTime: string;
   stage:
-  | 'unknown'
-  | 'awake'
-  | 'sleeping'
-  | 'out_of_bed'
-  | 'awake_in_bed'
-  | 'light'
-  | 'deep'
-  | 'rem';
+    | "unknown"
+    | "awake"
+    | "sleeping"
+    | "out_of_bed"
+    | "awake_in_bed"
+    | "light"
+    | "deep"
+    | "rem";
 };
 
 type WearableLatestBase = {
@@ -234,36 +276,36 @@ type WearableLatestBase = {
 
 export type WearableLatest = WearableLatestBase &
   (
-    | { recordType: 'steps'; data: { count: number } }
+    | { recordType: "steps"; data: { count: number } }
     | {
-      recordType: 'exercise';
-      data: { exerciseType: number; title: string | null };
-    }
-    | { recordType: 'distance'; data: { meters: number } }
-    | { recordType: 'elevation_gained'; data: { meters: number } }
-    | { recordType: 'weight'; data: { kilograms: number } }
+        recordType: "exercise";
+        data: { exerciseType: number; title: string | null };
+      }
+    | { recordType: "distance"; data: { meters: number } }
+    | { recordType: "elevation_gained"; data: { meters: number } }
+    | { recordType: "weight"; data: { kilograms: number } }
     | {
-      recordType: 'respiratory_rate';
-      data: { breathsPerMinute: number };
-    }
+        recordType: "respiratory_rate";
+        data: { breathsPerMinute: number };
+      }
     | {
-      recordType: 'resting_heart_rate';
-      data: { beatsPerMinute: number };
-    }
+        recordType: "resting_heart_rate";
+        data: { beatsPerMinute: number };
+      }
     | {
-      recordType: 'heart_rate';
-      data: {
-        samples: { time: string; beatsPerMinute: number }[];
-      };
-    }
+        recordType: "heart_rate";
+        data: {
+          samples: { time: string; beatsPerMinute: number }[];
+        };
+      }
     | {
-      recordType: 'sleep';
-      data: { stages: SleepStage[] };
-    }
+        recordType: "sleep";
+        data: { stages: SleepStage[] };
+      }
     | {
-      recordType: 'oxygen_saturation';
-      data: { percentage: number };
-    }
+        recordType: "oxygen_saturation";
+        data: { percentage: number };
+      }
   );
 
 export type HealthProfile = {
@@ -298,52 +340,52 @@ type WearableRecordBase = {
 
 export type WearableRecord = WearableRecordBase &
   (
-    | { record_type: 'steps'; data: { count: number } }
+    | { record_type: "steps"; data: { count: number } }
     | {
-      record_type: 'exercise';
-      data: { exercise_type: number; title: string | null };
-    }
-    | { record_type: 'distance'; data: { meters: number } }
-    | { record_type: 'elevation_gained'; data: { meters: number } }
-    | { record_type: 'weight'; data: { kilograms: number } }
+        record_type: "exercise";
+        data: { exercise_type: number; title: string | null };
+      }
+    | { record_type: "distance"; data: { meters: number } }
+    | { record_type: "elevation_gained"; data: { meters: number } }
+    | { record_type: "weight"; data: { kilograms: number } }
     | {
-      record_type: 'respiratory_rate';
-      data: { breaths_per_minute: number };
-    }
+        record_type: "respiratory_rate";
+        data: { breaths_per_minute: number };
+      }
     | {
-      record_type: 'resting_heart_rate';
-      data: { beats_per_minute: number };
-    }
+        record_type: "resting_heart_rate";
+        data: { beats_per_minute: number };
+      }
     | {
-      record_type: 'heart_rate';
-      data: {
-        samples: { time: string; beats_per_minute: number }[];
-      };
-    }
+        record_type: "heart_rate";
+        data: {
+          samples: { time: string; beats_per_minute: number }[];
+        };
+      }
     | {
-      record_type: 'sleep';
-      data: {
-        stages: {
-          start_time: string;
-          end_time: string;
-          stage:
-          | 'unknown'
-          | 'awake'
-          | 'sleeping'
-          | 'out_of_bed'
-          | 'awake_in_bed'
-          | 'light'
-          | 'deep'
-          | 'rem';
-        }[];
-      };
-    }
-    | { record_type: 'oxygen_saturation'; data: { percentage: number } }
+        record_type: "sleep";
+        data: {
+          stages: {
+            start_time: string;
+            end_time: string;
+            stage:
+              | "unknown"
+              | "awake"
+              | "sleeping"
+              | "out_of_bed"
+              | "awake_in_bed"
+              | "light"
+              | "deep"
+              | "rem";
+          }[];
+        };
+      }
+    | { record_type: "oxygen_saturation"; data: { percentage: number } }
   );
 
 export type WearableImportResponse = {
   importId: string;
-  status: 'completed';
+  status: "completed";
   recordsCreated: number;
   recordsUpdated: number;
   recordsUnchanged: number;
@@ -392,38 +434,38 @@ export type WearableDashboard = {
 };
 
 export type MessageStartedEvent = {
-  type: 'message_started';
+  type: "message_started";
   userMessageId: string;
   assistantMessageId: string;
   runId: string;
 };
 
 export type TextDeltaEvent = {
-  type: 'text_delta';
+  type: "text_delta";
   delta: string;
 };
 
 export type AgentActivityPhase =
-  | 'thinking'
-  | 'searching'
-  | 'reading'
-  | 'organizing';
+  | "thinking"
+  | "searching"
+  | "reading"
+  | "organizing";
 
 export type AgentActivityEvent = {
-  type: 'agent_activity';
+  type: "agent_activity";
   phase: AgentActivityPhase;
 };
 
 export type MessageCompletedEvent = {
-  type: 'message_completed';
+  type: "message_completed";
   inputTokens: number;
   outputTokens: number;
   sources: ChatSource[];
 };
 
 export type MessageFailedEvent = {
-  type: 'message_failed';
-  code: 'agent_run_failed';
+  type: "message_failed";
+  code: "agent_run_failed";
   errorType: string;
 };
 
@@ -440,14 +482,14 @@ const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function objectValue(value: unknown, name: string): JsonObject {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error(`${name} 必须是 JSON 对象`);
   }
   return value as JsonObject;
 }
 
 function stringValue(value: unknown, name: string): string {
-  if (typeof value !== 'string' || value.length === 0) {
+  if (typeof value !== "string" || value.length === 0) {
     throw new Error(`${name} 必须是非空字符串`);
   }
   return value;
@@ -470,27 +512,27 @@ function parseAttachment(value: unknown, name: string): ChatAttachment {
   const data = objectValue(value, name);
   const kind = stringValue(data.kind, `${name}.kind`);
   const mimeType = stringValue(data.mime_type, `${name}.mime_type`);
-  if (kind !== 'photo' && kind !== 'report') {
+  if (kind !== "photo" && kind !== "report") {
     throw new Error(`${name}.kind 无效`);
   }
-  if (!['application/pdf', 'image/jpeg', 'image/png'].includes(mimeType)) {
+  if (!["application/pdf", "image/jpeg", "image/png"].includes(mimeType)) {
     throw new Error(`${name}.mime_type 无效`);
   }
   return {
     id: uuidValue(data.id, `${name}.id`),
     kind,
     filename: stringValue(data.filename, `${name}.filename`),
-    mimeType: mimeType as ChatAttachment['mimeType'],
+    mimeType: mimeType as ChatAttachment["mimeType"],
     sizeBytes: integerValue(data.size_bytes, `${name}.size_bytes`),
   };
 }
 
 export function parseAttachmentUpload(value: unknown): ChatAttachment {
-  return parseAttachment(value, 'attachment');
+  return parseAttachment(value, "attachment");
 }
 
 function booleanValue(value: unknown, name: string): boolean {
-  if (typeof value !== 'boolean') throw new Error(`${name} 必须是布尔值`);
+  if (typeof value !== "boolean") throw new Error(`${name} 必须是布尔值`);
   return value;
 }
 
@@ -505,7 +547,7 @@ function quietTimeValue(value: unknown, name: string): string {
 function ianaTimeZoneValue(value: unknown, name: string): string {
   const result = stringValue(value, name);
   try {
-    new Intl.DateTimeFormat('zh-CN', { timeZone: result }).format();
+    new Intl.DateTimeFormat("zh-CN", { timeZone: result }).format();
   } catch {
     throw new Error(`${name} 必须是有效的 IANA 时区`);
   }
@@ -514,16 +556,14 @@ function ianaTimeZoneValue(value: unknown, name: string): string {
 
 function dateValue(value: unknown, name: string): string {
   const result = stringValue(value, name);
-  if (Number.isNaN(Date.parse(result))) throw new Error(`${name} 必须是日期时间`);
+  if (Number.isNaN(Date.parse(result)))
+    throw new Error(`${name} 必须是日期时间`);
   return result;
 }
 
 function zonedDateTimeValue(value: unknown, name: string): string {
   const result = dateValue(value, name);
-  if (
-    !result.includes('T') ||
-    !/(?:Z|[+-]\d{2}:\d{2})$/i.test(result)
-  ) {
+  if (!result.includes("T") || !/(?:Z|[+-]\d{2}:\d{2})$/i.test(result)) {
     throw new Error(`${name} 必须包含时区`);
   }
   return result;
@@ -557,18 +597,16 @@ function decimalNumberValue(
   minimumInclusive: boolean,
 ): number {
   if (
-    typeof value !== 'string' ||
+    typeof value !== "string" ||
     !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(value)
   ) {
     throw new Error(`${name} 必须是十进制数字字符串`);
   }
   const result = Number(value);
-  const validMinimum = minimumInclusive
-    ? result >= minimum
-    : result > minimum;
+  const validMinimum = minimumInclusive ? result >= minimum : result > minimum;
   if (!Number.isFinite(result) || !validMinimum) {
     throw new Error(
-      `${name} 必须是${minimumInclusive ? '不小于' : '大于'} ${minimum} 的有限数字`,
+      `${name} 必须是${minimumInclusive ? "不小于" : "大于"} ${minimum} 的有限数字`,
     );
   }
   return result;
@@ -588,7 +626,7 @@ function httpUrlValue(value: unknown, name: string): string {
   } catch {
     throw new Error(`${name} 必须是有效 URL`);
   }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error(`${name} 只允许 HTTP 或 HTTPS`);
   }
   return result;
@@ -604,7 +642,8 @@ function parseSources(value: unknown, name: string): ChatSource[] {
     if (!/^S[1-9]\d*$/.test(sourceId)) {
       throw new Error(`${name}[${index}].source_id 必须是 S 加正整数`);
     }
-    if (knownIds.has(sourceId)) throw new Error(`${name} 包含重复的 ${sourceId}`);
+    if (knownIds.has(sourceId))
+      throw new Error(`${name} 包含重复的 ${sourceId}`);
     knownIds.add(sourceId);
 
     return {
@@ -616,24 +655,141 @@ function parseSources(value: unknown, name: string): ChatSource[] {
 }
 
 export function parseUser(value: unknown): User {
-  const data = objectValue(value, 'user');
+  const data = objectValue(value, "user");
+  if (!["patient", "clinician", "researcher"].includes(data.role as string)) {
+    throw new Error("user.role 无效，请确认服务器已升级");
+  }
   return {
-    id: uuidValue(data.id, 'user.id'),
-    username: stringValue(data.username, 'user.username'),
+    id: uuidValue(data.id, "user.id"),
+    username: stringValue(data.username, "user.username"),
+    role: data.role as User["role"],
+    ...(data.full_name === undefined
+      ? {}
+      : {
+          fullName:
+            data.full_name === null
+              ? null
+              : stringValue(data.full_name, "user.full_name"),
+        }),
+    ...(data.application_status === undefined
+      ? {}
+      : {
+          applicationStatus:
+            data.application_status === null
+              ? null
+              : parseApplicationStatus(data.application_status),
+        }),
+  };
+}
+
+export function parsePatientGrants(value: unknown): PatientAccessGrant[] {
+  const data = objectValue(value, "grants");
+  if (!Array.isArray(data.grants)) throw new Error("授权列表格式错误");
+  return data.grants.map(parsePatientGrant);
+}
+
+export function parsePatientGrant(value: unknown): PatientAccessGrant {
+  const data = objectValue(value, "grant");
+  if (typeof data.available !== "boolean") throw new Error("授权状态格式错误");
+  return {
+    id: uuidValue(data.id, "grant.id"),
+    clinician: parseUser(data.clinician),
+    grantedAt: stringValue(data.granted_at, "granted_at"),
+    revokedAt:
+      data.revoked_at === null
+        ? null
+        : stringValue(data.revoked_at, "revoked_at"),
+    available: data.available,
+  };
+}
+
+export function parsePatientPage(value: unknown): PatientPage {
+  const data = objectValue(value, "patients");
+  if (!Array.isArray(data.patients)) throw new Error("患者列表格式错误");
+  return {
+    patients: data.patients.map(parseUser),
+    nextAfter:
+      data.next_after === null
+        ? null
+        : uuidValue(data.next_after, "next_after"),
+  };
+}
+
+function parseApplicationStatus(value: unknown): ApplicationStatus {
+  if (!["pending", "approved", "rejected"].includes(value as string))
+    throw new Error("医护申请状态无效");
+  return value as ApplicationStatus;
+}
+
+export function parseClinicianApplication(
+  value: unknown,
+): ClinicianApplication {
+  const data = objectValue(value, "application");
+  return {
+    id: uuidValue(data.id, "application.id"),
+    applicant: parseUser(data.applicant),
+    fullName: stringValue(data.full_name, "application.full_name"),
+    organization: stringValue(data.organization, "application.organization"),
+    status: parseApplicationStatus(data.status),
+    createdAt: stringValue(data.created_at, "created_at"),
+    reviewedAt:
+      data.reviewed_at === null
+        ? null
+        : stringValue(data.reviewed_at, "reviewed_at"),
+    rejectionReason:
+      data.rejection_reason === null
+        ? null
+        : stringValue(data.rejection_reason, "rejection_reason"),
+  };
+}
+
+export function parseOwnApplication(
+  value: unknown,
+): ClinicianApplication | null {
+  const data = objectValue(value, "own application");
+  return data.application === null
+    ? null
+    : parseClinicianApplication(data.application);
+}
+
+export function parseApplicationsPage(value: unknown): ApplicationsPage {
+  const data = objectValue(value, "applications page");
+  if (!Array.isArray(data.applications))
+    throw new Error("医护申请列表格式错误");
+  return {
+    applications: data.applications.map(parseClinicianApplication),
+    nextAfter:
+      data.next_after === null
+        ? null
+        : uuidValue(data.next_after, "next_after"),
+  };
+}
+
+export function parseUserOverview(value: unknown): UserOverview {
+  const data = objectValue(value, "user overview");
+  return {
+    totalUsers: integerValue(data.total_users, "total_users"),
+    patients: integerValue(data.patients, "patients"),
+    clinicians: integerValue(data.clinicians, "clinicians"),
+    collaborators: integerValue(data.collaborators, "collaborators"),
+    pendingApplications: integerValue(
+      data.pending_applications,
+      "pending_applications",
+    ),
   };
 }
 
 export function parseTokenPair(value: unknown): TokenPair {
-  const data = objectValue(value, 'token pair');
+  const data = objectValue(value, "token pair");
   return {
-    accessToken: stringValue(data.access_token, 'access_token'),
-    refreshToken: stringValue(data.refresh_token, 'refresh_token'),
-    expiresIn: integerValue(data.expires_in, 'expires_in'),
+    accessToken: stringValue(data.access_token, "access_token"),
+    refreshToken: stringValue(data.refresh_token, "refresh_token"),
+    expiresIn: integerValue(data.expires_in, "expires_in"),
   };
 }
 
 export function parseAuthResult(value: unknown): AuthResult {
-  const data = objectValue(value, 'auth response');
+  const data = objectValue(value, "auth response");
   return {
     user: parseUser(data.user),
     tokens: parseTokenPair(data),
@@ -641,132 +797,135 @@ export function parseAuthResult(value: unknown): AuthResult {
 }
 
 function parseMessage(value: unknown): ChatMessage {
-  const data = objectValue(value, 'message');
-  const role = stringValue(data.role, 'message.role');
-  const status = stringValue(data.status, 'message.status');
+  const data = objectValue(value, "message");
+  const role = stringValue(data.role, "message.role");
+  const status = stringValue(data.status, "message.status");
 
-  if (role !== 'user' && role !== 'assistant') {
+  if (role !== "user" && role !== "assistant") {
     throw new Error(`未知消息角色：${role}`);
   }
-  if (!['generating', 'completed', 'failed', 'cancelled'].includes(status)) {
+  if (!["generating", "completed", "failed", "cancelled"].includes(status)) {
     throw new Error(`未知消息状态：${status}`);
   }
-  if (typeof data.content !== 'string') {
-    throw new Error('message.content 必须是字符串');
+  if (typeof data.content !== "string") {
+    throw new Error("message.content 必须是字符串");
   }
 
   return {
-    id: uuidValue(data.id, 'message.id'),
+    id: uuidValue(data.id, "message.id"),
     clientMessageId:
       data.client_message_id === null
         ? null
-        : uuidValue(data.client_message_id, 'message.client_message_id'),
+        : uuidValue(data.client_message_id, "message.client_message_id"),
     role,
     status: status as MessageStatus,
     content: data.content,
-    sources: parseSources(data.sources, 'message.sources'),
+    sources: parseSources(data.sources, "message.sources"),
     attachments: Array.isArray(data.attachments)
       ? data.attachments.map((attachment, index) =>
           parseAttachment(attachment, `message.attachments[${index}]`),
         )
       : [],
-    createdAt: dateValue(data.created_at, 'message.created_at'),
+    createdAt: dateValue(data.created_at, "message.created_at"),
     completedAt:
       data.completed_at === null
         ? null
-        : dateValue(data.completed_at, 'message.completed_at'),
+        : dateValue(data.completed_at, "message.completed_at"),
   };
 }
 
 export function parseMessageHistory(value: unknown): MessageHistory {
-  const data = objectValue(value, 'message history');
+  const data = objectValue(value, "message history");
   if (!Array.isArray(data.messages)) {
-    throw new Error('message history.messages 必须是数组');
+    throw new Error("message history.messages 必须是数组");
   }
   return {
     messages: data.messages.map(parseMessage),
     nextBefore:
       data.next_before === null
         ? null
-        : uuidValue(data.next_before, 'message history.next_before'),
+        : uuidValue(data.next_before, "message history.next_before"),
   };
 }
 
 export function parseProactiveCareNotificationData(
   value: unknown,
 ): ProactiveCareNotificationData {
-  const data = objectValue(value, 'notification');
-  const kind = stringValue(data.kind, 'notification.kind');
-  if (!['routine_check_in', 'plan_follow_up', 'health_event'].includes(kind)) {
-    throw new Error('notification.kind 无效');
+  const data = objectValue(value, "notification");
+  const kind = stringValue(data.kind, "notification.kind");
+  if (!["routine_check_in", "plan_follow_up", "health_event"].includes(kind)) {
+    throw new Error("notification.kind 无效");
   }
   return {
-    kind: kind as ProactiveCareNotificationData['kind'],
-    messageId: uuidValue(data.message_id, 'notification.message_id'),
-    deliveryId: uuidValue(data.delivery_id, 'notification.delivery_id'),
+    kind: kind as ProactiveCareNotificationData["kind"],
+    messageId: uuidValue(data.message_id, "notification.message_id"),
+    deliveryId: uuidValue(data.delivery_id, "notification.delivery_id"),
   };
 }
 
 export function parseProactiveCareSettings(
   value: unknown,
 ): ProactiveCareSettings {
-  const data = objectValue(value, 'care settings');
+  const data = objectValue(value, "care settings");
   const cadence = stringValue(
     data.routine_cadence,
-    'care settings.routine_cadence',
+    "care settings.routine_cadence",
   );
-  if (!['disabled', 'daily', 'every_3_days', 'weekly'].includes(cadence)) {
-    throw new Error('care settings.routine_cadence 无效');
+  if (!["disabled", "daily", "every_3_days", "weekly"].includes(cadence)) {
+    throw new Error("care settings.routine_cadence 无效");
   }
   return {
     routineCadence: cadence as RoutineCareCadence,
     planFollowUpEnabled: booleanValue(
       data.plan_follow_up_enabled,
-      'care settings.plan_follow_up_enabled',
+      "care settings.plan_follow_up_enabled",
     ),
     healthEventsEnabled: booleanValue(
       data.health_events_enabled,
-      'care settings.health_events_enabled',
+      "care settings.health_events_enabled",
     ),
-    timezone: ianaTimeZoneValue(data.timezone, 'care settings.timezone'),
+    timezone: ianaTimeZoneValue(data.timezone, "care settings.timezone"),
     quietHoursStart: quietTimeValue(
       data.quiet_hours_start,
-      'care settings.quiet_hours_start',
+      "care settings.quiet_hours_start",
     ),
     quietHoursEnd: quietTimeValue(
       data.quiet_hours_end,
-      'care settings.quiet_hours_end',
+      "care settings.quiet_hours_end",
     ),
     healthNotificationPreviewEnabled: booleanValue(
       data.health_notification_preview_enabled,
-      'care settings.health_notification_preview_enabled',
+      "care settings.health_notification_preview_enabled",
     ),
   };
 }
 
 function parsePersonalProfile(value: unknown): PersonalProfile {
-  const data = objectValue(value, 'health profile.personal_profile');
+  const data = objectValue(value, "health profile.personal_profile");
   const ageYears =
     data.age_years === null
       ? null
-      : integerValue(data.age_years, 'health profile.personal_profile.age_years');
+      : integerValue(
+          data.age_years,
+          "health profile.personal_profile.age_years",
+        );
   if (ageYears !== null && ageYears > 150) {
-    throw new Error('health profile.personal_profile.age_years 必须不大于 150');
+    throw new Error("health profile.personal_profile.age_years 必须不大于 150");
   }
 
   return {
-    sex: nullableStringValue(data.sex, 'health profile.personal_profile.sex'),
+    sex: nullableStringValue(data.sex, "health profile.personal_profile.sex"),
     ageYears,
     ageAsOfDate: nullableDateOnlyValue(
       data.age_as_of_date,
-      'health profile.personal_profile.age_as_of_date',
+      "health profile.personal_profile.age_as_of_date",
     ),
     heightCm:
       data.height_cm === null
         ? null
         : decimalNumberValue(
             data.height_cm,
-            'health profile.personal_profile.height_cm',
+            "health profile.personal_profile.height_cm",
             0,
             false,
           ),
@@ -775,29 +934,29 @@ function parsePersonalProfile(value: unknown): PersonalProfile {
         ? null
         : decimalNumberValue(
             data.weight_kg,
-            'health profile.personal_profile.weight_kg',
+            "health profile.personal_profile.weight_kg",
             0,
             false,
           ),
     residentArea: nullableStringValue(
       data.resident_area,
-      'health profile.personal_profile.resident_area',
+      "health profile.personal_profile.resident_area",
     ),
     scheduleType: nullableStringValue(
       data.schedule_type,
-      'health profile.personal_profile.schedule_type',
+      "health profile.personal_profile.schedule_type",
     ),
     occupation: nullableStringValue(
       data.occupation,
-      'health profile.personal_profile.occupation',
+      "health profile.personal_profile.occupation",
     ),
     revision: integerValue(
       data.revision,
-      'health profile.personal_profile.revision',
+      "health profile.personal_profile.revision",
     ),
     updatedAt: zonedDateTimeValue(
       data.updated_at,
-      'health profile.personal_profile.updated_at',
+      "health profile.personal_profile.updated_at",
     ),
   };
 }
@@ -808,23 +967,23 @@ function parseHealthFact(value: unknown, index: number): HealthFact {
   const factType = stringValue(data.fact_type, `${name}.fact_type`);
   if (
     ![
-      'medical_history',
-      'allergy',
-      'severe_hypoglycemia_history',
-      'treatment',
+      "medical_history",
+      "allergy",
+      "severe_hypoglycemia_history",
+      "treatment",
     ].includes(factType)
   ) {
     throw new Error(`${name}.fact_type 无效`);
   }
   const assertion = stringValue(data.assertion, `${name}.assertion`);
-  if (assertion !== 'present' && assertion !== 'absent') {
+  if (assertion !== "present" && assertion !== "absent") {
     throw new Error(`${name}.assertion 无效`);
   }
   const temporalStatus = stringValue(
     data.temporal_status,
     `${name}.temporal_status`,
   );
-  if (!['current', 'past', 'unknown'].includes(temporalStatus)) {
+  if (!["current", "past", "unknown"].includes(temporalStatus)) {
     throw new Error(`${name}.temporal_status 无效`);
   }
   const effectiveStart = nullableDateOnlyValue(
@@ -848,7 +1007,7 @@ function parseHealthFact(value: unknown, index: number): HealthFact {
     factType: factType as HealthFactType,
     statement: stringValue(data.statement, `${name}.statement`),
     assertion,
-    temporalStatus: temporalStatus as HealthFact['temporalStatus'],
+    temporalStatus: temporalStatus as HealthFact["temporalStatus"],
     effectiveStart,
     effectiveEnd,
     revision: integerValue(data.revision, `${name}.revision`),
@@ -872,14 +1031,14 @@ function parseWearableLatest(value: unknown, index: number): WearableLatest {
   const data = objectValue(payload.data, `${name}.data`);
 
   switch (recordType) {
-    case 'steps':
+    case "steps":
       return {
         recordType,
         observedAt,
         sourcePackage,
         data: { count: integerValue(data.count, `${name}.data.count`) },
       };
-    case 'exercise':
+    case "exercise":
       return {
         recordType,
         observedAt,
@@ -892,8 +1051,8 @@ function parseWearableLatest(value: unknown, index: number): WearableLatest {
           title: nullableStringValue(data.title, `${name}.data.title`),
         },
       };
-    case 'distance':
-    case 'elevation_gained':
+    case "distance":
+    case "elevation_gained":
       return {
         recordType,
         observedAt,
@@ -907,7 +1066,7 @@ function parseWearableLatest(value: unknown, index: number): WearableLatest {
           ),
         },
       };
-    case 'weight':
+    case "weight":
       return {
         recordType,
         observedAt,
@@ -921,7 +1080,7 @@ function parseWearableLatest(value: unknown, index: number): WearableLatest {
           ),
         },
       };
-    case 'respiratory_rate':
+    case "respiratory_rate":
       return {
         recordType,
         observedAt,
@@ -935,7 +1094,7 @@ function parseWearableLatest(value: unknown, index: number): WearableLatest {
           ),
         },
       };
-    case 'resting_heart_rate':
+    case "resting_heart_rate":
       return {
         recordType,
         observedAt,
@@ -947,7 +1106,7 @@ function parseWearableLatest(value: unknown, index: number): WearableLatest {
           ),
         },
       };
-    case 'heart_rate': {
+    case "heart_rate": {
       if (!Array.isArray(data.samples) || data.samples.length === 0) {
         throw new Error(`${name}.data.samples 必须是非空数组`);
       }
@@ -979,7 +1138,7 @@ function parseWearableLatest(value: unknown, index: number): WearableLatest {
         data: { samples },
       };
     }
-    case 'sleep': {
+    case "sleep": {
       if (!Array.isArray(data.stages)) {
         throw new Error(`${name}.data.stages 必须是数组`);
       }
@@ -1010,14 +1169,14 @@ function parseWearableLatest(value: unknown, index: number): WearableLatest {
         const stage = stringValue(stageData.stage, `${stageName}.stage`);
         if (
           ![
-            'unknown',
-            'awake',
-            'sleeping',
-            'out_of_bed',
-            'awake_in_bed',
-            'light',
-            'deep',
-            'rem',
+            "unknown",
+            "awake",
+            "sleeping",
+            "out_of_bed",
+            "awake_in_bed",
+            "light",
+            "deep",
+            "rem",
           ].includes(stage)
         ) {
           throw new Error(`${stageName}.stage 无效`);
@@ -1025,7 +1184,7 @@ function parseWearableLatest(value: unknown, index: number): WearableLatest {
         return {
           startTime,
           endTime,
-          stage: stage as SleepStage['stage'],
+          stage: stage as SleepStage["stage"],
         };
       });
       return {
@@ -1035,7 +1194,7 @@ function parseWearableLatest(value: unknown, index: number): WearableLatest {
         data: { stages },
       };
     }
-    case 'oxygen_saturation': {
+    case "oxygen_saturation": {
       const percentage = decimalNumberValue(
         data.percentage,
         `${name}.data.percentage`,
@@ -1058,15 +1217,15 @@ function parseWearableLatest(value: unknown, index: number): WearableLatest {
 }
 
 export function parseHealthProfile(value: unknown): HealthProfile {
-  const data = objectValue(value, 'health profile');
+  const data = objectValue(value, "health profile");
   if (!Array.isArray(data.health_facts)) {
-    throw new Error('health profile.health_facts 必须是数组');
+    throw new Error("health profile.health_facts 必须是数组");
   }
   if (!Array.isArray(data.wearable_latest)) {
-    throw new Error('health profile.wearable_latest 必须是数组');
+    throw new Error("health profile.wearable_latest 必须是数组");
   }
   if (!Array.isArray(data.heart_rate_trend)) {
-    throw new Error('health profile.heart_rate_trend 必须是数组');
+    throw new Error("health profile.heart_rate_trend 必须是数组");
   }
 
   const healthFacts = data.health_facts.map(parseHealthFact);
@@ -1090,7 +1249,10 @@ export function parseHealthProfile(value: unknown): HealthProfile {
   }
 
   const heartRateTrend = data.heart_rate_trend.map((value, index) => {
-    const point = objectValue(value, `health profile.heart_rate_trend[${index}]`);
+    const point = objectValue(
+      value,
+      `health profile.heart_rate_trend[${index}]`,
+    );
     return {
       observedAt: zonedDateTimeValue(
         point.observed_at,
@@ -1111,19 +1273,22 @@ export function parseHealthProfile(value: unknown): HealthProfile {
   };
 }
 
-function parseHealthProfileCard(value: unknown, index: number): HealthProfileCard {
+function parseHealthProfileCard(
+  value: unknown,
+  index: number,
+): HealthProfileCard {
   const name = `health profile cards[${index}]`;
   const data = objectValue(value, name);
   const kind = stringValue(data.kind, `${name}.kind`);
-  if (kind !== 'confirmation' && kind !== 'clarification') {
+  if (kind !== "confirmation" && kind !== "clarification") {
     throw new Error(`${name}.kind 无效`);
   }
   const targetType = stringValue(data.target_type, `${name}.target_type`);
-  if (targetType !== 'personal_profile' && targetType !== 'health_fact') {
+  if (targetType !== "personal_profile" && targetType !== "health_fact") {
     throw new Error(`${name}.target_type 无效`);
   }
   const operation = stringValue(data.operation, `${name}.operation`);
-  if (!['set', 'clear', 'add', 'update', 'retract'].includes(operation)) {
+  if (!["set", "clear", "add", "update", "retract"].includes(operation)) {
     throw new Error(`${name}.operation 无效`);
   }
 
@@ -1153,7 +1318,7 @@ function parseHealthProfileCard(value: unknown, index: number): HealthProfileCar
     kind,
     targetType,
     fieldName: stringValue(data.field_name, `${name}.field_name`),
-    operation: operation as HealthProfileCard['operation'],
+    operation: operation as HealthProfileCard["operation"],
     question: stringValue(data.question, `${name}.question`),
     proposedValue,
     options,
@@ -1172,45 +1337,52 @@ function parseHealthProfileCard(value: unknown, index: number): HealthProfileCar
 export function parseWearableImportResponse(
   value: unknown,
 ): WearableImportResponse {
-  const data = objectValue(value, 'wearable import');
-  const status = stringValue(data.status, 'wearable import.status');
-  if (status !== 'completed') {
+  const data = objectValue(value, "wearable import");
+  const status = stringValue(data.status, "wearable import.status");
+  if (status !== "completed") {
     throw new Error(`未知手环导入状态：${status}`);
   }
   return {
-    importId: uuidValue(data.import_id, 'wearable import.import_id'),
+    importId: uuidValue(data.import_id, "wearable import.import_id"),
     status,
     recordsCreated: integerValue(
       data.records_created,
-      'wearable import.records_created',
+      "wearable import.records_created",
     ),
     recordsUpdated: integerValue(
       data.records_updated,
-      'wearable import.records_updated',
+      "wearable import.records_updated",
     ),
     recordsUnchanged: integerValue(
       data.records_unchanged,
-      'wearable import.records_unchanged',
+      "wearable import.records_unchanged",
     ),
     recordsDeleted: integerValue(
       data.records_deleted,
-      'wearable import.records_deleted',
+      "wearable import.records_deleted",
     ),
   };
 }
 
-export function parseHealthConnectRecordIdsPage(value: unknown): HealthConnectRecordIdsPage {
-  const data = objectValue(value, 'Health Connect record IDs');
-  if (!Array.isArray(data.ids)) throw new Error('Health Connect record IDs.ids 必须是数组');
+export function parseHealthConnectRecordIdsPage(
+  value: unknown,
+): HealthConnectRecordIdsPage {
+  const data = objectValue(value, "Health Connect record IDs");
+  if (!Array.isArray(data.ids))
+    throw new Error("Health Connect record IDs.ids 必须是数组");
   return {
     ids: data.ids.map((id, index) =>
-      stringValue(id, `Health Connect record IDs.ids[${index}]`)),
-    nextAfter: nullableStringValue(data.next_after, 'Health Connect record IDs.next_after'),
+      stringValue(id, `Health Connect record IDs.ids[${index}]`),
+    ),
+    nextAfter: nullableStringValue(
+      data.next_after,
+      "Health Connect record IDs.next_after",
+    ),
   };
 }
 
 function nonNegativeNumberValue(value: unknown, name: string): number {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     throw new Error(`${name} 必须是非负数字`);
   }
   return value;
@@ -1221,101 +1393,200 @@ function nullableDashboardNumber(value: unknown, name: string): number | null {
 }
 
 export function parseWearableDashboard(value: unknown): WearableDashboard {
-  const data = objectValue(value, 'wearable dashboard');
-  if (!Array.isArray(data.sources)) throw new Error('wearable dashboard.sources 必须是数组');
+  const data = objectValue(value, "wearable dashboard");
+  if (!Array.isArray(data.sources))
+    throw new Error("wearable dashboard.sources 必须是数组");
   const sources = data.sources.map((item, index): WearableDashboardSource => {
     const name = `wearable dashboard.sources[${index}]`;
     const source = objectValue(item, name);
-    const sourcePackage = stringValue(source.source_package, `${name}.source_package`);
-    if (![
-      'com.huami.watch.hmwatchmanager',
-      'nodomain.freeyourgadget.gadgetbridge',
-    ].includes(sourcePackage)) {
+    const sourcePackage = stringValue(
+      source.source_package,
+      `${name}.source_package`,
+    );
+    if (
+      ![
+        "com.huami.watch.hmwatchmanager",
+        "nodomain.freeyourgadget.gadgetbridge",
+      ].includes(sourcePackage)
+    ) {
       throw new Error(`${name}.source_package 无效`);
     }
-    const device = source.device === null ? null : objectValue(source.device, `${name}.device`);
-    if (!Array.isArray(source.daily) || !Array.isArray(source.heart_rate_trend) ||
-        !Array.isArray(source.sleep_sessions)) {
+    const device =
+      source.device === null
+        ? null
+        : objectValue(source.device, `${name}.device`);
+    if (
+      !Array.isArray(source.daily) ||
+      !Array.isArray(source.heart_rate_trend) ||
+      !Array.isArray(source.sleep_sessions)
+    ) {
       throw new Error(`${name} 的图表数据必须是数组`);
     }
     const totals = objectValue(source.totals, `${name}.totals`);
     return {
       sourcePackage,
-      device: device === null ? null : {
-        manufacturer: nullableStringValue(device.manufacturer, `${name}.device.manufacturer`),
-        model: nullableStringValue(device.model, `${name}.device.model`),
-      },
-      latestObservedAt: zonedDateTimeValue(source.latest_observed_at, `${name}.latest_observed_at`),
+      device:
+        device === null
+          ? null
+          : {
+              manufacturer: nullableStringValue(
+                device.manufacturer,
+                `${name}.device.manufacturer`,
+              ),
+              model: nullableStringValue(device.model, `${name}.device.model`),
+            },
+      latestObservedAt: zonedDateTimeValue(
+        source.latest_observed_at,
+        `${name}.latest_observed_at`,
+      ),
       daily: source.daily.map((entry, dayIndex) => {
         const dayName = `${name}.daily[${dayIndex}]`;
         const day = objectValue(entry, dayName);
         return {
           day: dateOnlyValue(day.day, `${dayName}.day`),
           steps: integerValue(day.steps, `${dayName}.steps`),
-          distanceMeters: nonNegativeNumberValue(day.distance_meters, `${dayName}.distance_meters`),
+          distanceMeters: nonNegativeNumberValue(
+            day.distance_meters,
+            `${dayName}.distance_meters`,
+          ),
         };
       }),
       heartRateTrend: source.heart_rate_trend.map((entry, pointIndex) => {
         const pointName = `${name}.heart_rate_trend[${pointIndex}]`;
         const point = objectValue(entry, pointName);
         return {
-          observedAt: zonedDateTimeValue(point.observed_at, `${pointName}.observed_at`),
-          beatsPerMinute: positiveIntegerValue(point.beats_per_minute, `${pointName}.beats_per_minute`),
+          observedAt: zonedDateTimeValue(
+            point.observed_at,
+            `${pointName}.observed_at`,
+          ),
+          beatsPerMinute: positiveIntegerValue(
+            point.beats_per_minute,
+            `${pointName}.beats_per_minute`,
+          ),
         };
       }),
       sleepSessions: source.sleep_sessions.map((entry, sessionIndex) => {
         const sessionName = `${name}.sleep_sessions[${sessionIndex}]`;
         const session = objectValue(entry, sessionName);
-        if (!Array.isArray(session.stages)) throw new Error(`${sessionName}.stages 必须是数组`);
+        if (!Array.isArray(session.stages))
+          throw new Error(`${sessionName}.stages 必须是数组`);
         return {
-          startTime: zonedDateTimeValue(session.start_time, `${sessionName}.start_time`),
-          endTime: zonedDateTimeValue(session.end_time, `${sessionName}.end_time`),
+          startTime: zonedDateTimeValue(
+            session.start_time,
+            `${sessionName}.start_time`,
+          ),
+          endTime: zonedDateTimeValue(
+            session.end_time,
+            `${sessionName}.end_time`,
+          ),
           stages: session.stages.map((entryStage, stageIndex) => {
             const stageName = `${sessionName}.stages[${stageIndex}]`;
             const stage = objectValue(entryStage, stageName);
             const stageValue = stringValue(stage.stage, `${stageName}.stage`);
-            if (!['unknown', 'awake', 'sleeping', 'out_of_bed', 'awake_in_bed', 'light', 'deep', 'rem'].includes(stageValue)) {
+            if (
+              ![
+                "unknown",
+                "awake",
+                "sleeping",
+                "out_of_bed",
+                "awake_in_bed",
+                "light",
+                "deep",
+                "rem",
+              ].includes(stageValue)
+            ) {
               throw new Error(`${stageName}.stage 无效`);
             }
             return {
-              startTime: zonedDateTimeValue(stage.start_time, `${stageName}.start_time`),
-              endTime: zonedDateTimeValue(stage.end_time, `${stageName}.end_time`),
-              stage: stageValue as SleepStage['stage'],
+              startTime: zonedDateTimeValue(
+                stage.start_time,
+                `${stageName}.start_time`,
+              ),
+              endTime: zonedDateTimeValue(
+                stage.end_time,
+                `${stageName}.end_time`,
+              ),
+              stage: stageValue as SleepStage["stage"],
             };
           }),
         };
       }),
       totals: {
-        heartRateSamples: integerValue(totals.heart_rate_samples, `${name}.totals.heart_rate_samples`),
-        heartRateMinimum: nullableDashboardNumber(totals.heart_rate_minimum, `${name}.totals.heart_rate_minimum`),
-        heartRateMaximum: nullableDashboardNumber(totals.heart_rate_maximum, `${name}.totals.heart_rate_maximum`),
-        heartRateAverage: nullableDashboardNumber(totals.heart_rate_average, `${name}.totals.heart_rate_average`),
+        heartRateSamples: integerValue(
+          totals.heart_rate_samples,
+          `${name}.totals.heart_rate_samples`,
+        ),
+        heartRateMinimum: nullableDashboardNumber(
+          totals.heart_rate_minimum,
+          `${name}.totals.heart_rate_minimum`,
+        ),
+        heartRateMaximum: nullableDashboardNumber(
+          totals.heart_rate_maximum,
+          `${name}.totals.heart_rate_maximum`,
+        ),
+        heartRateAverage: nullableDashboardNumber(
+          totals.heart_rate_average,
+          `${name}.totals.heart_rate_average`,
+        ),
         steps: integerValue(totals.steps, `${name}.totals.steps`),
-        distanceMeters: nonNegativeNumberValue(totals.distance_meters, `${name}.totals.distance_meters`),
-        oxygenSaturationSamples: integerValue(totals.oxygen_saturation_samples, `${name}.totals.oxygen_saturation_samples`),
-        oxygenSaturationMinimum: nullableDashboardNumber(totals.oxygen_saturation_minimum, `${name}.totals.oxygen_saturation_minimum`),
-        oxygenSaturationAverage: nullableDashboardNumber(totals.oxygen_saturation_average, `${name}.totals.oxygen_saturation_average`),
-        restingHeartRateSamples: integerValue(totals.resting_heart_rate_samples, `${name}.totals.resting_heart_rate_samples`),
-        restingHeartRateMinimum: nullableDashboardNumber(totals.resting_heart_rate_minimum, `${name}.totals.resting_heart_rate_minimum`),
-        sleepSessions: integerValue(totals.sleep_sessions, `${name}.totals.sleep_sessions`),
-        sleepMinutes: integerValue(totals.sleep_minutes, `${name}.totals.sleep_minutes`),
+        distanceMeters: nonNegativeNumberValue(
+          totals.distance_meters,
+          `${name}.totals.distance_meters`,
+        ),
+        oxygenSaturationSamples: integerValue(
+          totals.oxygen_saturation_samples,
+          `${name}.totals.oxygen_saturation_samples`,
+        ),
+        oxygenSaturationMinimum: nullableDashboardNumber(
+          totals.oxygen_saturation_minimum,
+          `${name}.totals.oxygen_saturation_minimum`,
+        ),
+        oxygenSaturationAverage: nullableDashboardNumber(
+          totals.oxygen_saturation_average,
+          `${name}.totals.oxygen_saturation_average`,
+        ),
+        restingHeartRateSamples: integerValue(
+          totals.resting_heart_rate_samples,
+          `${name}.totals.resting_heart_rate_samples`,
+        ),
+        restingHeartRateMinimum: nullableDashboardNumber(
+          totals.resting_heart_rate_minimum,
+          `${name}.totals.resting_heart_rate_minimum`,
+        ),
+        sleepSessions: integerValue(
+          totals.sleep_sessions,
+          `${name}.totals.sleep_sessions`,
+        ),
+        sleepMinutes: integerValue(
+          totals.sleep_minutes,
+          `${name}.totals.sleep_minutes`,
+        ),
       },
     };
   });
-  if (new Set(sources.map((source) => source.sourcePackage)).size !== sources.length) {
-    throw new Error('wearable dashboard.sources 包含重复来源');
+  if (
+    new Set(sources.map((source) => source.sourcePackage)).size !==
+    sources.length
+  ) {
+    throw new Error("wearable dashboard.sources 包含重复来源");
   }
   return {
-    periodStart: zonedDateTimeValue(data.period_start, 'wearable dashboard.period_start'),
-    periodEnd: zonedDateTimeValue(data.period_end, 'wearable dashboard.period_end'),
+    periodStart: zonedDateTimeValue(
+      data.period_start,
+      "wearable dashboard.period_start",
+    ),
+    periodEnd: zonedDateTimeValue(
+      data.period_end,
+      "wearable dashboard.period_end",
+    ),
     sources,
   };
 }
 
 export function parseHealthProfileCards(value: unknown): HealthProfileCards {
-  const data = objectValue(value, 'health profile cards');
+  const data = objectValue(value, "health profile cards");
   if (!Array.isArray(data.cards)) {
-    throw new Error('health profile cards.cards 必须是数组');
+    throw new Error("health profile cards.cards 必须是数组");
   }
   return {
     cards: data.cards.map(parseHealthProfileCard),
@@ -1325,99 +1596,100 @@ export function parseHealthProfileCards(value: unknown): HealthProfileCards {
 export function parseHealthProfileCardDecision(
   value: unknown,
 ): HealthProfileCardDecision {
-  const data = objectValue(value, 'health profile card decision');
-  const status = stringValue(data.status, 'health profile card decision.status');
-  if (!['applied', 'rejected', 'conflicted'].includes(status)) {
+  const data = objectValue(value, "health profile card decision");
+  const status = stringValue(
+    data.status,
+    "health profile card decision.status",
+  );
+  if (!["applied", "rejected", "conflicted"].includes(status)) {
     throw new Error(`未知健康档案卡片状态：${status}`);
   }
   return {
-    cardId: uuidValue(data.card_id, 'health profile card decision.card_id'),
-    status: status as HealthProfileCardDecision['status'],
+    cardId: uuidValue(data.card_id, "health profile card decision.card_id"),
+    status: status as HealthProfileCardDecision["status"],
   };
 }
 
 export function parseHealthProfileChangeResult(
   value: unknown,
 ): HealthProfileChangeResult {
-  const data = objectValue(value, 'health profile change');
-  const status = stringValue(data.status, 'health profile change.status');
-  if (status !== 'applied') {
+  const data = objectValue(value, "health profile change");
+  const status = stringValue(data.status, "health profile change.status");
+  if (status !== "applied") {
     throw new Error(`未知健康档案修改状态：${status}`);
   }
   const targetType = stringValue(
     data.target_type,
-    'health profile change.target_type',
+    "health profile change.target_type",
   );
-  if (targetType !== 'personal_profile' && targetType !== 'health_fact') {
-    throw new Error('health profile change.target_type 无效');
+  if (targetType !== "personal_profile" && targetType !== "health_fact") {
+    throw new Error("health profile change.target_type 无效");
   }
   const operation = stringValue(
     data.operation,
-    'health profile change.operation',
+    "health profile change.operation",
   );
-  if (!['set', 'clear', 'add', 'update', 'retract'].includes(operation)) {
-    throw new Error('health profile change.operation 无效');
+  if (!["set", "clear", "add", "update", "retract"].includes(operation)) {
+    throw new Error("health profile change.operation 无效");
   }
   return {
-    changeId: uuidValue(data.change_id, 'health profile change.change_id'),
+    changeId: uuidValue(data.change_id, "health profile change.change_id"),
     status,
     targetType,
-    fieldName: stringValue(data.field_name, 'health profile change.field_name'),
-    operation: operation as HealthProfileChangeResult['operation'],
+    fieldName: stringValue(data.field_name, "health profile change.field_name"),
+    operation: operation as HealthProfileChangeResult["operation"],
     targetId:
       data.target_id === null
         ? null
-        : uuidValue(data.target_id, 'health profile change.target_id'),
+        : uuidValue(data.target_id, "health profile change.target_id"),
     resultRevision: integerValue(
       data.result_revision,
-      'health profile change.result_revision',
+      "health profile change.result_revision",
     ),
   };
 }
 
 export function parseChatStreamEvent(value: unknown): ChatStreamEvent {
-  const data = objectValue(value, 'stream event');
-  const type = stringValue(data.type, 'stream event.type');
+  const data = objectValue(value, "stream event");
+  const type = stringValue(data.type, "stream event.type");
 
   switch (type) {
-    case 'message_started':
+    case "message_started":
       return {
         type,
-        userMessageId: uuidValue(data.user_message_id, 'user_message_id'),
+        userMessageId: uuidValue(data.user_message_id, "user_message_id"),
         assistantMessageId: uuidValue(
           data.assistant_message_id,
-          'assistant_message_id',
+          "assistant_message_id",
         ),
-        runId: uuidValue(data.run_id, 'run_id'),
+        runId: uuidValue(data.run_id, "run_id"),
       };
-    case 'text_delta':
+    case "text_delta":
       return {
         type,
-        delta: stringValue(data.delta, 'delta'),
+        delta: stringValue(data.delta, "delta"),
       };
-    case 'agent_activity': {
-      const phase = stringValue(data.phase, 'phase');
-      if (
-        !['thinking', 'searching', 'reading', 'organizing'].includes(phase)
-      ) {
+    case "agent_activity": {
+      const phase = stringValue(data.phase, "phase");
+      if (!["thinking", "searching", "reading", "organizing"].includes(phase)) {
         throw new Error(`未知活动阶段：${phase}`);
       }
       return { type, phase: phase as AgentActivityPhase };
     }
-    case 'message_completed':
+    case "message_completed":
       return {
         type,
-        inputTokens: integerValue(data.input_tokens, 'input_tokens'),
-        outputTokens: integerValue(data.output_tokens, 'output_tokens'),
-        sources: parseSources(data.sources, 'sources'),
+        inputTokens: integerValue(data.input_tokens, "input_tokens"),
+        outputTokens: integerValue(data.output_tokens, "output_tokens"),
+        sources: parseSources(data.sources, "sources"),
       };
-    case 'message_failed': {
-      const code = stringValue(data.code, 'code');
-      if (code !== 'agent_run_failed') throw new Error(`未知失败代码：${code}`);
+    case "message_failed": {
+      const code = stringValue(data.code, "code");
+      if (code !== "agent_run_failed") throw new Error(`未知失败代码：${code}`);
       return {
         type,
         code,
-        errorType: stringValue(data.error_type, 'error_type'),
+        errorType: stringValue(data.error_type, "error_type"),
       };
     }
     default:
@@ -1429,26 +1701,26 @@ export function readErrorPayload(value: unknown): {
   code?: string;
   message?: string;
 } {
-  const data = objectValue(value, 'error response');
+  const data = objectValue(value, "error response");
   const detail =
-    typeof data.detail === 'object' &&
+    typeof data.detail === "object" &&
     data.detail !== null &&
     !Array.isArray(data.detail)
       ? (data.detail as JsonObject)
       : null;
   return {
     code:
-      typeof data.code === 'string'
+      typeof data.code === "string"
         ? data.code
-        : typeof detail?.code === 'string'
+        : typeof detail?.code === "string"
           ? detail.code
           : undefined,
     message:
-      typeof data.message === 'string'
+      typeof data.message === "string"
         ? data.message
-        : typeof data.detail === 'string'
+        : typeof data.detail === "string"
           ? data.detail
-          : typeof detail?.message === 'string'
+          : typeof detail?.message === "string"
             ? detail.message
             : undefined,
   };

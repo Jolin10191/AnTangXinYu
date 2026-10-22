@@ -1,11 +1,8 @@
-import {
-  fetch as expoFetch,
-  type FetchRequestInit,
-} from 'expo/fetch';
-import { File } from 'expo-file-system';
+import { fetch as expoFetch, type FetchRequestInit } from "expo/fetch";
+import { File } from "expo-file-system";
 
-import type { TokenStore } from '../auth/token-store';
-import { consumeChatStream } from './ndjson';
+import type { TokenStore } from "../auth/token-store";
+import { consumeChatStream } from "./ndjson";
 import {
   parseAuthResult,
   parseAttachmentUpload,
@@ -37,7 +34,16 @@ import {
   type User,
   type WearableImportResponse,
   type WearableRecord,
-} from './types';
+  parsePatientGrants,
+  parsePatientGrant,
+  parsePatientPage,
+  parseClinicianApplication,
+  parseOwnApplication,
+  parseApplicationsPage,
+  parseUserOverview,
+  type ApplicationStatus,
+  type RegistrationOptions,
+} from "./types";
 
 export type FetchFunction = (
   input: string | URL,
@@ -53,33 +59,35 @@ export class ApiError extends Error {
     readonly code?: string,
   ) {
     super(message);
-    this.name = 'ApiError';
+    this.name = "ApiError";
   }
 }
 
 export class SessionExpiredError extends Error {
-  constructor(message = '登录已过期，请重新登录。') {
+  constructor(message = "登录已过期，请重新登录。") {
     super(message);
-    this.name = 'SessionExpiredError';
+    this.name = "SessionExpiredError";
   }
 }
 
 export class SessionChangedError extends Error {
-  constructor(message = '登录账号已发生变化，旧请求已停止。') {
+  constructor(message = "登录账号已发生变化，旧请求已停止。") {
     super(message);
-    this.name = 'SessionChangedError';
+    this.name = "SessionChangedError";
   }
 }
 
 export function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : '发生了未知错误';
+  return error instanceof Error ? error.message : "发生了未知错误";
 }
 
 async function responseJson(response: FetchResponse): Promise<unknown> {
   try {
     return await response.json();
   } catch {
-    throw new Error(`服务器返回 HTTP ${response.status}，响应内容不是有效 JSON`);
+    throw new Error(
+      `服务器返回 HTTP ${response.status}，响应内容不是有效 JSON`,
+    );
   }
 }
 
@@ -102,13 +110,17 @@ export class ApiClient {
     return `${this.baseUrl}${path}`;
   }
 
-  private jsonInit(init: FetchRequestInit = {}, accessToken?: string): FetchRequestInit {
+  private jsonInit(
+    init: FetchRequestInit = {},
+    accessToken?: string,
+  ): FetchRequestInit {
     const headers = new Headers(init.headers);
-    if (!headers.has('Accept')) headers.set('Accept', 'application/json');
+    if (!headers.has("Accept")) headers.set("Accept", "application/json");
     if (init.body !== undefined && !(init.body instanceof FormData)) {
-      headers.set('Content-Type', 'application/json');
+      headers.set("Content-Type", "application/json");
     }
-    if (accessToken !== undefined) headers.set('Authorization', `Bearer ${accessToken}`);
+    if (accessToken !== undefined)
+      headers.set("Authorization", `Bearer ${accessToken}`);
     return { ...init, headers };
   }
 
@@ -128,11 +140,16 @@ export class ApiClient {
   ): Promise<void> {
     if (!response.ok) throw await this.apiError(response);
 
-    const contentType = response.headers.get('content-type')?.split(';')[0].trim();
-    if (contentType !== 'application/x-ndjson') {
-      throw new Error(`聊天接口返回了错误的 Content-Type：${contentType ?? '缺失'}`);
+    const contentType = response.headers
+      .get("content-type")
+      ?.split(";")[0]
+      .trim();
+    if (contentType !== "application/x-ndjson") {
+      throw new Error(
+        `聊天接口返回了错误的 Content-Type：${contentType ?? "缺失"}`,
+      );
     }
-    if (response.body === null) throw new Error('聊天接口没有返回响应流');
+    if (response.body === null) throw new Error("聊天接口没有返回响应流");
 
     await consumeChatStream(response.body, onEvent);
   }
@@ -152,7 +169,10 @@ export class ApiClient {
   }
 
   /** Serializes SecureStore writes so an older async request can never finish last. */
-  private mutateTokens<T>(version: number, mutation: () => Promise<T>): Promise<T> {
+  private mutateTokens<T>(
+    version: number,
+    mutation: () => Promise<T>,
+  ): Promise<T> {
     const result = this.tokenMutationTail.then(async () => {
       this.assertSessionVersion(version);
       return mutation();
@@ -178,9 +198,9 @@ export class ApiClient {
     version: number,
   ): Promise<TokenPair> {
     const response = await this.fetchImpl(
-      this.url('/api/v1/auth/refresh'),
+      this.url("/api/v1/auth/refresh"),
       this.jsonInit({
-        method: 'POST',
+        method: "POST",
         body: JSON.stringify({ refresh_token: refreshToken }),
       }),
     );
@@ -278,25 +298,42 @@ export class ApiClient {
   }
 
   async login(username: string, password: string): Promise<User> {
-    return this.authenticate('/api/v1/auth/login', username, password);
+    return this.authenticate("/api/v1/auth/login", username, password);
   }
 
-  async register(username: string, password: string): Promise<User> {
-    return this.authenticate('/api/v1/auth/register', username, password);
+  async register(
+    username: string,
+    password: string,
+    options?: RegistrationOptions,
+  ): Promise<User> {
+    return this.authenticate(
+      "/api/v1/auth/register",
+      username,
+      password,
+      options === undefined
+        ? {}
+        : {
+            consent_accepted: options.consentAccepted,
+            full_name: options.fullName,
+            registration_kind: options.registrationKind,
+            organization: options.organization,
+          },
+    );
   }
 
   private async authenticate(
     path: string,
     username: string,
     password: string,
+    extra: Record<string, unknown> = {},
   ): Promise<User> {
     const version = this.advanceSession();
     await this.mutateTokens(version, () => this.tokenStore.clear());
     const response = await this.fetchImpl(
       this.url(path),
       this.jsonInit({
-        method: 'POST',
-        body: JSON.stringify({ username, password }),
+        method: "POST",
+        body: JSON.stringify({ username, password, ...extra }),
       }),
     );
     this.assertSessionVersion(version);
@@ -308,7 +345,104 @@ export class ApiClient {
   }
 
   async me(signal?: AbortSignal): Promise<User> {
-    const response = await this.authorizedFetch('/api/v1/auth/me', { signal });
+    const response = await this.authorizedFetch("/api/v1/auth/me", { signal });
+    if (!response.ok) throw await this.apiError(response);
+    return parseUser(await responseJson(response));
+  }
+
+  async updateAccountName(fullName: string): Promise<User> {
+    const response = await this.authorizedFetch("/api/v1/auth/me", {
+      method: "PATCH",
+      body: JSON.stringify({ full_name: fullName }),
+    });
+    if (!response.ok) throw await this.apiError(response);
+    return parseUser(await responseJson(response));
+  }
+
+  async getOwnClinicianApplication(signal?: AbortSignal) {
+    const response = await this.authorizedFetch(
+      "/api/v1/clinician-applications/me",
+      { signal },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseOwnApplication(await responseJson(response));
+  }
+
+  async submitClinicianApplication(fullName: string, organization: string) {
+    const response = await this.authorizedFetch(
+      "/api/v1/clinician-applications",
+      {
+        method: "POST",
+        body: JSON.stringify({ full_name: fullName, organization }),
+      },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseClinicianApplication(await responseJson(response));
+  }
+
+  async getAdminOverview(signal?: AbortSignal) {
+    const response = await this.authorizedFetch("/api/v1/admin/overview", {
+      signal,
+    });
+    if (!response.ok) throw await this.apiError(response);
+    return parseUserOverview(await responseJson(response));
+  }
+
+  async getClinicianApplications(
+    status: ApplicationStatus,
+    after?: string,
+    signal?: AbortSignal,
+  ) {
+    const response = await this.authorizedFetch(
+      `/api/v1/admin/clinician-applications?status=${status}&limit=30${after ? `&after=${encodeURIComponent(after)}` : ""}`,
+      { signal },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseApplicationsPage(await responseJson(response));
+  }
+
+  async reviewClinicianApplication(
+    id: string,
+    decision: "approve" | "reject",
+    reason?: string,
+  ) {
+    const response = await this.authorizedFetch(
+      `/api/v1/admin/clinician-applications/${encodeURIComponent(id)}/review`,
+      {
+        method: "POST",
+        body: JSON.stringify({ decision, reason }),
+      },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseClinicianApplication(await responseJson(response));
+  }
+
+  async getClinicians(after?: string, signal?: AbortSignal) {
+    const response = await this.authorizedFetch(
+      `/api/v1/admin/clinicians?limit=30${after ? `&after=${encodeURIComponent(after)}` : ""}`,
+      { signal },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parsePatientPage(await responseJson(response));
+  }
+
+  async createClinician(username: string, password: string, fullName: string) {
+    const response = await this.authorizedFetch("/api/v1/admin/clinicians", {
+      method: "POST",
+      body: JSON.stringify({ username, password, full_name: fullName }),
+    });
+    if (!response.ok) throw await this.apiError(response);
+    return parseUser(await responseJson(response));
+  }
+
+  async assignClinician(username: string) {
+    const response = await this.authorizedFetch(
+      "/api/v1/admin/clinicians/assign",
+      {
+        method: "POST",
+        body: JSON.stringify({ username }),
+      },
+    );
     if (!response.ok) throw await this.apiError(response);
     return parseUser(await responseJson(response));
   }
@@ -321,9 +455,9 @@ export class ApiClient {
     const logoutVersion = this.advanceSession();
 
     const response = await this.fetchImpl(
-      this.url('/api/v1/auth/logout'),
+      this.url("/api/v1/auth/logout"),
       this.jsonInit({
-        method: 'POST',
+        method: "POST",
         body: JSON.stringify({ refresh_token: tokens.refreshToken }),
       }),
     );
@@ -334,8 +468,13 @@ export class ApiClient {
   }
 
   async getMessages(before: string | null = null): Promise<MessageHistory> {
-    const query = before === null ? '?limit=50' : `?before=${encodeURIComponent(before)}&limit=50`;
-    const response = await this.authorizedFetch(`/api/v1/chat/messages${query}`);
+    const query =
+      before === null
+        ? "?limit=50"
+        : `?before=${encodeURIComponent(before)}&limit=50`;
+    const response = await this.authorizedFetch(
+      `/api/v1/chat/messages${query}`,
+    );
     if (!response.ok) throw await this.apiError(response);
     return parseMessageHistory(await responseJson(response));
   }
@@ -367,17 +506,17 @@ export class ApiClient {
   async syncPushInstallation(
     installationId: string,
     expoPushToken: string | null,
-    permission: 'undetermined' | 'denied' | 'granted',
+    permission: "undetermined" | "denied" | "granted",
     appVersion: string,
   ): Promise<void> {
     const response = await this.authorizedFetch(
       `/api/v1/proactive-care/installations/${encodeURIComponent(installationId)}`,
       {
-        method: 'PUT',
+        method: "PUT",
         body: JSON.stringify({
           expo_push_token: expoPushToken,
           permission,
-          platform: 'android',
+          platform: "android",
           app_version: appVersion,
         }),
       },
@@ -388,7 +527,7 @@ export class ApiClient {
   async disablePushInstallation(installationId: string): Promise<void> {
     const response = await this.authorizedFetch(
       `/api/v1/proactive-care/installations/${encodeURIComponent(installationId)}`,
-      { method: 'DELETE' },
+      { method: "DELETE" },
     );
     if (!response.ok) throw await this.apiError(response);
   }
@@ -396,14 +535,14 @@ export class ApiClient {
   async markPushDeliveryOpened(deliveryId: string): Promise<void> {
     const response = await this.authorizedFetch(
       `/api/v1/proactive-care/deliveries/${encodeURIComponent(deliveryId)}/opened`,
-      { method: 'POST' },
+      { method: "POST" },
     );
     if (!response.ok) throw await this.apiError(response);
   }
 
   async getProactiveCareSettings(): Promise<ProactiveCareSettings> {
     const response = await this.authorizedFetch(
-      '/api/v1/proactive-care/settings',
+      "/api/v1/proactive-care/settings",
     );
     if (!response.ok) throw await this.apiError(response);
     return parseProactiveCareSettings(await responseJson(response));
@@ -413,9 +552,9 @@ export class ApiClient {
     settings: ProactiveCareSettings,
   ): Promise<ProactiveCareSettings> {
     const response = await this.authorizedFetch(
-      '/api/v1/proactive-care/settings',
+      "/api/v1/proactive-care/settings",
       {
-        method: 'PUT',
+        method: "PUT",
         body: JSON.stringify({
           routine_cadence: settings.routineCadence,
           plan_follow_up_enabled: settings.planFollowUpEnabled,
@@ -433,22 +572,99 @@ export class ApiClient {
   }
 
   async getHealthProfileCards(): Promise<HealthProfileCards> {
-    const response = await this.authorizedFetch('/api/v1/health-profile/cards?limit=50');
+    const response = await this.authorizedFetch(
+      "/api/v1/health-profile/cards?limit=50",
+    );
     if (!response.ok) throw await this.apiError(response);
     return parseHealthProfileCards(await responseJson(response));
   }
 
   async getHealthProfile(signal?: AbortSignal): Promise<HealthProfile> {
-    const response = await this.authorizedFetch('/api/v1/health-profile', {
+    const response = await this.authorizedFetch("/api/v1/health-profile", {
       signal,
     });
     if (!response.ok) throw await this.apiError(response);
     return parseHealthProfile(await responseJson(response));
   }
 
+  async getPatientGrants(signal?: AbortSignal) {
+    const response = await this.authorizedFetch(
+      "/api/v1/patient-access-grants",
+      { signal },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parsePatientGrants(await responseJson(response));
+  }
+
+  async resolveClinician(username: string) {
+    const response = await this.authorizedFetch(
+      "/api/v1/patient-access-grants/resolve",
+      {
+        method: "POST",
+        body: JSON.stringify({ username }),
+      },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseUser(await responseJson(response));
+  }
+
+  async grantPatientAccess(clinicianId: string) {
+    const response = await this.authorizedFetch(
+      "/api/v1/patient-access-grants",
+      {
+        method: "POST",
+        body: JSON.stringify({ clinician_id: clinicianId }),
+      },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parsePatientGrant(await responseJson(response));
+  }
+
+  async revokePatientAccess(grantId: string) {
+    const response = await this.authorizedFetch(
+      `/api/v1/patient-access-grants/${grantId}`,
+      { method: "DELETE" },
+    );
+    if (!response.ok) throw await this.apiError(response);
+  }
+
+  async getPatients(after?: string, signal?: AbortSignal) {
+    const response = await this.authorizedFetch(
+      `/api/v1/patients?limit=30${after ? `&after=${encodeURIComponent(after)}` : ""}`,
+      { signal },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parsePatientPage(await responseJson(response));
+  }
+
+  async getPatientHealthProfile(
+    patientId: string,
+    signal?: AbortSignal,
+  ): Promise<HealthProfile> {
+    const response = await this.authorizedFetch(
+      `/api/v1/patients/${encodeURIComponent(patientId)}/health-profile`,
+      { signal },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseHealthProfile(await responseJson(response));
+  }
+
+  async getPatientWearableDashboard(
+    patientId: string,
+    signal?: AbortSignal,
+  ): Promise<WearableDashboard> {
+    const response = await this.authorizedFetch(
+      `/api/v1/patients/${encodeURIComponent(patientId)}/wearable-dashboard`,
+      { signal },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseWearableDashboard(await responseJson(response));
+  }
+
   async getWearableDashboard(signal?: AbortSignal): Promise<WearableDashboard> {
     const response = await this.authorizedFetch(
-      '/api/v1/health-profile/wearable-dashboard', { signal },
+      "/api/v1/health-profile/wearable-dashboard",
+      { signal },
     );
     if (!response.ok) throw await this.apiError(response);
     return parseWearableDashboard(await responseJson(response));
@@ -466,7 +682,7 @@ export class ApiClient {
             client_action_id: clientActionId,
             option_id: answer.optionId,
           }
-        : customAnswer.targetType === 'personal_profile'
+        : customAnswer.targetType === "personal_profile"
           ? {
               client_action_id: clientActionId,
               custom_answer: {
@@ -487,7 +703,7 @@ export class ApiClient {
     const response = await this.authorizedFetch(
       `/api/v1/health-profile/cards/${encodeURIComponent(cardId)}/answer`,
       {
-        method: 'POST',
+        method: "POST",
         body: JSON.stringify(body),
       },
     );
@@ -495,13 +711,13 @@ export class ApiClient {
       const payload = await responseJson(response);
       try {
         const result = parseHealthProfileCardDecision(payload);
-        if (result.status === 'conflicted') return result;
+        if (result.status === "conflicted") return result;
       } catch {
         // A normal API error is handled below from the already-read payload.
       }
       const details = readErrorPayload(payload);
       throw new ApiError(
-        details.message ?? '服务器返回 HTTP 409',
+        details.message ?? "服务器返回 HTTP 409",
         response.status,
         details.code,
       );
@@ -520,37 +736,40 @@ export class ApiClient {
       operation: change.operation,
     };
 
-    if ('fieldName' in change) body.field_name = change.fieldName;
-    if ('targetId' in change) body.target_id = change.targetId;
-    if ('value' in change) body.value = change.value;
-    if ('unit' in change && change.unit !== undefined) body.unit = change.unit;
-    if ('factType' in change) body.fact_type = change.factType;
-    if ('statement' in change) body.statement = change.statement;
-    if ('assertion' in change) body.assertion = change.assertion;
-    if ('temporalStatus' in change) {
+    if ("fieldName" in change) body.field_name = change.fieldName;
+    if ("targetId" in change) body.target_id = change.targetId;
+    if ("value" in change) body.value = change.value;
+    if ("unit" in change && change.unit !== undefined) body.unit = change.unit;
+    if ("factType" in change) body.fact_type = change.factType;
+    if ("statement" in change) body.statement = change.statement;
+    if ("assertion" in change) body.assertion = change.assertion;
+    if ("temporalStatus" in change) {
       body.temporal_status = change.temporalStatus;
     }
 
-    const response = await this.authorizedFetch('/api/v1/health-profile/changes', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
+    const response = await this.authorizedFetch(
+      "/api/v1/health-profile/changes",
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
     if (!response.ok) throw await this.apiError(response);
     return parseHealthProfileChangeResult(await responseJson(response));
   }
 
   async importWearableRecords(
     clientSyncId: string,
-    recordType: WearableRecord['record_type'],
+    recordType: WearableRecord["record_type"],
     healthContextComplete: boolean,
     records: WearableRecord[],
     deletedRecordIds: string[],
     signal?: AbortSignal,
   ): Promise<WearableImportResponse> {
     const response = await this.authorizedFetch(
-      '/api/v1/health-profile/wearable-imports',
+      "/api/v1/health-profile/wearable-imports",
       {
-        method: 'POST',
+        method: "POST",
         body: JSON.stringify({
           client_sync_id: clientSyncId,
           record_type: recordType,
@@ -566,12 +785,12 @@ export class ApiClient {
   }
 
   async listHealthConnectRecordIds(
-    recordType: WearableRecord['record_type'],
+    recordType: WearableRecord["record_type"],
     after?: string,
     signal?: AbortSignal,
   ): Promise<HealthConnectRecordIdsPage> {
     const query = new URLSearchParams({ record_type: recordType });
-    if (after !== undefined) query.set('after', after);
+    if (after !== undefined) query.set("after", after);
     const response = await this.authorizedFetch(
       `/api/v1/health-profile/wearable-health-connect-ids?${query.toString()}`,
       { signal },
@@ -587,39 +806,36 @@ export class ApiClient {
     onEvent: (event: ChatStreamEvent) => void,
     signal?: AbortSignal,
   ): Promise<void> {
-    const response = await this.authorizedFetch('/api/v1/chat/messages', {
-      method: 'POST',
+    const response = await this.authorizedFetch("/api/v1/chat/messages", {
+      method: "POST",
       body: JSON.stringify({
         client_message_id: clientMessageId,
         content,
         attachment_id: attachmentId,
       }),
       signal,
-      headers: { Accept: 'application/x-ndjson' },
+      headers: { Accept: "application/x-ndjson" },
     });
 
     await this.consumeChatResponse(response, onEvent);
   }
 
   async uploadChatAttachment(attachment: {
-    kind: 'photo' | 'report';
+    kind: "photo" | "report";
     mimeType: string;
     name: string;
     uri: string;
   }): Promise<ChatAttachment> {
     const form = new FormData();
     const file = new File(attachment.uri);
-    form.append('kind', attachment.kind);
-    form.append(
-      'file',
-      {
-        bytes: () => file.bytes(),
-        name: attachment.name,
-        type: attachment.mimeType,
-      } as unknown as Blob,
-    );
-    const response = await this.authorizedFetch('/api/v1/chat/attachments', {
-      method: 'POST',
+    form.append("kind", attachment.kind);
+    form.append("file", {
+      bytes: () => file.bytes(),
+      name: attachment.name,
+      type: attachment.mimeType,
+    } as unknown as Blob);
+    const response = await this.authorizedFetch("/api/v1/chat/attachments", {
+      method: "POST",
       body: form,
     });
     if (!response.ok) throw await this.apiError(response);
@@ -634,9 +850,9 @@ export class ApiClient {
     const response = await this.authorizedFetch(
       `/api/v1/chat/messages/${encodeURIComponent(failedAssistantMessageId)}/retry`,
       {
-        method: 'POST',
+        method: "POST",
         signal,
-        headers: { Accept: 'application/x-ndjson' },
+        headers: { Accept: "application/x-ndjson" },
       },
     );
 

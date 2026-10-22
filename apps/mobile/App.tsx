@@ -1,21 +1,30 @@
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { useCallback, useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 
-import { appClient, setSessionExpiredListener } from './src/api/app-client';
-import { errorMessage, SessionExpiredError } from './src/api/client';
-import type { User } from './src/api/types';
-import { AuthScreen } from './src/auth/AuthScreen';
-import { secureTokenStore } from './src/auth/token-store';
-import { ChatScreen } from './src/chat/ChatScreen';
-import { BrandMark } from './src/ui/brand-mark';
-import { colors, radii, spacing, typefaces } from './src/ui/theme';
+import { appClient, setSessionExpiredListener } from "./src/api/app-client";
+import { errorMessage, SessionExpiredError } from "./src/api/client";
+import type { User } from "./src/api/types";
+import { AuthScreen } from "./src/auth/AuthScreen";
+import { AdministrationScreen } from "./src/administration/AdministrationScreen";
+import { ClinicianApplicationScreen } from "./src/administration/ClinicianApplicationScreen";
+import { secureTokenStore } from "./src/auth/token-store";
+import { ChatScreen } from "./src/chat/ChatScreen";
+import { ClinicianScreen } from "./src/patient-access/patient-access-screen";
+import { BrandMark } from "./src/ui/brand-mark";
+import { colors, radii, spacing, typefaces } from "./src/ui/theme";
 
 type AppState =
-  | { kind: 'loading' }
-  | { kind: 'signed-out'; message?: string }
-  | { kind: 'signed-in'; user: User }
-  | { kind: 'startup-error'; message: string };
+  | { kind: "loading" }
+  | { kind: "signed-out"; message?: string }
+  | { kind: "signed-in"; user: User }
+  | { kind: "startup-error"; message: string };
 
 export default function App() {
   return (
@@ -26,14 +35,18 @@ export default function App() {
 }
 
 function AppRoot() {
-  const [state, setState] = useState<AppState>({ kind: 'loading' });
+  const [state, setState] = useState<AppState>({ kind: "loading" });
   const [startupAttempt, setStartupAttempt] = useState(0);
   const api = appClient;
+  const updateUser = useCallback(
+    (user: User) => setState({ kind: "signed-in", user }),
+    [],
+  );
 
   useEffect(
     () =>
       setSessionExpiredListener(() => {
-        setState({ kind: 'signed-out', message: '登录已过期，请重新登录。' });
+        setState({ kind: "signed-out", message: "登录已过期，请重新登录。" });
       }),
     [],
   );
@@ -46,18 +59,18 @@ function AppRoot() {
         const tokens = await secureTokenStore.load();
 
         if (tokens === null) {
-          if (active) setState({ kind: 'signed-out' });
+          if (active) setState({ kind: "signed-out" });
           return;
         }
 
         const user = await api.me();
-        if (active) setState({ kind: 'signed-in', user });
+        if (active) setState({ kind: "signed-in", user });
       } catch (error) {
         if (active) {
           if (error instanceof SessionExpiredError) {
-            setState({ kind: 'signed-out', message: error.message });
+            setState({ kind: "signed-out", message: error.message });
           } else {
-            setState({ kind: 'startup-error', message: errorMessage(error) });
+            setState({ kind: "startup-error", message: errorMessage(error) });
           }
         }
       }
@@ -70,7 +83,7 @@ function AppRoot() {
     };
   }, [api, startupAttempt]);
 
-  if (state.kind === 'loading') {
+  if (state.kind === "loading") {
     return (
       <SafeAreaView style={styles.centered}>
         <BrandMark size={62} />
@@ -83,7 +96,7 @@ function AppRoot() {
     );
   }
 
-  if (state.kind === 'startup-error') {
+  if (state.kind === "startup-error") {
     return (
       <SafeAreaView style={styles.centered}>
         <View style={styles.errorCard}>
@@ -97,7 +110,7 @@ function AppRoot() {
           <Pressable
             accessibilityRole="button"
             onPress={() => {
-              setState({ kind: 'loading' });
+              setState({ kind: "loading" });
               setStartupAttempt((attempt) => attempt + 1);
             }}
             style={({ pressed }) => [
@@ -112,12 +125,45 @@ function AppRoot() {
     );
   }
 
-  if (state.kind === 'signed-out') {
+  if (state.kind === "signed-out") {
     return (
       <AuthScreen
         api={api}
         initialMessage={state.message}
-        onAuthenticated={(user) => setState({ kind: 'signed-in', user })}
+        onAuthenticated={(user) => setState({ kind: "signed-in", user })}
+      />
+    );
+  }
+
+  if (state.user.role === "researcher") {
+    return (
+      <AdministrationScreen
+        api={api}
+        user={state.user}
+        onSignedOut={() => setState({ kind: "signed-out" })}
+      />
+    );
+  }
+
+  if (
+    state.user.role === "patient" &&
+    ["pending", "rejected"].includes(state.user.applicationStatus ?? "")
+  ) {
+    return (
+      <ClinicianApplicationScreen
+        api={api}
+        onUserUpdated={updateUser}
+        onSignedOut={() => setState({ kind: "signed-out" })}
+      />
+    );
+  }
+
+  if (state.user.role === "clinician") {
+    return (
+      <ClinicianScreen
+        api={api}
+        user={state.user}
+        onSignedOut={() => setState({ kind: "signed-out" })}
       />
     );
   }
@@ -126,7 +172,7 @@ function AppRoot() {
     <ChatScreen
       api={api}
       user={state.user}
-      onSignedOut={() => setState({ kind: 'signed-out' })}
+      onSignedOut={() => setState({ kind: "signed-out" })}
     />
   );
 }
@@ -134,8 +180,8 @@ function AppRoot() {
 const styles = StyleSheet.create({
   centered: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     gap: spacing.sm,
     paddingHorizontal: spacing.xl,
     backgroundColor: colors.background,
@@ -144,11 +190,11 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontFamily: typefaces.sansMedium,
     fontSize: 28,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   loadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: spacing.xs,
     paddingTop: spacing.sm,
   },
@@ -158,22 +204,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   errorCard: {
-    width: '100%',
+    width: "100%",
     maxWidth: 420,
-    alignItems: 'center',
+    alignItems: "center",
     gap: spacing.sm,
     padding: spacing.xl,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.line,
     borderRadius: radii.xl,
-    borderCurve: 'continuous',
+    borderCurve: "continuous",
     backgroundColor: colors.paper,
   },
   errorMark: {
     width: 42,
     height: 42,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     marginBottom: spacing.xs,
     borderRadius: radii.pill,
     backgroundColor: colors.coralSoft,
@@ -182,20 +228,20 @@ const styles = StyleSheet.create({
     color: colors.danger,
     fontFamily: typefaces.serif,
     fontSize: 24,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   errorTitle: {
     color: colors.ink,
     fontFamily: typefaces.sansMedium,
     fontSize: 24,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   errorText: {
     color: colors.muted,
     fontFamily: typefaces.sans,
     fontSize: 14,
     lineHeight: 21,
-    textAlign: 'center',
+    textAlign: "center",
   },
   actionButton: {
     marginTop: spacing.sm,

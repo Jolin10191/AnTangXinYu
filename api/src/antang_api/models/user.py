@@ -1,9 +1,16 @@
 from datetime import datetime
 from uuid import UUID, uuid4
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Uuid, func, true
+from enum import StrEnum
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, Uuid, func, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from antang_api.database import Base
+
+
+class UserRole(StrEnum):
+    PATIENT = "patient"
+    CLINICIAN = "clinician"
+    RESEARCHER = "researcher"
 
 
 class User(Base):
@@ -15,7 +22,21 @@ class User(Base):
 
     username_normalized: Mapped[str] = mapped_column(String(32), unique=True)
 
+    full_name: Mapped[str | None] = mapped_column(String(64))
+
     password_hash: Mapped[str] = mapped_column(String(255))
+
+    role: Mapped[UserRole] = mapped_column(
+        Enum(
+            UserRole,
+            values_callable=lambda roles: [role.value for role in roles],
+            native_enum=False,
+            create_constraint=True,
+            name="user_role",
+        ),
+        default=UserRole.PATIENT,
+        server_default="patient",
+    )
 
     is_active: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default=true()

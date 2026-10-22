@@ -55,6 +55,7 @@ import { useHealthConnect } from '../health-connect/use-health-connect';
 import { useGadgetbridge } from '../health-connect/useGadgetbridge';
 import { HealthOverviewScreen } from '../health-overview';
 import { HealthDashboardScreen } from '../health/HealthDashboardScreen';
+import { PatientAccessScreen } from '../patient-access/patient-access-screen';
 import { AppMenu, type ConversationAnchor } from '../navigation/app-menu';
 import { useNotifications } from '../notifications/use-notifications';
 import { CareSettingsModal } from '../proactive-care/care-settings-modal';
@@ -108,6 +109,7 @@ export function ChatScreen({ api, user, onSignedOut }: Props) {
   const [showCamera, setShowCamera] = useState(false);
   const [showReportPicker, setShowReportPicker] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [showPatientAccess, setShowPatientAccess] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [attachment, setAttachment] = useState<DraftAttachment | null>(null);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
@@ -971,7 +973,12 @@ export function ChatScreen({ api, user, onSignedOut }: Props) {
         importPreview={gadgetbridge.lastBundle}
       />
 
+      {showPatientAccess ? <Modal visible animationType="slide" onRequestClose={() => setShowPatientAccess(false)}>
+        <PatientAccessScreen api={api} onClose={() => setShowPatientAccess(false)} />
+      </Modal> : null}
+
       <AppMenu
+        onOpenPatientAccess={() => { setShowMenu(false); setShowPatientAccess(true); }}
         conversations={conversationAnchors}
         onClose={() => setShowMenu(false)}
         onOpenHealth={() => {

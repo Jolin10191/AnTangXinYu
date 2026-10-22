@@ -10,6 +10,7 @@ from pydantic import (
     NonNegativeInt,
     PositiveInt,
     StringConstraints,
+    field_validator,
     model_validator,
 )
 
@@ -522,3 +523,109 @@ class HealthProfileResponse(BaseModel):
     health_facts: list[HealthFactSnapshot]
     wearable_latest: list[WearableLatestResponse]
     heart_rate_trend: list[HeartRateTrendPointResponse]
+
+
+class PsychosocialAssessmentRequest(BaseModel):
+    """一次 HFS-II 与 Gold score 评估的得分率。
+
+    存百分比而不是原始分，因为 HFS 有 33 题、13 题、9 题三个版本，分母不同。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    fear_behavior_percent: Annotated[int, Field(ge=0, le=100)]
+    fear_worry_percent: Annotated[int, Field(ge=0, le=100)]
+    gold_score: Annotated[int | None, Field(ge=1, le=7)] = None
+    instrument: Annotated[str, Field(max_length=64)] = "HFS-II"
+    assessed_at: datetime
+
+    @field_validator("assessed_at")
+    @classmethod
+    def require_offset(cls, value: datetime) -> datetime:
+        """不带时区的时间无法判断是哪一天，直接拒掉。"""
+
+        if value.tzinfo is None:
+            raise ValueError("assessed_at 必须带时区")
+        return value
+
+
+class PsychosocialProfileResponse(BaseModel):
+    """服务器给 App 看的档位；不返回量表原始题目与逐题答案。"""
+
+    assessed_at: datetime
+    instrument: str
+    fear_percent: int
+    fear_high: bool
+    gold_score: int | None
+    awareness: Literal["normal", "impaired", "unknown"]
+    quadrant: Literal[
+        "high_fear_normal_awareness",
+        "high_fear_impaired_awareness",
+        "low_fear_normal_awareness",
+        "low_fear_impaired_awareness",
+        "unknown_awareness",
+    ]
+    weekly_contact_limit: int
+
+
+class BeliefNodeResponse(BaseModel):
+    """信念图里的一个节点在窗口内的观测统计。"""
+
+    belief_code: str
+    label: str
+    mentions: int
+    reframes: int
+    denials: int
+    latest_quote: str
+    latest_detected_at: datetime
+    resolved: bool
+
+
+class BehaviorLogResponse(BaseModel):
+    """一条行为记录。带 id 是为了让患者自己删掉它。
+
+    label 由服务端给出，和汇总卡片上的说法保持一致；不在客户端各写一套词表，
+    否则同一条记录在两个界面里叫法会不一样。
+    """
+
+    id: UUID
+    kind: str
+    label: str
+    count: int
+    note: str | None
+    occurred_at: datetime
+
+
+class BeliefEventResponse(BaseModel):
+    """一条信念观测。quote 是患者原话，删掉这条观测等于连那句原话一起删。"""
+
+    id: UUID
+    belief_code: str
+    label: str
+    quote: str
+    occurrence: Literal["mentioned", "reframed", "denied"]
+    detected_at: datetime
+
+
+class FearSummaryResponse(BaseModel):
+    """显性分数与行为代理的对照结果。
+
+    behavior_counts 的键是行为类型，值是窗口内的总次数。
+    discrepancy 只表达「两路证据一致不一致」，不是诊断。
+    """
+
+    window_start: datetime
+    window_end: datetime
+    behavior_counts: dict[str, int]
+    behavior_total: int
+    monitoring_weekly: float
+    avoidance_weekly: float
+    beliefs: list[BeliefNodeResponse]
+    assessment: PsychosocialProfileResponse | None
+    discrepancy: Literal[
+        "aligned",
+        "implicit_higher",
+        "explicit_higher",
+        "unknown",
+    ]
+    discrepancy_note: str

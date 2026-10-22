@@ -789,7 +789,7 @@ function MetricCard({
   );
 }
 
-function WearableCard({
+export function WearableCard({
   heartRateTrend,
   observation,
 }: {

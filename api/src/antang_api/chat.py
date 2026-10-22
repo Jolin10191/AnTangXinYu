@@ -1,13 +1,14 @@
 import asyncio
 import json
 import time
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from typing import Any, Literal, cast
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+import httpx
 from anyio import CancelScope
 from langchain.agents.middleware import InputAgentState
 from langchain.chat_models import BaseChatModel
@@ -24,6 +25,8 @@ from antang_api.agents.core import (
     CoreAgentGraph,
     render_core_system_prompt,
 )
+from antang_api.agents.promises import promise_target, unbacked_promise
+from antang_api.agents.relative_day import describe_today
 from antang_api.agents.runtime import AgentContext, ToolActivity
 from antang_api.citations import (
     VISIBLE_TURN_SEPARATOR,
@@ -33,6 +36,7 @@ from antang_api.citations import (
 from antang_api.companion_memory import CompanionMemory
 from antang_api.context import prepare_chat_context
 from antang_api.context.health_profile import render_core_profile
+from antang_api.health_profile.glucose import pending_hypo_review
 from antang_api.database import lock_user_conversation
 from antang_api.models import (
     AgentRun,
@@ -41,6 +45,7 @@ from antang_api.models import (
     AgentToolCallStatus,
     CarePlan,
     CarePlanStatus,
+    GlucoseReading,
     Message,
     MessageAttachment,
     MessageAttachmentKind,
@@ -53,13 +58,23 @@ from antang_api.schemas.chat import (
     AgentActivityEvent,
     ChatStreamEvent,
     ChatSource,
+    LiveHeartRateReading,
     MessageCompletedEvent,
     MessageFailedEvent,
     MessageStartedEvent,
     TextDeltaEvent,
 )
 from antang_api.proactive_care.service import record_user_activity
+from antang_api.psychosocial import read_latest_assessment, render_guidance
+from antang_api.psychosocial.hypo_review import render_hypo_review_prompt
+from antang_api.behavioral import read_fear_summary, render_behavior_context
 from antang_api.settings import settings
+from antang_api.voice import (
+    as_speech_cue_data,
+    mark_speech_cue_consumed,
+    pending_speech_cue,
+    render_speech_cue,
+)
 
 
 class DuplicateClientMessageError(Exception):
@@ -90,8 +105,11 @@ TOOL_ACTIVITY_PHASES: dict[str, ActivityPhase] = {
     "web_search": "searching",
     "web_fetch": "reading",
     "read_wearable_data": "reading",
+    "search_diabetes_knowledge": "reading",
     "delegate_health_profile": "organizing",
     "manage_care_plan": "organizing",
+    "log_fear_behavior": "organizing",
+    "record_hypoglycemia_belief": "organizing",
 }
 
 
@@ -319,6 +337,7 @@ async def _load_running_chat_run(
 def extract_agent_result(
     final_state: dict[str, Any],
     input_message_count: int,
+    usage_by_step: dict[tuple[int, str], tuple[int, int]] | None = None,
 ) -> tuple[str, tuple[VisibleCitationTurn, ...], int, int]:
     """从最终状态取得全部可见文字和真实 token 用量。"""
 
@@ -362,6 +381,13 @@ def extract_agent_result(
     input_tokens = 0
     output_tokens = 0
 
+    if usage_by_step:
+        # 流式路径：每个模型调用只取最后一份用量（见 _record_step_usage），
+        # 合并后的 message.usage_metadata 是被放大过的。
+        input_tokens = sum(item[0] for item in usage_by_step.values())
+        output_tokens = sum(item[1] for item in usage_by_step.values())
+        return content, tuple(visible_turns), input_tokens, output_tokens
+
     for message in generated_messages:
         if not isinstance(message, AIMessage):
             continue
@@ -387,6 +413,75 @@ def _has_thinking_content(chunk: AIMessageChunk) -> bool:
         isinstance(block, dict) and block.get("type") == "thinking"
         for block in chunk.content
     )
+
+
+RETRYABLE_STREAM_ATTEMPTS = 2
+
+
+def _is_retryable_stream_error(error: BaseException) -> bool:
+    """只有网络层断流值得重试；契约错误、解析错误重试也只会再错一次。"""
+
+    return isinstance(error, (httpx.HTTPError, ConnectionError, TimeoutError))
+
+
+async def _astream_agent(
+    agent: Any,
+    agent_input: Any,
+    run_config: RunnableConfig,
+    runtime_context: AgentContext,
+    *,
+    attempts: int = RETRYABLE_STREAM_ATTEMPTS,
+    on_retry: Callable[[int, BaseException], None] | None = None,
+) -> AsyncIterator[dict[str, Any]]:
+    """把 Agent 的流包一层，只在「还什么都没发出去」时重试上游断流。
+
+    中转站偶尔会在流到一半时断开连接（`RemoteProtocolError`），患者看到的就是
+    一句「回复失败」。但如果已经发出过任何事件——文字、状态栏、工具开始信号——
+    重试就会让用户看到两遍内容，或者把工具执行两遍（记行为、写承诺都有副作用），
+    所以那种情况照原样抛错，让上层把这一轮标记成失败。
+    """
+
+    attempt = 0
+    while True:
+        attempt += 1
+        emitted = False
+        try:
+            async for part in agent.astream(
+                agent_input,
+                config=run_config,
+                context=runtime_context,
+                stream_mode=["messages", "custom", "values"],
+                version="v2",
+            ):
+                emitted = True
+                yield part
+            return
+        except Exception as error:
+            if emitted or attempt >= attempts or not _is_retryable_stream_error(error):
+                raise
+            if on_retry is not None:
+                on_retry(attempt, error)
+
+
+def _record_step_usage(
+    usage_by_step: dict[tuple[int, str], tuple[int, int]],
+    chunk: BaseMessage,
+    metadata: dict[str, Any],
+) -> None:
+    """记下这次模型调用的真实用量。
+
+    中转站在每个流式分片上重复带上「到目前为止的累计用量」，所以同一次调用会看到
+    很多次；只保留最后一次，再按调用求和，才等于真实消耗。
+    """
+
+    usage = getattr(chunk, "usage_metadata", None)
+    step = metadata.get("langgraph_step")
+
+    if usage is None or not isinstance(step, int):
+        return
+
+    node = str(metadata.get("langgraph_node") or "")
+    usage_by_step[(step, node)] = (usage["input_tokens"], usage["output_tokens"])
 
 
 def _parse_tool_activity(value: object) -> ToolActivity:
@@ -425,6 +520,8 @@ async def _complete_chat_run(
     input_tokens: int,
     output_tokens: int,
     sources: list[ChatSource],
+    hypo_review_reading_id: UUID | None = None,
+    speech_cue_id: UUID | None = None,
 ) -> None:
     """保存完整回答，并将 AgentRun 标记为完成。"""
 
@@ -443,6 +540,37 @@ async def _complete_chat_run(
     agent_run.input_tokens = input_tokens
     agent_run.output_tokens = output_tokens
     agent_run.finished_at = now
+
+    tool_names = set(
+        (
+            await session.execute(
+                select(AgentToolCall.tool_name).where(
+                    AgentToolCall.agent_run_id == agent_run.id
+                )
+            )
+        ).scalars()
+    )
+    if unbacked_promise(content, tool_names):
+        # 把承诺的时刻一并记下来：凌晨说的「明天十点」按用户的口径算，
+        # 否则事后排查时只看到「承诺过」，看不出它到底该在哪一刻发生。
+        target = promise_target(content, now=now)
+        logger.warning(
+            "助手承诺了主动联系但这一轮没有调用计划工具（承诺时刻=%s）",
+            target.isoformat() if target is not None else "无法解析",
+        )
+
+    if hypo_review_reading_id is not None:
+        reviewed_reading = await session.get(GlucoseReading, hypo_review_reading_id)
+        if reviewed_reading is not None and reviewed_reading.reviewed_at is None:
+            # 只有回答真的写进数据库，这一问才算「问过」；失败或取消的轮次
+            # 用户没收到，下次还得再问。mark_hypo_reviewed 自带 commit，
+            # 会把「问过」和本轮成败拆成两次事务，所以这里只改对象状态。
+            reviewed_reading.reviewed_at = now
+
+    if speech_cue_id is not None:
+        # 声音状态同样只在回答落库时才算用掉：失败或取消的轮次用户没读到回复，
+        # 这条 cue 留给下一次真正发出去的那一轮。
+        await mark_speech_cue_consumed(session, cue_id=speech_cue_id, now=now)
 
     await session.commit()
 
@@ -536,6 +664,7 @@ async def stream_chat_run(
     companion_memory: CompanionMemory,
     user_id: UUID,
     prepared_run: PreparedChatRun,
+    live_heart_rate: LiveHeartRateReading | None = None,
 ) -> AsyncIterator[ChatStreamEvent]:
     """准备上下文、执行 Core Agent，并持续产生聊天流事件。"""
 
@@ -565,6 +694,53 @@ async def stream_chat_run(
         health_profile_context = await render_core_profile(
             session,
             user_id,
+        )
+        # 这一段决定「怎么说」：同一个风险提示对不同恐惧程度、不同察觉能力的人要换说法。
+        psychosocial_context = render_guidance(
+            await read_latest_assessment(session, user_id),
+        )
+        # 行为与信念是「这个人实际做了什么、相信什么」，用来决定追问方向。
+        behavior_context = render_behavior_context(
+            await read_fear_summary(session, user_id=user_id, days=28),
+        )
+        # 日期口径必须显式告诉模型：凌晨一点说的「明天」是用户口中的明天，
+        # 不是日历上的次日，否则承诺的回访会晚一整天。
+        behavior_context = "\n".join(
+            part
+            for part in (describe_today(datetime.now(UTC)), behavior_context)
+            if part
+        )
+        # 复盘只问一次：读取最近 24 小时里偏低、还没问过的那一条。
+        # prepare_chat_context 会 rollback，之后再碰 ORM 对象就会过期，
+        # 所以这里立刻把开场白定下来，只留 reading.id。
+        hypo_review_reading = await pending_hypo_review(
+            session,
+            user_id=user_id,
+            now=datetime.now(UTC),
+        )
+        hypo_review_reading_id = (
+            hypo_review_reading.id if hypo_review_reading is not None else None
+        )
+        hypo_review_context = (
+            render_hypo_review_prompt(
+                reported_by_user=hypo_review_reading.source == "manual",
+            )
+            if hypo_review_reading is not None
+            else ""
+        )
+        # 声音状态只对紧接着的这句话有效：取最近一条没用过、没过期的。
+        # 和复盘一样，读完之后 prepare_chat_context 会 rollback，所以立刻算好
+        # 提示词，只留 cue.id，等回答落库时再打「用过了」。
+        speech_cue = await pending_speech_cue(
+            session,
+            user_id=user_id,
+            now=datetime.now(UTC),
+        )
+        speech_cue_id = speech_cue.id if speech_cue is not None else None
+        speech_cue_context = (
+            render_speech_cue(as_speech_cue_data(speech_cue))
+            if speech_cue is not None
+            else ""
         )
         companion_memory_context = await companion_memory.prepare_context(
             session,
@@ -603,11 +779,32 @@ async def stream_chat_run(
             },
             ensure_ascii=False,
         )
+        live_heart_rate_context = ""
+        if live_heart_rate is not None:
+            measured_at = live_heart_rate.measured_at
+            if measured_at.tzinfo is None:
+                # 手机没带时区时按用户自己的时区解释，不凭空当成 UTC。
+                measured_at = measured_at.replace(
+                    tzinfo=ZoneInfo(care_settings.timezone),
+                )
+            live_heart_rate_context = json.dumps(
+                {
+                    "beats_per_minute": live_heart_rate.beats_per_minute,
+                    "measured_at": measured_at.isoformat(),
+                    "device_name": live_heart_rate.device_name,
+                },
+                ensure_ascii=False,
+            )
         rendered_system_prompt = render_core_system_prompt(
             health_profile_context,
             companion_memory_context=companion_memory_context,
             care_plan_context=care_plan_context,
             current_time_context=current_time_context,
+            live_heart_rate_context=live_heart_rate_context,
+            psychosocial_context=psychosocial_context,
+            behavior_context=behavior_context,
+            hypo_review_context=hypo_review_context,
+            speech_cue_context=speech_cue_context,
         )
 
         prepared_context = await prepare_chat_context(
@@ -647,17 +844,28 @@ async def stream_chat_run(
             rendered_system_prompt=rendered_system_prompt,
         )
         last_text_model_step: int | None = None
+        # 中转站会在**每个**流式分片上重复带上累计用量，LangChain 合并分片时会把
+        # 它们相加，直接用合并后的 usage_metadata 会把它放大十几倍（实测 6.6k 的
+        # 上下文被记成 12 万）。所以按模型调用（langgraph_step）只保留最后一次看到
+        # 的用量——那才是这一次调用的真实值。
+        usage_by_step: dict[tuple[int, str], tuple[int, int]] = {}
         agent_input = cast(
             InputAgentState,
             {"messages": list(prepared_context.context.messages)},
         )
 
-        async for stream_part in agent.astream(
+        def _log_stream_retry(attempt: int, error: BaseException) -> None:
+            run_log.bind(
+                attempt=attempt,
+                error_type=type(error).__name__,
+            ).warning("chat_stream_retry")
+
+        async for stream_part in _astream_agent(
+            agent,
             agent_input,
-            config=run_config,
-            context=runtime_context,
-            stream_mode=["messages", "custom", "values"],
-            version="v2",
+            run_config,
+            runtime_context,
+            on_retry=_log_stream_retry,
         ):
             stream_type = stream_part["type"]
 
@@ -667,6 +875,8 @@ async def stream_chat_run(
                     tuple[BaseMessage, dict[str, Any]],
                     stream_part["data"],
                 )
+
+                _record_step_usage(usage_by_step, chunk, metadata)
 
                 if not _is_user_visible_model_event(metadata):
                     continue
@@ -747,6 +957,7 @@ async def stream_chat_run(
         content, visible_turns, input_tokens, output_tokens = extract_agent_result(
             final_state,
             input_message_count,
+            usage_by_step,
         )
         streamed_content = "".join(streamed_parts)
 
@@ -767,6 +978,8 @@ async def stream_chat_run(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             sources=sources,
+            hypo_review_reading_id=hypo_review_reading_id,
+            speech_cue_id=speech_cue_id,
         )
         latency_ms = round((time.perf_counter() - started_at) * 1000)
         run_log.bind(

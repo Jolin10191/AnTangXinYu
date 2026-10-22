@@ -72,6 +72,7 @@ async def register(client: AsyncClient, prefix: str) -> dict[str, Any]:
     response = await client.post(
         "/api/v1/auth/register",
         json={
+            "consent_accepted": True,
             "username": f"{prefix}_{uuid4().hex[:12]}",
             "password": "correct-password",
         },

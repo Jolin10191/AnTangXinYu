@@ -3,32 +3,48 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Request,
+    Response,
+    status,
+)
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import InvalidTokenError
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from antang_api.database import get_session
 from antang_api.models import (
+    CarePlan,
     LoginSession,
     PersonalProfile,
     ProactiveCareSettings,
+    ProactiveCareTask,
     PushDelivery,
     PushDeliveryStatus,
     PushInstallation,
     User,
+    UserRole,
+    ClinicianApplication,
+    PatientAccessAudit,
+    WearableObservation,
+    WearableRecordTombstone,
 )
 from antang_api.schemas.auth import (
     AuthResponse,
+    DeleteAccountRequest,
     LoginRequest,
     LogoutRequest,
     RefreshRequest,
     RegisterRequest,
     TokenPair,
     UserResponse,
+    AccountNameRequest,
 )
 from antang_api.security import (
     access_token_expires_in,
@@ -136,6 +152,24 @@ async def get_current_user(
     return authenticated.user
 
 
+async def user_response(user: User, session: AsyncSession) -> UserResponse:
+    application_status = await session.scalar(
+        select(ClinicianApplication.status)
+        .where(ClinicianApplication.user_id == user.id)
+        .order_by(
+            ClinicianApplication.created_at.desc(), ClinicianApplication.id.desc()
+        )
+        .limit(1)
+    )
+    return UserResponse(
+        id=user.id,
+        username=user.username,
+        role=user.role,
+        full_name=user.full_name,
+        application_status=application_status,
+    )
+
+
 @router.post(
     "/register",
     response_model=AuthResponse,
@@ -152,6 +186,8 @@ async def register(
     user = User(
         username=request.username,
         username_normalized=request.username.casefold(),
+        full_name=request.full_name,
+        role=UserRole.PATIENT,
         password_hash=await run_in_threadpool(
             hash_password,
             request.password,
@@ -168,6 +204,22 @@ async def register(
         # 每个用户必须有一行基础档案；缺失时读取流程会明确报错。
         session.add(PersonalProfile(user_id=user.id))
         session.add(ProactiveCareSettings(user_id=user.id))
+        if request.registration_kind == "clinician":
+            assert request.full_name is not None and request.organization is not None
+            session.add(
+                ClinicianApplication(
+                    user_id=user.id,
+                    full_name=request.full_name,
+                    organization=request.organization,
+                )
+            )
+            session.add(
+                PatientAccessAudit(
+                    actor_user_id=user.id,
+                    target_user_id=user.id,
+                    action="clinician_application:submit",
+                )
+            )
 
         refresh_token, login_session = new_login_session(user.id, now)
         session.add(login_session)
@@ -184,7 +236,7 @@ async def register(
     tokens = token_pair(user.id, login_session.id, refresh_token)
 
     return AuthResponse(
-        user=UserResponse.model_validate(user),
+        user=await user_response(user, session),
         **tokens.model_dump(),
     )
 
@@ -219,7 +271,7 @@ async def login(
     tokens = token_pair(user.id, login_session.id, refresh_token)
 
     return AuthResponse(
-        user=UserResponse.model_validate(user),
+        user=await user_response(user, session),
         **tokens.model_dump(),
     )
 
@@ -344,5 +396,69 @@ async def logout(
 @router.get("/me", response_model=UserResponse)
 async def me(
     user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> UserResponse:
-    return UserResponse.model_validate(user)
+    return await user_response(user, session)
+
+
+@router.patch("/me", response_model=UserResponse)
+async def update_account_name(
+    request: AccountNameRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> UserResponse:
+    user.full_name = request.full_name
+    session.add(
+        PatientAccessAudit(
+            actor_user_id=user.id, target_user_id=user.id, action="account:name:update"
+        )
+    )
+    await session.commit()
+    return await user_response(user, session)
+
+
+@router.delete("/account", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_account(
+    payload: DeleteAccountRequest,
+    request: Request,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> Response:
+    """注销账号，并删除这个人的全部数据。
+
+    多数子表靠 users 的外键级联删除，但护理计划引用消息、主动关怀任务与手环观测引用
+    手环导入时用的是 ON DELETE RESTRICT，所以必须先删这些行，否则删除用户会被数据库
+    直接拒绝。陪伴记忆不在这个库里，单独按 bank 清理；清理失败就整体失败，不留下
+    「账号没了但记忆还在」的状态。
+    """
+
+    if not await run_in_threadpool(
+        verify_password,
+        payload.password,
+        user.password_hash,
+    ):
+        raise unauthorized()
+
+    if settings.hindsight_mode != "disabled":
+        hindsight = getattr(request.app.state, "hindsight_client", None)
+        if hindsight is not None:
+            try:
+                await hindsight.adelete_bank(bank_id=f"antang-user-{user.id}")
+            except Exception as error:  # noqa: BLE001 - 明确失败，不静默跳过
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="陪伴记忆清理失败，账号未注销，请稍后重试",
+                ) from error
+
+    for model in (
+        CarePlan,
+        ProactiveCareTask,
+        WearableObservation,
+        WearableRecordTombstone,
+    ):
+        await session.execute(delete(model).where(model.user_id == user.id))
+
+    await session.execute(delete(User).where(User.id == user.id))
+    await session.commit()
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

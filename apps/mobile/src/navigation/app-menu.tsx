@@ -25,6 +25,7 @@ type Props = {
   onOpenHealth: () => void;
   onOpenSettings: () => void;
   onOpenDashboard?: () => void;
+  onOpenPatientAccess?: () => void;
   onSelectConversation: (messageId: string) => void;
   username: string;
   visible: boolean;
@@ -52,6 +53,7 @@ export function AppMenu({
   onOpenHealth,
   onOpenSettings,
   onOpenDashboard = () => { },
+  onOpenPatientAccess,
   onSelectConversation,
   username,
   visible,
@@ -117,6 +119,16 @@ export function AppMenu({
             </Pressable>
           </View>
 
+          {onOpenPatientAccess === undefined ? null : (
+            <Pressable accessibilityLabel="医护授权" accessibilityRole="button"
+              onPress={onOpenPatientAccess} style={styles.healthEntry}>
+              <View style={styles.healthCopy}>
+                <Text style={styles.healthTitle}>医护授权</Text>
+                <Text style={styles.healthHint}>指定医护只读查看，随时撤销</Text>
+              </View>
+              <AppIcon color={colors.muted} icon={ArrowRight01Icon} size={20} />
+            </Pressable>
+          )}
           {/* ===== 原有的健康档案入口 ===== */}
           <Pressable
             accessibilityLabel="健康档案"
