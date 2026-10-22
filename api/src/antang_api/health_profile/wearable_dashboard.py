@@ -82,11 +82,13 @@ async def read_wearable_dashboard(
     *,
     user_id: UUID,
     now: datetime | None = None,
+    period_start: datetime | None = None,
+    period_end: datetime | None = None,
 ) -> WearableDashboardResponse:
     """Summarize the last 30 days without sending raw history to the App."""
 
-    period_end = now or datetime.now(UTC)
-    period_start = period_end - timedelta(days=30)
+    period_end = period_end or now or datetime.now(UTC)
+    period_start = period_start or period_end - timedelta(days=30)
     result = await session.execute(
         select(
             WearableObservation.source_package,

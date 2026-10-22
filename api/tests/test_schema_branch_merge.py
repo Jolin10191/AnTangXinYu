@@ -86,7 +86,7 @@ async def test_existing_local_and_server_branches_upgrade_without_losing_users(p
                 await connection.execute(
                     text("SELECT version_num FROM alembic_version")
                 )
-            ).scalar_one() == "r75cae7f1d94"
+            ).scalar_one() == "t97ec0913b26"
     finally:
         await database.dispose()
         async with admin.connect() as connection:
@@ -96,4 +96,4 @@ async def test_existing_local_and_server_branches_upgrade_without_losing_users(p
 
 def test_unified_schema_has_one_head():
     config = Config(str(API / "alembic.ini"))
-    assert ScriptDirectory.from_config(config).get_heads() == ["r75cae7f1d94"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["t97ec0913b26"]

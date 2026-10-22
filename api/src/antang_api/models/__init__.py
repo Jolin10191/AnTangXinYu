@@ -1,3 +1,4 @@
+from antang_api.models.clinical_access import ClinicalAccessSession, ClinicalAccessSettings
 from antang_api.models.agent_tool_call import AgentToolCall, AgentToolCallStatus
 from antang_api.models.behavior import (
     BEHAVIOR_KINDS,
@@ -68,6 +69,8 @@ from antang_api.models.wearable import (
 )
 
 __all__ = [
+    "ClinicalAccessSession",
+    "ClinicalAccessSettings",
     "AgentToolCall",
     "AgentToolCallStatus",
     "AgentRun",
