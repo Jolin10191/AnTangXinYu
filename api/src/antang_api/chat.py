@@ -750,11 +750,21 @@ async def stream_chat_run(
             if speech_cue is not None
             else ""
         )
-        companion_memory_context = await companion_memory.prepare_context(
-            session,
-            user_id,
-            prepared_run.user_message_id,
-        )
+        try:
+            companion_memory_context = await companion_memory.prepare_context(
+                session,
+                user_id,
+                prepared_run.user_message_id,
+            )
+        except Exception as error:
+            # 记忆是增强项：写入或召回失败不该让患者收不到任何回答。
+            # 现场有过 `Fact extraction failed` 把整轮聊天打成失败。
+            await session.rollback()
+            logger.bind(
+                user_id=str(user_id),
+                error_type=type(error).__name__,
+            ).opt(exception=True).warning("companion_memory_unavailable")
+            companion_memory_context = ""
         active_plans = list(
             await session.scalars(
                 select(CarePlan)

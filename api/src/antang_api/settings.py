@@ -48,7 +48,8 @@ class Settings(BaseSettings):
     hindsight_retain_user_turns: int = Field(default=3, gt=0)
     hindsight_recall_budget: Literal["low", "mid", "high"] = "low"
     hindsight_recall_max_tokens: int = Field(default=2_048, gt=0)
-    # 单次记忆请求等待上限；online 超时仍明确失败，保持既有行为。
+    # 记忆是增强项：召回或写入一旦超过这两个秒数就放弃，别让患者等它。
+    # 现场数据：4 核机器上重排 60 个候选要 67 秒，整轮聊天被拖到 111 秒。
     hindsight_recall_timeout_seconds: float = Field(default=8, gt=0)
     hindsight_retain_timeout_seconds: float = Field(default=25, gt=0)
 
