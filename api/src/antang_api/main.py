@@ -1,3 +1,6 @@
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
+from antang_api.routers.clinical import router as clinical_router
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -145,6 +148,8 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+app.include_router(clinical_router)
+app.mount("/clinician/assets", StaticFiles(directory=Path(__file__).resolve().parent / "clinical_web", check_dir=False), name="clinical-assets")
 app.include_router(auth_router)
 app.include_router(administration_router)
 app.include_router(patient_access_router)

@@ -72,3 +72,6 @@ curl --fail https://82.157.48.200:8000/health
 ```
 
 API 镜像启动时先自动执行 `alembic upgrade head`，成功才启动服务。`alembic current` 应显示 `k48e9f1a6b52 (head)`。初始化研发账号后，安装新 APK，验证医护申请、审批、授权读取与撤销。无需重建数据库或重新录入既有患者档案。
+
+
+浏览器医护工作台及统一密码范围见 [医护工作台](clinical-workbench.md)。统一密码解锁是经用户另行确认的全体患者只读范围，与原患者个人授权独立。
