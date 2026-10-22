@@ -186,3 +186,32 @@ async def test_core_model_rejects_missing_dynamic_prompt() -> None:
 
     with pytest.raises(RuntimeError, match="缺少完整系统提示词"):
         await runtime_system_prompt.awrap_model_call(request, handler)
+
+
+def test_core_prompt_includes_a_live_heart_rate_reading_when_given() -> None:
+    rendered_prompt = render_core_system_prompt(
+        '{"occupation":"学生"}',
+        care_plan_context="[]",
+        live_heart_rate_context=(
+            '{"beats_per_minute": 89, "measured_at": "2026-07-26T22:00:00+08:00",'
+            ' "device_name": "HUAWEI Band 9-598"}'
+        ),
+    )
+
+    assert "[实时心率读数]" in rendered_prompt
+    assert "只在本次回复有效" in rendered_prompt
+    assert '"beats_per_minute": 89' in rendered_prompt
+    assert rendered_prompt.index("[当前健康档案]") < rendered_prompt.index("[实时心率读数]")
+    assert rendered_prompt.index("[实时心率读数]") < rendered_prompt.index("[当前主动关怀计划]")
+
+
+def test_core_prompt_omits_the_live_heart_rate_section_without_a_reading() -> None:
+    rendered_prompt = render_core_system_prompt('{"occupation":"学生"}')
+
+    assert "[实时心率读数]" not in rendered_prompt
+
+
+def test_core_prompt_only_calls_a_provided_reading_real_time() -> None:
+    assert "只有当本轮上下文明确给出了「实时心率读数」时，才可以把它称为实时" in SYSTEM_PROMPT
+    assert "不能当成趋势、平均值或一段时间的心率" in SYSTEM_PROMPT
+    assert "设备结果都是服务器已经同步的历史观测" in SYSTEM_PROMPT

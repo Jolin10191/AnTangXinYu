@@ -1,0 +1,124 @@
+name: Android release build
+
+# 手工触发，或打一个 v* 标签时出包。
+# 产物是未发布的 APK + sha256：下载下来，用 scripts/publish-apk 才对外发布，
+# 这样"构建"和"发布"分开，出包不会自动影响正在使用的用户。
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # 不装 android-actions/setup-android：它内部的 `sdkmanager tools` 在新 SDK
+      # 仓库里已经找不到 `tools` 包而直接失败。runner 自带 Android SDK，
+      # 直接用它的 sdkmanager 补 NDK 和 CMake。
+      - name: Install NDK and CMake
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -n 1)
+          fi
+          echo "using $SDKMANAGER"
+          yes | "$SDKMANAGER" --install "ndk;27.1.12297006" "cmake;3.22.1" > /tmp/sdkmanager.log 2>&1 || {
+            tail -n 40 /tmp/sdkmanager.log
+            exit 1
+          }
+          tail -n 5 /tmp/sdkmanager.log
+
+      - name: Restore release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANTANG_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "缺少 ANTANG_KEYSTORE_BASE64；不能用别的密钥出包，否则装过的用户更新不了" >&2
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/antang-release.keystore"
+
+      - name: Install dependencies
+        working-directory: apps/mobile
+        run: npm ci
+
+      - name: Write API address
+        working-directory: apps/mobile
+        env:
+          API_URL: ${{ secrets.ANTANG_API_URL }}
+        run: |
+          if [ -z "$API_URL" ]; then
+            echo "缺少 ANTANG_API_URL（例如 https://82.157.48.200:8000）" >&2
+            exit 1
+          fi
+          printf 'EXPO_PUBLIC_API_URL=%s\n' "$API_URL" > .env
+
+      - name: Restore Firebase Android configuration
+        working-directory: apps/mobile
+        env:
+          GOOGLE_SERVICES_BASE64: ${{ secrets.ANTANG_GOOGLE_SERVICES_BASE64 }}
+        run: |
+          if [ -z "$GOOGLE_SERVICES_BASE64" ]; then
+            echo "缺少 ANTANG_GOOGLE_SERVICES_BASE64；须使用团队现有 Firebase 配置" >&2
+            exit 1
+          fi
+          printf '%s' "$GOOGLE_SERVICES_BASE64" | base64 -d > google-services.json
+
+      - name: Prebuild android project
+        working-directory: apps/mobile
+        run: npx --yes expo prebuild --platform android --no-install --clean
+
+      - name: Build release APK
+        working-directory: apps/mobile/android
+        env:
+          STORE_PASSWORD: ${{ secrets.ANTANG_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANTANG_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease \
+            -PreactNativeArchitectures=arm64-v8a \
+            -Pandroid.injected.signing.store.file="$RUNNER_TEMP/antang-release.keystore" \
+            -Pandroid.injected.signing.store.password="$STORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias=antang \
+            -Pandroid.injected.signing.key.password="$KEY_PASSWORD" \
+            --console=plain
+
+      - name: Read version and checksum
+        working-directory: apps/mobile
+        run: |
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          sha256sum "$APK" | awk '{print $1}' > sha256.txt
+          node -e "const c=require('./app.json');console.log(c.expo.version+' '+c.expo.android.versionCode)" > version.txt
+          cat version.txt sha256.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: antang-release-apk
+          path: |
+            apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+            apps/mobile/sha256.txt
+            apps/mobile/version.txt
+          if-no-files-found: error
