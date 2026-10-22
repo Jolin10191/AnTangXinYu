@@ -840,3 +840,60 @@ describe('ApiClient proactive care settings', () => {
     });
   });
 });
+test('register sends the consent flag the server requires', async () => {
+  const store = new MemoryTokenStore(null);
+  let body: unknown;
+  const fetchMock = jest.fn(async (_url: string, init: { body?: unknown }) => {
+    body = JSON.parse(String(init.body));
+    return jsonResponse(201, {
+      access_token: 'access',
+      refresh_token: 'refresh',
+      token_type: 'bearer',
+      expires_in: 900,
+      user: { id: '00000000-0000-0000-0000-000000000001', username: 'aya', role: 'patient', full_name: '测试患者', application_status: null },
+    });
+  });
+
+  const client = new ApiClient(
+    'http://api.test',
+    store,
+    jest.fn(),
+    fetchMock as unknown as FetchFunction,
+  );
+
+  await client.register('aya', 'correct-password', { consentAccepted: true, fullName: '测试患者', registrationKind: 'patient' });
+
+  expect(body).toEqual({
+    username: 'aya',
+    password: 'correct-password',
+    consent_accepted: true,
+    full_name: '测试患者',
+    registration_kind: 'patient',
+  });
+});
+
+test('deleteAccount sends the password and clears the stored session', async () => {
+  const store = new MemoryTokenStore(oldTokens);
+  let method: string | undefined;
+  let body: unknown;
+  const fetchMock = jest.fn(async (_url: string, init: { method?: string; body?: unknown }) => {
+    method = init.method;
+    body = init.body === undefined ? undefined : JSON.parse(String(init.body));
+    return { status: 204, ok: true, headers: new Headers(), body: null, json: async () => null } as Awaited<
+      ReturnType<FetchFunction>
+    >;
+  });
+
+  const client = new ApiClient(
+    'http://api.test',
+    store,
+    jest.fn(),
+    fetchMock as unknown as FetchFunction,
+  );
+
+  await client.deleteAccount('correct-password');
+
+  expect(method).toBe('DELETE');
+  expect(body).toEqual({ password: 'correct-password' });
+  expect(store.tokens).toBeNull();
+});

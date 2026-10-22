@@ -1,0 +1,13 @@
+[Unit]
+Description=Back up the Antang production database
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu
+ExecStart=/bin/bash /usr/local/bin/antang-backup-database
+Nice=10
+IOSchedulingClass=idle

@@ -2,8 +2,10 @@ import { act, create } from 'react-test-renderer';
 import { FlatList, TextInput } from 'react-native';
 
 import type { ApiClient } from '../api/client';
-import { ChatScreen } from './ChatScreen';
+import { ChatScreen, currentLiveHeartRate } from './ChatScreen';
+import type { LiveHeartRateController } from '../live-heart-rate/use-live-heart-rate';
 
+const mockAppMenu = jest.fn((_props: unknown) => null);
 const mockRefreshHealthProfileCards = jest.fn().mockResolvedValue(undefined);
 
 jest.mock('react-native-safe-area-context', () => ({
@@ -58,7 +60,7 @@ jest.mock('../health-profile/health-profile-cards', () => ({
 }));
 
 jest.mock('../navigation/app-menu', () => ({
-  AppMenu: () => null,
+  AppMenu: (props: unknown) => mockAppMenu(props),
 }));
 
 jest.mock('../proactive-care/care-settings-modal', () => ({
@@ -112,6 +114,10 @@ describe('ChatScreen', () => {
       await Promise.resolve();
     });
 
+    const menuProps = mockAppMenu.mock.calls.at(-1)![0] as Record<string, unknown>;
+    expect(menuProps.onOpenPatientAccess).toEqual(expect.any(Function));
+    expect(menuProps.onOpenGlucose).toEqual(expect.any(Function));
+    expect(menuProps.onOpenHealth).toEqual(expect.any(Function));
     expect(api.getChatAttachmentImageSource).toHaveBeenCalledWith(
       '019b2222-2222-7222-8222-222222222222',
     );
@@ -192,4 +198,14 @@ describe('ChatScreen', () => {
     });
     act(() => tree!.unmount());
   });
+});
+
+test('only attaches a fresh sample from an active heart rate stream', () => {
+  const controller = {
+    phase: 'streaming', latest: { beatsPerMinute: 78, measuredAt: 100_000, name: '手环' },
+  } as LiveHeartRateController;
+  expect(currentLiveHeartRate(controller, 100_500)?.beatsPerMinute).toBe(78);
+  expect(currentLiveHeartRate(controller, 131_000)).toBeNull();
+  expect(currentLiveHeartRate(controller, 99_000)).toBeNull();
+  expect(currentLiveHeartRate({ ...controller, phase: 'idle' }, 100_500)).toBeNull();
 });

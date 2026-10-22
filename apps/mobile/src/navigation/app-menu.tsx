@@ -6,11 +6,22 @@ import {
   SmartWatch01Icon,  // 新增：手环图标
   ChartLineData01Icon,  // 新增：看板图标
 } from '@hugeicons/core-free-icons';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import {
+  Alert,
+  Linking,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppIcon } from '../ui/icon';
 import { colors, radii, spacing, typefaces } from '../ui/theme';
+import { checkForUpdate, formatSize, installedVersion } from '../update/release';
 
 export type ConversationAnchor = {
   group: string;
@@ -26,6 +37,7 @@ type Props = {
   onOpenSettings: () => void;
   onOpenDashboard?: () => void;
   onOpenPatientAccess?: () => void;
+  onOpenGlucose?: () => void;
   onSelectConversation: (messageId: string) => void;
   username: string;
   visible: boolean;
@@ -47,6 +59,62 @@ function formatLastSync(value: string): string {
   }).format(new Date(value));
 }
 
+function UpdateRow() {
+  const [checking, setChecking] = useState(false);
+  const installed = installedVersion();
+
+  async function handlePress() {
+    if (checking) {
+      return;
+    }
+    setChecking(true);
+    try {
+      const result = await checkForUpdate();
+      if (result.kind === 'available') {
+        const { release } = result;
+        Alert.alert(
+          '有新版本',
+          `新版本 ${release.versionName}（${formatSize(release.sizeBytes)}）\n\n${release.notes}`,
+          [
+            { text: '稍后', style: 'cancel' },
+            {
+              text: '去下载',
+              onPress: () => {
+                void Linking.openURL(release.apkUrl);
+              },
+            },
+          ],
+        );
+      } else {
+        Alert.alert('已是最新版本', `当前版本 ${result.installed.name}`);
+      }
+    } catch (error) {
+      Alert.alert(
+        '检查更新失败',
+        error instanceof Error ? error.message : '请确认网络后重试',
+      );
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  return (
+    <Pressable
+      accessibilityLabel="检查更新"
+      accessibilityRole="button"
+      disabled={checking}
+      onPress={handlePress}
+      style={styles.updateRow}
+    >
+      <View style={styles.updateCopy}>
+        <Text style={styles.updateTitle}>检查更新</Text>
+        <Text style={styles.updateHint}>当前版本 {installed.name}</Text>
+      </View>
+      <Text style={styles.updateAction}>{checking ? '检查中…' : '检查'}</Text>
+    </Pressable>
+  );
+}
+
 export function AppMenu({
   conversations,
   onClose,
@@ -54,6 +122,7 @@ export function AppMenu({
   onOpenSettings,
   onOpenDashboard = () => { },
   onOpenPatientAccess,
+  onOpenGlucose = () => { },
   onSelectConversation,
   username,
   visible,
@@ -169,6 +238,26 @@ export function AppMenu({
             <AppIcon color={colors.muted} icon={ArrowRight01Icon} size={20} />
           </Pressable>
 
+          {/* ===== 新增：血糖记录入口 ===== */}
+          <Pressable
+            accessibilityLabel="血糖记录"
+            accessibilityRole="button"
+            onPress={onOpenGlucose}
+            style={({ pressed }) => [
+              styles.healthEntry,
+              pressed && styles.healthEntryPressed,
+            ]}
+          >
+            <View style={styles.healthIcon}>
+              <AppIcon color={colors.primaryPressed} icon={ChartLineData01Icon} size={26} />
+            </View>
+            <View style={styles.healthCopy}>
+              <Text style={styles.healthTitle}>血糖记录</Text>
+              <Text style={styles.healthHint}>记一条血糖，看看近 7 天</Text>
+            </View>
+            <AppIcon color={colors.muted} icon={ArrowRight01Icon} size={20} />
+          </Pressable>
+
           {/* ===== 新增：Gadgetbridge 独立入口 ===== */}
           <Pressable
             accessibilityLabel="华为手环导入"
@@ -210,6 +299,8 @@ export function AppMenu({
               {gadgetbridgeBusy ? '...' : gadgetbridgeConnected ? '同步' : '连接'}
             </Text>
           </Pressable>
+
+          <UpdateRow />
 
           <View style={styles.sectionHeading}>
             <AppIcon color={colors.muted} icon={Message01Icon} size={19} />
@@ -257,6 +348,34 @@ export function AppMenu({
 }
 
 const styles = StyleSheet.create({
+  updateRow: {
+    alignItems: 'center',
+    backgroundColor: colors.paperMuted,
+    borderRadius: radii.md,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  updateCopy: { flex: 1, gap: 2 },
+  updateTitle: {
+    color: colors.text,
+    fontFamily: typefaces.sans,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  updateHint: {
+    color: colors.muted,
+    fontFamily: typefaces.sans,
+    fontSize: 12,
+  },
+  updateAction: {
+    color: colors.primaryPressed,
+    fontFamily: typefaces.sans,
+    fontSize: 14,
+    fontWeight: '600',
+  },
   overlay: {
     flex: 1,
     flexDirection: 'row',

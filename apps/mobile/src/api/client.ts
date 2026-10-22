@@ -6,6 +6,10 @@ import { consumeChatStream } from "./ndjson";
 import {
   parseAuthResult,
   parseAttachmentUpload,
+  parseFearSummary,
+  parseGlucoseReading,
+  parseGlucoseReadings,
+  parseGlucoseSummary,
   parseHealthProfile,
   parseHealthProfileCardDecision,
   parseHealthProfileChangeResult,
@@ -14,12 +18,16 @@ import {
   parseWearableDashboard,
   parseMessageHistory,
   parseProactiveCareSettings,
+  parsePsychosocialProfile,
   parseTokenPair,
   parseUser,
   parseWearableImportResponse,
   readErrorPayload,
   type ChatStreamEvent,
   type ChatAttachment,
+  type FearSummary,
+  type GlucoseReading,
+  type GlucoseSummary,
   type HealthProfile,
   type HealthConnectRecordIdsPage,
   type WearableDashboard,
@@ -30,6 +38,8 @@ import {
   type HealthProfileChangeResult,
   type MessageHistory,
   type ProactiveCareSettings,
+  type PsychosocialAssessmentInput,
+  type PsychosocialProfile,
   type TokenPair,
   type User,
   type WearableImportResponse,
@@ -80,6 +90,17 @@ export class SessionChangedError extends Error {
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "发生了未知错误";
 }
+
+/**
+ * 发送消息时手机正在收到的实时心率广播中最近的一条读数。
+ * 请求体里对应后端的下划线字段 beats_per_minute / measured_at / device_name。
+ */
+export type LiveHeartRateReading = {
+  beatsPerMinute: number;
+  /** ISO 8601 时间字符串。 */
+  measuredAt: string;
+  deviceName: string | null;
+};
 
 async function responseJson(response: FetchResponse): Promise<unknown> {
   try {
@@ -467,6 +488,17 @@ export class ApiClient {
     await this.mutateTokens(logoutVersion, () => this.tokenStore.clear());
   }
 
+  async deleteAccount(password: string): Promise<void> {
+    const version = this.sessionVersion;
+    const response = await this.authorizedFetch('/api/v1/auth/account', {
+      method: 'DELETE',
+      body: JSON.stringify({ password }),
+    });
+    this.assertSessionVersion(version);
+    if (!response.ok) throw await this.apiError(response);
+    await this.mutateTokens(version, () => this.tokenStore.clear());
+  }
+
   async getMessages(before: string | null = null): Promise<MessageHistory> {
     const query =
       before === null
@@ -661,6 +693,45 @@ export class ApiClient {
     return parseWearableDashboard(await responseJson(response));
   }
 
+  async getPsychosocialAssessment(): Promise<PsychosocialProfile | null> {
+    const response = await this.authorizedFetch(
+      '/api/v1/health-profile/psychosocial-assessment',
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parsePsychosocialProfile(await responseJson(response));
+  }
+
+  async recordPsychosocialAssessment(
+    input: PsychosocialAssessmentInput,
+  ): Promise<PsychosocialProfile> {
+    const response = await this.authorizedFetch(
+      '/api/v1/health-profile/psychosocial-assessment',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          fear_behavior_percent: input.fearBehaviorPercent,
+          fear_worry_percent: input.fearWorryPercent,
+          gold_score: input.goldScore,
+          instrument: input.instrument,
+          assessed_at: input.assessedAt,
+        }),
+      },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    const parsed = parsePsychosocialProfile(await responseJson(response));
+    if (parsed === null) throw new Error('服务器没有返回沟通方式评估结果');
+    return parsed;
+  }
+
+  async getFearSummary(signal?: AbortSignal): Promise<FearSummary> {
+    const response = await this.authorizedFetch(
+      '/api/v1/health-profile/fear-summary',
+      { signal },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseFearSummary(await responseJson(response));
+  }
+
   async getWearableDashboard(signal?: AbortSignal): Promise<WearableDashboard> {
     const response = await this.authorizedFetch(
       "/api/v1/health-profile/wearable-dashboard",
@@ -805,6 +876,7 @@ export class ApiClient {
     attachmentId: string | null,
     onEvent: (event: ChatStreamEvent) => void,
     signal?: AbortSignal,
+    liveHeartRate?: LiveHeartRateReading | null,
   ): Promise<void> {
     const response = await this.authorizedFetch("/api/v1/chat/messages", {
       method: "POST",
@@ -812,6 +884,13 @@ export class ApiClient {
         client_message_id: clientMessageId,
         content,
         attachment_id: attachmentId,
+        live_heart_rate: liveHeartRate === undefined || liveHeartRate === null
+          ? null
+          : {
+            beats_per_minute: liveHeartRate.beatsPerMinute,
+            measured_at: liveHeartRate.measuredAt,
+            device_name: liveHeartRate.deviceName,
+          },
       }),
       signal,
       headers: { Accept: "application/x-ndjson" },
@@ -857,5 +936,54 @@ export class ApiClient {
     );
 
     await this.consumeChatResponse(response, onEvent);
+  }
+
+  async createGlucoseReading(input: {
+    valueMgDl: number;
+    measuredAt: string;
+    context: string;
+    note?: string | null;
+  }): Promise<GlucoseReading> {
+    const response = await this.authorizedFetch(
+      "/api/v1/health-profile/glucose-readings",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          value_mg_dl: input.valueMgDl,
+          measured_at: input.measuredAt,
+          context: input.context,
+          note: input.note ?? null,
+        }),
+      },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseGlucoseReading(await responseJson(response));
+  }
+
+  async getGlucoseReadings(days = 14, signal?: AbortSignal): Promise<GlucoseReading[]> {
+    const response = await this.authorizedFetch(
+      `/api/v1/health-profile/glucose-readings?days=${days}`,
+      { signal },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseGlucoseReadings(await responseJson(response));
+  }
+
+  async getGlucoseSummary(days = 7, signal?: AbortSignal): Promise<GlucoseSummary> {
+    const response = await this.authorizedFetch(
+      `/api/v1/health-profile/glucose-readings/summary?days=${days}`,
+      { signal },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseGlucoseSummary(await responseJson(response));
+  }
+
+  async revokeGlucoseReading(id: string): Promise<void> {
+    const response = await this.authorizedFetch(
+      `/api/v1/health-profile/glucose-readings/${id}`,
+      { method: "DELETE" },
+    );
+    if (!response.ok) throw await this.apiError(response);
   }
 }

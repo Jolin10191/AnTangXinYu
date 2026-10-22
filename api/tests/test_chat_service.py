@@ -250,6 +250,7 @@ def values_event(content: str) -> dict[str, Any]:
 
 def test_new_tools_reuse_stable_activity_phases() -> None:
     assert chat.TOOL_ACTIVITY_PHASES["read_wearable_data"] == "reading"
+    assert chat.TOOL_ACTIVITY_PHASES["search_diabetes_knowledge"] == "reading"
     assert chat.TOOL_ACTIVITY_PHASES["delegate_health_profile"] == "organizing"
     assert chat.TOOL_ACTIVITY_PHASES["manage_care_plan"] == "organizing"
     assert AgentActivityEvent(phase="reading").phase == "reading"

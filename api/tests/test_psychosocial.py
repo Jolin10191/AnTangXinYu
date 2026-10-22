@@ -1,0 +1,288 @@
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
+from uuid import UUID, uuid4
+
+import pytest
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from antang_api.agents.core import render_core_system_prompt
+from antang_api.database import get_session
+from antang_api.models import User
+from antang_api.psychosocial import (
+    AWARENESS_IMPAIRED_GOLD,
+    FEAR_HIGH_PERCENT,
+    PsychosocialProfile,
+    read_latest_assessment,
+    render_guidance,
+)
+from antang_api.routers.auth import router as auth_router
+from antang_api.routers.health_profile import router as health_profile_router
+
+
+async def _client(session: AsyncSession) -> AsyncIterator[AsyncClient]:
+    app = FastAPI()
+    app.include_router(auth_router)
+    app.include_router(health_profile_router)
+
+    async def override_get_session() -> AsyncIterator[AsyncSession]:
+        yield session
+
+    app.dependency_overrides[get_session] = override_get_session
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        yield client
+
+
+async def _register(client: AsyncClient) -> tuple[dict[str, str], str]:
+    username = f"psy_{uuid4().hex[:16]}"
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": username,
+            "password": "correct-password",
+            "consent_accepted": True,
+        },
+    )
+    assert response.status_code == 201
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}, username
+
+
+def test_quadrant_follows_fear_and_awareness() -> None:
+    cases = [
+        (80, 80, 2, "high_fear_normal_awareness"),
+        (80, 80, 6, "high_fear_impaired_awareness"),
+        (10, 20, 1, "low_fear_normal_awareness"),
+        (10, 20, 7, "low_fear_impaired_awareness"),
+        (80, 80, None, "unknown_awareness"),
+        (10, 20, None, "unknown_awareness"),
+    ]
+    for behavior, worry, gold, expected in cases:
+        profile = PsychosocialProfile(
+            fear_behavior_percent=behavior,
+            fear_worry_percent=worry,
+            gold_score=gold,
+        )
+        assert profile.quadrant == expected
+
+
+def test_thresholds_sit_exactly_where_the_boundaries_are_documented() -> None:
+    at_threshold = PsychosocialProfile(
+        fear_behavior_percent=FEAR_HIGH_PERCENT,
+        fear_worry_percent=FEAR_HIGH_PERCENT,
+        gold_score=AWARENESS_IMPAIRED_GOLD,
+    )
+    assert at_threshold.fear_high is True
+    assert at_threshold.awareness == "impaired"
+
+    just_below = PsychosocialProfile(
+        fear_behavior_percent=FEAR_HIGH_PERCENT - 1,
+        fear_worry_percent=FEAR_HIGH_PERCENT - 1,
+        gold_score=AWARENESS_IMPAIRED_GOLD - 1,
+    )
+    assert just_below.fear_high is False
+    assert just_below.awareness == "normal"
+
+
+def test_fear_percent_averages_the_two_subscales() -> None:
+    profile = PsychosocialProfile(
+        fear_behavior_percent=40,
+        fear_worry_percent=60,
+        gold_score=None,
+    )
+    assert profile.fear_percent == 50
+
+
+def test_profile_rejects_out_of_range_scores() -> None:
+    with pytest.raises(ValueError):
+        PsychosocialProfile(
+            fear_behavior_percent=101,
+            fear_worry_percent=50,
+            gold_score=3,
+        )
+    with pytest.raises(ValueError):
+        PsychosocialProfile(
+            fear_behavior_percent=50,
+            fear_worry_percent=50,
+            gold_score=8,
+        )
+
+
+def test_guidance_states_the_contact_limit_without_quoting_scores() -> None:
+    profile = PsychosocialProfile(
+        fear_behavior_percent=90,
+        fear_worry_percent=90,
+        gold_score=6,
+    )
+    guidance = render_guidance(profile)
+    assert "[沟通方式参考]" in guidance
+    assert f"不超过 {profile.weekly_contact_limit} 次" in guidance
+    # 分数是内部参考，不能出现在要交给模型的原话里。
+    assert "90" not in guidance
+    assert "HFS" not in guidance
+    assert "Gold" not in guidance
+
+
+def test_guidance_is_empty_without_an_assessment() -> None:
+    assert render_guidance(None) == ""
+
+
+def test_prompt_appends_guidance_after_the_profile_block() -> None:
+    guidance = render_guidance(
+        PsychosocialProfile(
+            fear_behavior_percent=10,
+            fear_worry_percent=10,
+            gold_score=1,
+        )
+    )
+    prompt = render_core_system_prompt(
+        "档案内容",
+        current_time_context="2026-11-02 10:00",
+        psychosocial_context=guidance,
+    )
+    assert prompt.index("[当前健康档案]") < prompt.index("[沟通方式参考]")
+
+    without = render_core_system_prompt(
+        "档案内容",
+        current_time_context="2026-11-02 10:00",
+    )
+    assert "[沟通方式参考]" not in without
+
+
+async def test_assessment_round_trip(db_session: AsyncSession) -> None:
+    async for client in _client(db_session):
+        headers, _ = await _register(client)
+
+        empty = await client.get(
+            "/api/v1/health-profile/psychosocial-assessment",
+            headers=headers,
+        )
+        assert empty.status_code == 200
+        assert empty.json() is None
+
+        assessed_at = datetime(2026, 10, 31, 9, 0, tzinfo=UTC)
+        created = await client.post(
+            "/api/v1/health-profile/psychosocial-assessment",
+            headers=headers,
+            json={
+                "fear_behavior_percent": 40,
+                "fear_worry_percent": 60,
+                "gold_score": 5,
+                "instrument": "HFS-II",
+                "assessed_at": assessed_at.isoformat(),
+            },
+        )
+        assert created.status_code == 201
+        body = created.json()
+        assert body["fear_percent"] == 50
+        assert body["fear_high"] is True
+        assert body["awareness"] == "impaired"
+        assert body["quadrant"] == "high_fear_impaired_awareness"
+        assert body["weekly_contact_limit"] == 4
+        assert datetime.fromisoformat(body["assessed_at"]) == assessed_at
+
+        latest = await client.get(
+            "/api/v1/health-profile/psychosocial-assessment",
+            headers=headers,
+        )
+        assert latest.status_code == 200
+        assert latest.json()["quadrant"] == "high_fear_impaired_awareness"
+
+
+async def test_latest_assessment_wins_by_assessed_at(db_session: AsyncSession) -> None:
+    async for client in _client(db_session):
+        headers, _ = await _register(client)
+        base = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
+
+        for offset, gold in ((0, 1), (1, 7)):
+            response = await client.post(
+                "/api/v1/health-profile/psychosocial-assessment",
+                headers=headers,
+                json={
+                    "fear_behavior_percent": 20,
+                    "fear_worry_percent": 20,
+                    "gold_score": gold,
+                    "assessed_at": (base + timedelta(days=offset)).isoformat(),
+                },
+            )
+            assert response.status_code == 201
+
+        latest = await client.get(
+            "/api/v1/health-profile/psychosocial-assessment",
+            headers=headers,
+        )
+        assert latest.json()["gold_score"] == 7
+        assert latest.json()["quadrant"] == "low_fear_impaired_awareness"
+
+
+async def test_chat_reads_the_latest_assessment_of_that_user(
+    db_session: AsyncSession,
+) -> None:
+    username = ""
+    async for client in _client(db_session):
+        headers, username = await _register(client)
+        response = await client.post(
+            "/api/v1/health-profile/psychosocial-assessment",
+            headers=headers,
+            json={
+                "fear_behavior_percent": 70,
+                "fear_worry_percent": 70,
+                "gold_score": 6,
+                "assessed_at": datetime(2026, 10, 31, 9, 0, tzinfo=UTC).isoformat(),
+            },
+        )
+        assert response.status_code == 201
+
+    assert username, "注册没有执行"
+    user = await db_session.scalar(select(User).where(User.username == username))
+    assert user is not None
+    user_id: UUID = user.id
+
+    profile = await read_latest_assessment(db_session, user_id)
+    assert profile is not None
+    assert profile.quadrant == "high_fear_impaired_awareness"
+    assert profile.weekly_contact_limit == 4
+
+
+async def test_assessment_rejects_naive_time_and_unknown_fields(
+    db_session: AsyncSession,
+) -> None:
+    async for client in _client(db_session):
+        headers, _ = await _register(client)
+        naive = await client.post(
+            "/api/v1/health-profile/psychosocial-assessment",
+            headers=headers,
+            json={
+                "fear_behavior_percent": 40,
+                "fear_worry_percent": 40,
+                "assessed_at": "2026-10-31T09:00:00",
+            },
+        )
+        assert naive.status_code == 422
+
+        extra = await client.post(
+            "/api/v1/health-profile/psychosocial-assessment",
+            headers=headers,
+            json={
+                "fear_behavior_percent": 40,
+                "fear_worry_percent": 40,
+                "assessed_at": "2026-10-31T09:00:00+00:00",
+                "diagnosis": "T1D",
+            },
+        )
+        assert extra.status_code == 422
+
+        out_of_range = await client.post(
+            "/api/v1/health-profile/psychosocial-assessment",
+            headers=headers,
+            json={
+                "fear_behavior_percent": 140,
+                "fear_worry_percent": 40,
+                "assessed_at": "2026-10-31T09:00:00+00:00",
+            },
+        )
+        assert out_of_range.status_code == 422

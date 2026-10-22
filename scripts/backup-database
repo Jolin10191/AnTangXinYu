@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# 备份生产数据库：pg_dump -> gzip -> gpg 对称加密（AES-256）。
+#
+# 明文不出内存：整条流水线是管道，只有加密后的文件落盘。
+# 口令放在单独的文件里（默认 /home/ubuntu/.antang-backup.pass，权限 600），
+# 与备份文件分开保存；这个口令丢了，备份就打不开，请另存一份到密码管理器。
+#
+# 用法：
+#   bash scripts/backup-database
+#   ANTANG_BACKUP_KEEP_DAYS=30 bash scripts/backup-database
+#
+# 恢复见 docs/backup.md。
+set -euo pipefail
+
+BACKUP_DIR="${ANTANG_BACKUP_DIR:-/home/ubuntu/antang-backups}"
+PASSPHRASE_FILE="${ANTANG_BACKUP_PASSPHRASE_FILE:-/home/ubuntu/.antang-backup.pass}"
+CONTAINER="${ANTANG_DB_CONTAINER:-antang-prod-postgres-1}"
+DATABASE="${ANTANG_DB_NAME:-antang}"
+DB_USER="${ANTANG_DB_USER:-wocky}"
+KEEP_DAYS="${ANTANG_BACKUP_KEEP_DAYS:-14}"
+
+if [[ ! -s "$PASSPHRASE_FILE" ]]; then
+  echo "missing passphrase file: $PASSPHRASE_FILE" >&2
+  exit 1
+fi
+
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+target="$BACKUP_DIR/$stamp"
+mkdir -p "$target"
+chmod 700 "$target"
+
+docker exec "$CONTAINER" pg_dump -U "$DB_USER" -d "$DATABASE" --format=custom \
+  | gzip -9 \
+  | gpg --batch --yes --quiet \
+        --pinentry-mode loopback \
+        --passphrase-file "$PASSPHRASE_FILE" \
+        --symmetric --cipher-algo AES256 \
+        --output "$target/$DATABASE.dump.gz.gpg"
+
+(
+  cd "$target"
+  sha256sum "$DATABASE.dump.gz.gpg" > SHA256SUMS
+)
+
+# 只留最近 N 天，避免把磁盘占满。
+find "$BACKUP_DIR" -maxdepth 1 -mindepth 1 -type d \
+  -regextype posix-extended -regex ".*/[0-9]{8}T[0-9]{6}Z" \
+  -mtime "+$KEEP_DAYS" -print -exec rm -rf -- {} +
+
+echo "backup ok: $target/$DATABASE.dump.gz.gpg ($(du -h "$target/$DATABASE.dump.gz.gpg" | cut -f1))"

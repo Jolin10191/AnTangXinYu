@@ -7,10 +7,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from antang_api.models import (
+    CarePlan,
+    CarePlanStatus,
     LoginSession,
     Message,
     MessageRole,
     MessageStatus,
+    PersonalProfile,
     ProactiveCareSettings,
     PushDelivery,
     PushDeliveryStatus,
@@ -18,6 +21,9 @@ from antang_api.models import (
     PushPermissionState,
     PushPlatform,
     User,
+    WearableImport,
+    WearableObservation,
+    WearableRecordType,
 )
 from antang_api.security import (
     ALGORITHM,
@@ -316,3 +322,126 @@ async def test_access_token_session_must_belong_to_the_same_user(
         headers={"Authorization": f"Bearer {forged}"},
     )
     assert response.status_code == 401
+
+async def test_delete_account_removes_every_row_the_user_owns(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """注销账号要真的把数据删干净，包括拦住级联的那几张表。"""
+
+    username = unique_username("delete_account")
+    password = "correct-password"
+
+    register_response = await client.post(
+        "/api/v1/auth/register",
+        json={"username": username, "password": password, "consent_accepted": True},
+    )
+    assert register_response.status_code == 201
+    auth = register_response.json()
+    user_id = UUID(auth["user"]["id"])
+    headers = {"Authorization": f"Bearer {auth['access_token']}"}
+
+    now = datetime.now(timezone.utc)
+    message = Message(
+        user_id=user_id,
+        role=MessageRole.USER,
+        status=MessageStatus.COMPLETED,
+        content="今晚一个人在家，有点怕低血糖。",
+        completed_at=now,
+    )
+    db_session.add(message)
+    await db_session.flush()
+
+    # care_plans 对 messages 是 RESTRICT：先删消息会被数据库拒绝。
+    plan = CarePlan(
+        user_id=user_id,
+        summary="明晚问问睡得怎么样",
+        status=CarePlanStatus.ACTIVE,
+        follow_up_at=now + timedelta(hours=20),
+        revision=1,
+        created_by_message_id=message.id,
+        last_changed_by_message_id=message.id,
+    )
+    db_session.add(plan)
+
+    upload = WearableImport(
+        user_id=user_id,
+        client_sync_id=uuid4(),
+        request_hash="0" * 64,
+        record_type=WearableRecordType.HEART_RATE,
+        records_created=1,
+        records_updated=0,
+        records_unchanged=0,
+        records_deleted=0,
+    )
+    db_session.add(upload)
+    await db_session.flush()
+
+    # wearable_observations 对 wearable_imports 同样是 RESTRICT。
+    observation = WearableObservation(
+        user_id=user_id,
+        external_record_id="gb-hr-1700000000",
+        record_type=WearableRecordType.HEART_RATE,
+        start_time=now,
+        end_time=now,
+        data={"beats_per_minute": 78},
+        data_hash="1" * 64,
+        source_package="nodomain.freeyourgadget.gadgetbridge",
+        source_last_modified_at=now,
+        last_import_id=upload.id,
+    )
+    db_session.add(observation)
+    await db_session.flush()
+    # commit 之后 ORM 会把属性过期；主键要在提交前取出来，否则后面再读会触发同步 IO。
+    message_id = message.id
+    plan_id = plan.id
+    upload_id = upload.id
+    observation_id = observation.id
+    await db_session.commit()
+
+    wrong_password = await client.request(
+        "DELETE",
+        "/api/v1/auth/account",
+        json={"password": "not-the-password"},
+        headers=headers,
+    )
+    assert wrong_password.status_code == 401
+    assert await db_session.get(User, user_id) is not None
+
+    response = await client.request(
+        "DELETE",
+        "/api/v1/auth/account",
+        json={"password": password},
+        headers=headers,
+    )
+    assert response.status_code == 204
+
+    db_session.expire_all()
+    assert await db_session.get(User, user_id) is None
+    assert (
+        await db_session.scalar(
+            select(PersonalProfile).where(PersonalProfile.user_id == user_id)
+        )
+        is None
+    )
+    for model, key in (
+        (Message, message_id),
+        (CarePlan, plan_id),
+        (WearableImport, upload_id),
+        (WearableObservation, observation_id),
+    ):
+        assert await db_session.get(model, key) is None, model.__tablename__
+
+
+async def test_registration_requires_consent(
+    client: AsyncClient,
+) -> None:
+    """没有勾选知情同意时注册会被拒绝，前端不能绕过这一步。"""
+
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={"username": unique_username("no_consent"), "password": "correct-password"},
+    )
+
+    assert response.status_code == 422
+    assert "知情同意" in response.text
