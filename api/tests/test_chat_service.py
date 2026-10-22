@@ -813,10 +813,12 @@ async def test_stream_chat_run_never_forwards_internal_subagent_text(
     assert "子 Agent" not in text
 
 
-async def test_stream_chat_run_fails_before_core_when_companion_memory_fails(
+async def test_stream_chat_run_answers_even_when_companion_memory_fails(
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """记忆服务写不进去时，这一轮照常回答，只是不带记忆。"""
+
     user = await create_user(db_session, "memory_failure")
     prepared_run = await prepare_chat_run(
         db_session,
@@ -826,7 +828,7 @@ async def test_stream_chat_run_fails_before_core_when_companion_memory_fails(
     )
     prepare_context_mock = AsyncMock(return_value=prepared_context())
     monkeypatch.setattr(chat, "prepare_chat_context", prepare_context_mock)
-    fake_agent = FakeAgent([])
+    fake_agent = FakeAgent([message_event("在的。"), values_event("在的。")])
 
     events = [
         event
@@ -844,13 +846,15 @@ async def test_stream_chat_run_fails_before_core_when_companion_memory_fails(
         )
     ]
 
-    assert events[-1].type == "message_failed"
-    assert fake_agent.config is None
-    prepare_context_mock.assert_not_awaited()
+    completed = cast("MessageCompletedEvent", events[-1])
+    assert completed.type == "message_completed"
+    text = "".join(event.delta for event in events if isinstance(event, TextDeltaEvent))
+    assert text == "在的。"
+    prepare_context_mock.assert_awaited()
+    assert "[相关陪伴记忆]" not in rendered_prompt(fake_agent)
     run = await db_session.get(AgentRun, prepared_run.run_id)
     assert run is not None
-    assert run.status == AgentRunStatus.FAILED
-    assert run.error_type == "RuntimeError"
+    assert run.status == AgentRunStatus.COMPLETED
 
 
 async def test_stream_chat_run_validates_and_persists_cited_sources(

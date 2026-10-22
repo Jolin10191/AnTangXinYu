@@ -566,7 +566,7 @@ async def test_companion_memory_never_reads_another_users_turns(
     assert await db_session.get(CompanionMemoryCursor, second_id) is None
 
 
-async def test_a_slow_online_recall_fails_explicitly(
+async def test_a_slow_recall_gives_up_so_the_turn_can_answer(
     db_session: AsyncSession,
 ) -> None:
     user = await create_user(db_session, "memory_slow_recall")
@@ -580,11 +580,14 @@ async def test_a_slow_online_recall_fails_explicitly(
     client.recall_delay = 5
     client.recall_texts = ["本该出现的记忆"]
 
-    with pytest.raises(TimeoutError):
-        await build_memory(
-            client, "online", recall_timeout_seconds=0.05,
-        ).prepare_context(db_session, user_id, current_id)
+    context = await build_memory(
+        client,
+        "online",
+        recall_timeout_seconds=0.05,
+    ).prepare_context(db_session, user_id, current_id)
 
+    # 记忆超时不是故障：这一轮没有记忆照样往下走。
+    assert context == ""
     assert len(client.retain_calls) == 1
     assert len(client.recall_calls) == 1
 
@@ -602,11 +605,13 @@ async def test_a_slow_retain_is_cut_off_and_the_cursor_stays_put(
     client = FakeHindsight()
     client.retain_delay = 5
 
-    with pytest.raises(TimeoutError):
-        await build_memory(
-            client, "online", retain_timeout_seconds=0.05,
-        ).prepare_context(db_session, user_id, current_id)
+    context = await build_memory(
+        client,
+        "online",
+        retain_timeout_seconds=0.05,
+    ).prepare_context(db_session, user_id, current_id)
 
+    assert context == ""
     # 游标没前进，下一段还会把这段补上。
     assert await db_session.get(CompanionMemoryCursor, user_id) is None
     assert client.recall_calls == []

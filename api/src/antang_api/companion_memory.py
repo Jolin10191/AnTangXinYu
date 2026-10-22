@@ -40,7 +40,9 @@ class CompanionMemory:
         self.retain_user_turns = retain_user_turns
         self.recall_budget = recall_budget
         self.recall_max_tokens = recall_max_tokens
-        # 限制单次记忆请求等待时间；online 超时明确失败，不丢弃记忆继续回答。
+        # 记忆是增强项，不是这一轮回答的前提。线上真实数据：一次召回在
+        # 4 核机器上重排 60 个候选要 67 秒，整轮聊天被它拖到 111 秒。
+        # 超时就当这轮没有记忆，绝不让患者等一个「锦上添花」。
         self.recall_timeout_seconds = recall_timeout_seconds
         self.retain_timeout_seconds = retain_timeout_seconds
 
@@ -185,8 +187,8 @@ class CompanionMemory:
                     user_id=str(user_id),
                     timeout_seconds=self.retain_timeout_seconds,
                 ).warning("companion_memory_retain_timeout")
-                if self.mode != "shadow":
-                    raise
+                # 记忆没写完不影响这一轮回答；影子模式和非影子模式都先放行，
+                # 下一段会把这段对话重新补上（游标还没前进）。
                 return ""
             except Exception as error:
                 if self.mode != "shadow":
@@ -280,13 +282,13 @@ class CompanionMemory:
                 timeout=self.recall_timeout_seconds,
             )
         except TimeoutError:
-            # online 模式明确暴露超时；不把空上下文伪装成成功。
+            # 超时不当故障抛给用户：这一轮没有记忆照样能回答。
             logger.bind(
                 user_id=str(user_id),
                 timeout_seconds=self.recall_timeout_seconds,
                 latency_ms=round((time.perf_counter() - recall_started_at) * 1000),
             ).warning("companion_memory_recall_timeout")
-            raise
+            return ""
         memories = [
             result.text.strip()
             for result in recall_response.results
