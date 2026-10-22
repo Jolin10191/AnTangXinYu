@@ -86,7 +86,8 @@ def test_runner_forwards_termination_and_removes_database(
         output, _ = process.communicate(timeout=5)
     except subprocess.TimeoutExpired:
         forwarded = False
-        os.kill(child_pid, signal.SIGKILL)
+        # SIGKILL 在 Windows 上不存在，那里本来也跑不到这条（需要 POSIX 子进程）。
+        os.kill(child_pid, getattr(signal, "SIGKILL", signal.SIGTERM))
         output, _ = process.communicate(timeout=10)
 
     match = re.search(

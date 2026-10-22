@@ -29,6 +29,42 @@ bash scripts/build-android preview tunnel
 
 出包脚本提交云构建并附上 Git 提交编号。只有 Expo 页面显示 `FINISHED`、核对地址与 Android 签名后，才分发安装链接。开发包连接 Metro；预览 APK 独立运行。团队成员使用自己的 Expo 项目权限，不共享登录凭据。`EXPO_PUBLIC_API_URL` 不是密钥。
 
+## 模型配置
+
+对话与主动关怀是两条独立的链，可以各配一个模型（方案 B：对话求快，主动关怀求稳）。
+
+| 环境变量 | 用途 | 当前取值（2026-10-21 决定） |
+| --- | --- | --- |
+| `HACHIMI_MODEL_NAME` | Core Agent 对话，用户看得见的流式回复 | `gemini-3.8-flash-low`（红队 12/12，端到端 p50 11.0 s，会发 `tool_calls`） |
+| `HACHIMI_PROACTIVE_MODEL_NAME` | 主动关怀 worker 的起草与 Auditor 审核 | `gemini-3.8-flash`（红队 33/36，TTFT 8.6 s，只影响 worker） |
+| `HACHIMI_AUDIO_MODEL_NAME` | 语音输入的听感（快慢/轻重/呼吸），一次请求同时拿转写 | 留空（只转写）；配 `gemini-3.8-flash` 才有听感 |
+| `HACHIMI_TRANSCRIBE_MODEL_NAME` | 语音输入转写（`POST /api/v1/voice/transcribe`） | `whisper-1`（默认；换模型不影响对话） |
+
+`HACHIMI_AUDIO_MODEL_NAME` 留空时不产生声音状态；生产环境的中转站没有 whisper 模型，不配它时 `/api/v1/voice/transcribe` 会稳定 502（`/audio/transcriptions` 返回 `503 model_not_found`，实测记录见 `docs/voice-input.md`）。
+
+`HACHIMI_PROACTIVE_MODEL_NAME` 留空或填空白时回退到 `HACHIMI_MODEL_NAME`，所以不配也能跑。改完要重建 `api` 与 `proactive-care-worker` 两个容器（`hindsight` 走自己的 key，不用动）。
+
+**为什么对话不用 `deepseek-chat`**：这台中转站上的 `deepseek-chat` 收到 `tools` 也返回 `tool_calls: null`（直连网关实测，同一次探测里 `gemini-3.8-flash`、`-low`、`-high`、`gemini-2.5-flash`、`deepseek-v4-flash` 都会正常发），知识库检索工具从不被调用，回答里的页码只能靠模型编。`-low` 与 `-high` 是同一族的中转站别名（实测 2.5 s / 3.0 s 都会发 `tool_calls`，正牌 `gemini-3.8-flash` 18.9 s），差别体现在推理预算而不是能否用工具；质量差异只能靠红队测，当前 `-low` 是 12/12。
+
+两条注意事项：
+
+- **换对话模型之后旧红队分数作废**，必须重跑 `api/evals/simulated_patient/` 的 36 轮再引用通过率。
+- 主动关怀延迟要单独看 worker 日志：`processor.py` 有重试上限，模型太慢会触发重试。
+
+### Hindsight 召回的重排（最容易被误当成「模型慢」）
+
+`compose.yaml` 里 `HINDSIGHT_API_RERANKER_LOCAL_MODEL` 是 `BAAI/bge-reranker-v2-m3`（5.68 亿参数的 cross-encoder）。在 4 核机器上给 60 个候选逐对打分要 **67 秒**，而这段时间发生在模型开始生成之前——患者看到的就是「回复好慢」。所以 `HINDSIGHT_API_RERANKER_MAX_CANDIDATES` 设成 `10`（默认 300），召回实测 37.6 s / 39.0 s → 8.7 s / 6.4 s。
+
+改动落在 `compose.yaml`，生效要重建 hindsight（模型要重新加载，约 40 秒）：
+
+```bash
+docker compose -p antang-prod -f compose.yaml -f compose.server.yaml \
+  up -d --no-deps --force-recreate hindsight
+```
+
+代码侧还有一层兜底：`hindsight_recall_timeout_seconds`（默认 8 s）与 `hindsight_retain_timeout_seconds`（默认 25 s）。超时只记 `companion_memory_recall_timeout` / `companion_memory_retain_timeout` 警告，召回超时当本轮没有记忆，写入超时不动游标（下一段重补）。
+
+
 ## 更新服务器
 
 角色及患者授权的账号维护和演示步骤见 [患者授权说明](patient-access.md)。当前统一迁移为 `r75cae7f1d94`；开发和审核先升级本机，审核通过后再更新线上。普通注册固定患者，医护申请由研发管理审批，研发身份仍通过维护命令赋予。

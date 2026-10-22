@@ -43,6 +43,21 @@ import {
   parseUserOverview,
   type ApplicationStatus,
   type RegistrationOptions,
+  type PsychosocialProfile,
+  parsePsychosocialProfile,
+  type PsychosocialAssessmentInput,
+  type FearSummary,
+  parseFearSummary,
+  type FearBehaviorLog,
+  parseFearBehaviorLogs,
+  type BeliefEventRecord,
+  parseBeliefEvents,
+  parseTranscription,
+  type GlucoseReading,
+  parseGlucoseReading,
+  parseGlucoseReadings,
+  type GlucoseSummary,
+  parseGlucoseSummary,
 } from "./types";
 
 export type FetchFunction = (
@@ -51,6 +66,17 @@ export type FetchFunction = (
 ) => ReturnType<typeof expoFetch>;
 
 type FetchResponse = Awaited<ReturnType<typeof expoFetch>>;
+
+/**
+ * 发送消息时手机正在收到的实时心率广播中最近的一条读数。
+ * 请求体里对应后端的下划线字段 beats_per_minute / measured_at / device_name。
+ */
+export type LiveHeartRateReading = {
+  beatsPerMinute: number;
+  /** ISO 8601 时间字符串。 */
+  measuredAt: string;
+  deviceName: string | null;
+};
 
 export class ApiError extends Error {
   constructor(
@@ -311,7 +337,9 @@ export class ApiClient {
       username,
       password,
       options === undefined
-        ? {}
+        ? // 服务端注册接口要求 consent_accepted，没显式传就按「已同意」处理，
+          // 与旧调用方一致（注册页本身已经有勾选同意这一步）。
+          { consent_accepted: true }
         : {
             consent_accepted: options.consentAccepted,
             full_name: options.fullName,
@@ -805,16 +833,24 @@ export class ApiClient {
     attachmentId: string | null,
     onEvent: (event: ChatStreamEvent) => void,
     signal?: AbortSignal,
+    liveHeartRate?: LiveHeartRateReading | null,
   ): Promise<void> {
-    const response = await this.authorizedFetch("/api/v1/chat/messages", {
-      method: "POST",
+    const response = await this.authorizedFetch('/api/v1/chat/messages', {
+      method: 'POST',
       body: JSON.stringify({
         client_message_id: clientMessageId,
         content,
         attachment_id: attachmentId,
+        live_heart_rate: liveHeartRate === undefined || liveHeartRate === null
+          ? null
+          : {
+            beats_per_minute: liveHeartRate.beatsPerMinute,
+            measured_at: liveHeartRate.measuredAt,
+            device_name: liveHeartRate.deviceName,
+          },
       }),
       signal,
-      headers: { Accept: "application/x-ndjson" },
+      headers: { Accept: 'application/x-ndjson' },
     });
 
     await this.consumeChatResponse(response, onEvent);
@@ -857,5 +893,161 @@ export class ApiClient {
     );
 
     await this.consumeChatResponse(response, onEvent);
+  }
+
+  async deleteAccount(password: string): Promise<void> {
+    const version = this.sessionVersion;
+    const response = await this.authorizedFetch('/api/v1/auth/account', {
+      method: 'DELETE',
+      body: JSON.stringify({ password }),
+    });
+    this.assertSessionVersion(version);
+    if (!response.ok) throw await this.apiError(response);
+    await this.mutateTokens(version, () => this.tokenStore.clear());
+  }
+
+  async getPsychosocialAssessment(): Promise<PsychosocialProfile | null> {
+    const response = await this.authorizedFetch(
+      '/api/v1/health-profile/psychosocial-assessment',
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parsePsychosocialProfile(await responseJson(response));
+  }
+
+  async recordPsychosocialAssessment(
+    input: PsychosocialAssessmentInput,
+  ): Promise<PsychosocialProfile> {
+    const response = await this.authorizedFetch(
+      '/api/v1/health-profile/psychosocial-assessment',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          fear_behavior_percent: input.fearBehaviorPercent,
+          fear_worry_percent: input.fearWorryPercent,
+          gold_score: input.goldScore,
+          instrument: input.instrument,
+          assessed_at: input.assessedAt,
+        }),
+      },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    const parsed = parsePsychosocialProfile(await responseJson(response));
+    if (parsed === null) throw new Error('服务器没有返回沟通方式评估结果');
+    return parsed;
+  }
+
+  async getFearSummary(signal?: AbortSignal): Promise<FearSummary> {
+    const response = await this.authorizedFetch(
+      '/api/v1/health-profile/fear-summary',
+      { signal },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseFearSummary(await responseJson(response));
+  }
+
+  async getFearBehaviorLogs(signal?: AbortSignal): Promise<FearBehaviorLog[]> {
+    const response = await this.authorizedFetch(
+      '/api/v1/health-profile/fear-behavior',
+      { signal },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseFearBehaviorLogs(await responseJson(response));
+  }
+
+  async getBeliefEvents(signal?: AbortSignal): Promise<BeliefEventRecord[]> {
+    const response = await this.authorizedFetch(
+      '/api/v1/health-profile/belief-events',
+      { signal },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseBeliefEvents(await responseJson(response));
+  }
+
+  async deleteFearBehaviorLog(id: string): Promise<void> {
+    const response = await this.authorizedFetch(
+      `/api/v1/health-profile/fear-behavior/${id}`,
+      { method: 'DELETE' },
+    );
+    if (!response.ok) throw await this.apiError(response);
+  }
+
+  async deleteBeliefEvent(id: string): Promise<void> {
+    const response = await this.authorizedFetch(
+      `/api/v1/health-profile/belief-events/${id}`,
+      { method: 'DELETE' },
+    );
+    if (!response.ok) throw await this.apiError(response);
+  }
+
+  async transcribeVoice(recording: {
+    mimeType: string;
+    name: string;
+    uri: string;
+  }): Promise<string> {
+    const form = new FormData();
+    const file = new File(recording.uri);
+    form.append(
+      'file',
+      {
+        bytes: () => file.bytes(),
+        name: recording.name,
+        type: recording.mimeType,
+      } as unknown as Blob,
+    );
+    const response = await this.authorizedFetch('/api/v1/voice/transcribe', {
+      method: 'POST',
+      body: form,
+    });
+    if (!response.ok) throw await this.apiError(response);
+    return parseTranscription(await responseJson(response));
+  }
+
+  async createGlucoseReading(input: {
+    valueMgDl: number;
+    measuredAt: string;
+    context: string;
+    note?: string | null;
+  }): Promise<GlucoseReading> {
+    const response = await this.authorizedFetch(
+      "/api/v1/health-profile/glucose-readings",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          value_mg_dl: input.valueMgDl,
+          measured_at: input.measuredAt,
+          context: input.context,
+          note: input.note ?? null,
+        }),
+      },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseGlucoseReading(await responseJson(response));
+  }
+
+  async getGlucoseReadings(days = 14, signal?: AbortSignal): Promise<GlucoseReading[]> {
+    const response = await this.authorizedFetch(
+      `/api/v1/health-profile/glucose-readings?days=${days}`,
+      { signal },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseGlucoseReadings(await responseJson(response));
+  }
+
+  async getGlucoseSummary(days = 7, signal?: AbortSignal): Promise<GlucoseSummary> {
+    const response = await this.authorizedFetch(
+      `/api/v1/health-profile/glucose-readings/summary?days=${days}`,
+      { signal },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseGlucoseSummary(await responseJson(response));
+  }
+
+  async revokeGlucoseReading(id: string): Promise<void> {
+    const response = await this.authorizedFetch(
+      `/api/v1/health-profile/glucose-readings/${id}`,
+      { method: "DELETE" },
+    );
+    if (!response.ok) throw await this.apiError(response);
   }
 }

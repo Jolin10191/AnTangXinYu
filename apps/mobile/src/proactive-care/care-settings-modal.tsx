@@ -36,6 +36,7 @@ type Props = {
   onDisableBackgroundHealth: () => Promise<void>;
   onEnableBackgroundHealth: () => Promise<void>;
   onLogout: () => void;
+  onAccountDeleted: () => void;
   onRequestNotificationPermission: () => Promise<unknown>;
   visible: boolean;
 };
@@ -91,6 +92,7 @@ export function CareSettingsModal({
   onDisableBackgroundHealth,
   onEnableBackgroundHealth,
   onLogout,
+  onAccountDeleted,
   onRequestNotificationPermission,
   visible,
 }: Props) {
@@ -99,6 +101,10 @@ export function CareSettingsModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteRunning, setDeleteRunning] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!visible) return;
@@ -147,6 +153,22 @@ export function CareSettingsModal({
       setError(errorMessage(reason));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function deleteAccount() {
+    if (deleteRunning || deletePassword.length === 0) return;
+    setDeleteRunning(true);
+    setDeleteError(null);
+    try {
+      await api.deleteAccount(deletePassword);
+      setDeletePassword('');
+      setDeleteOpen(false);
+      onAccountDeleted();
+    } catch (reason) {
+      setDeleteError(errorMessage(reason));
+    } finally {
+      setDeleteRunning(false);
     }
   }
 
@@ -459,6 +481,85 @@ export function CareSettingsModal({
                     <Text style={styles.logoutButtonText}>退出登录</Text>
                   </Pressable>
                 </View>
+
+                <View style={styles.deleteSection}>
+                  <View style={styles.accountCopy}>
+                    <Text style={styles.sectionTitle}>注销账号</Text>
+                    <Text style={styles.description}>
+                      注销会删除这个账号的全部档案、对话、手环记录和陪伴记忆，无法恢复。
+                    </Text>
+                  </View>
+                  {deleteOpen ? (
+                    <View style={styles.deleteForm}>
+                      <TextInput
+                        accessibilityLabel="注销账号时输入登录密码"
+                        autoCapitalize="none"
+                        editable={!deleteRunning}
+                        onChangeText={setDeletePassword}
+                        placeholder="输入登录密码确认"
+                        placeholderTextColor={colors.muted}
+                        secureTextEntry
+                        style={styles.deleteInput}
+                        value={deletePassword}
+                      />
+                      <Text style={styles.description}>
+                        这不是退出登录。确认后数据立即删除，无法找回。
+                      </Text>
+                      {deleteError === null ? null : (
+                        <Text style={styles.deleteErrorText}>{deleteError}</Text>
+                      )}
+                      <View style={styles.deleteActions}>
+                        <Pressable
+                          accessibilityLabel="取消注销账号"
+                          accessibilityRole="button"
+                          disabled={deleteRunning}
+                          onPress={() => {
+                            setDeleteOpen(false);
+                            setDeletePassword('');
+                            setDeleteError(null);
+                          }}
+                          style={({ pressed }) => [
+                            styles.deleteCancelButton,
+                            pressed && styles.buttonPressed,
+                          ]}
+                        >
+                          <Text style={styles.deleteCancelText}>取消</Text>
+                        </Pressable>
+                        <Pressable
+                          accessibilityLabel="确认注销并删除全部数据"
+                          accessibilityRole="button"
+                          disabled={deleteRunning || deletePassword.length === 0}
+                          onPress={() => void deleteAccount()}
+                          style={({ pressed }) => [
+                            styles.deleteConfirmButton,
+                            (pressed || deleteRunning || deletePassword.length === 0) &&
+                              styles.buttonDisabled,
+                          ]}
+                        >
+                          <Text style={styles.deleteConfirmText}>
+                            {deleteRunning ? '正在注销…' : '确认注销'}
+                          </Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ) : (
+                    <Pressable
+                      accessibilityLabel="注销账号"
+                      accessibilityRole="button"
+                      disabled={disabled}
+                      onPress={() => {
+                        setDeleteOpen(true);
+                        setDeleteError(null);
+                      }}
+                      style={({ pressed }) => [
+                        styles.deleteOpenButton,
+                        pressed && styles.buttonPressed,
+                      ]}
+                    >
+                      <Text style={styles.deleteOpenText}>注销账号</Text>
+                    </Pressable>
+                  )}
+                </View>
               </>
             )}
           </ScrollView>
@@ -713,6 +814,70 @@ const styles = StyleSheet.create({
   },
   logoutButtonText: {
     color: colors.danger,
+    fontFamily: typefaces.sansMedium,
+    fontSize: 13,
+  },
+  deleteSection: {
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+  },
+  deleteOpenButton: {
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.danger,
+  },
+  deleteOpenText: {
+    color: colors.danger,
+    fontFamily: typefaces.sansMedium,
+    fontSize: 13,
+  },
+  deleteForm: { gap: spacing.sm },
+  deleteInput: {
+    minHeight: 44,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    color: colors.text,
+    fontFamily: typefaces.sans,
+    fontSize: 14,
+  },
+  deleteErrorText: {
+    color: colors.danger,
+    fontFamily: typefaces.sans,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  deleteActions: { flexDirection: 'row', gap: spacing.sm },
+  deleteCancelButton: {
+    flex: 1,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  deleteCancelText: {
+    color: colors.muted,
+    fontFamily: typefaces.sansMedium,
+    fontSize: 13,
+  },
+  deleteConfirmButton: {
+    flex: 1,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.pill,
+    backgroundColor: colors.danger,
+  },
+  deleteConfirmText: {
+    color: '#FFFFFF',
     fontFamily: typefaces.sansMedium,
     fontSize: 13,
   },

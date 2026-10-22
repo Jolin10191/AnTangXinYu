@@ -21,6 +21,7 @@ import type {
   WearableDashboardSleepSession,
 } from '../api/types';
 import type { HealthBundle } from '../services/GadgetbridgeService';
+import { LiveHeartRatePanel } from '../live-heart-rate/LiveHeartRatePanel';
 import { AppIcon } from '../ui/icon';
 import { colors, radii, spacing, typefaces } from '../ui/theme';
 
@@ -160,6 +161,7 @@ export function HealthDashboardScreen({ visible, onClose, api, refreshKey, impor
           </View>
         ) : source === null || totals === undefined ? (
           <ScrollView contentContainerStyle={s.body}>
+            <LiveHeartRatePanel />
             <Text style={s.hint}>近 30 天还没有保存到服务器的手环观测。</Text>
             {importPreview === null ? null : <LocalImportExtras bundle={importPreview} />}
           </ScrollView>
@@ -175,6 +177,7 @@ export function HealthDashboardScreen({ visible, onClose, api, refreshKey, impor
             showsVerticalScrollIndicator={false}
           >
             {error === null ? null : <Text style={s.error}>{error}</Text>}
+            <LiveHeartRatePanel />
             <Text style={s.source}>
               服务器已保存的近 30 天观测 · 历史记录，非实时测量
               {'\n'}最新观测 {formatDay(source.latestObservedAt)} {formatClock(source.latestObservedAt)}

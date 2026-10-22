@@ -531,6 +531,16 @@ export function parseAttachmentUpload(value: unknown): ChatAttachment {
   return parseAttachment(value, "attachment");
 }
 
+/** 转写只回一段文字：音频在服务端用完就丢，没有 id 也没有下载地址。 */
+export function parseTranscription(value: unknown): string {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('转写结果必须是对象');
+  }
+  const text = stringValue((value as Record<string, unknown>).text, 'text').trim();
+  if (text.length === 0) throw new Error('转写结果是空的');
+  return text;
+}
+
 function booleanValue(value: unknown, name: string): boolean {
   if (typeof value !== "boolean") throw new Error(`${name} 必须是布尔值`);
   return value;
@@ -1649,6 +1659,277 @@ export function parseHealthProfileChangeResult(
   };
 }
 
+export type PsychosocialQuadrant =
+  | 'high_fear_normal_awareness'
+  | 'high_fear_impaired_awareness'
+  | 'low_fear_normal_awareness'
+  | 'low_fear_impaired_awareness'
+  | 'unknown_awareness';
+
+export type PsychosocialAwareness = 'normal' | 'impaired' | 'unknown';
+
+export type PsychosocialProfile = {
+  assessedAt: string;
+  instrument: string;
+  fearPercent: number;
+  fearHigh: boolean;
+  goldScore: number | null;
+  awareness: PsychosocialAwareness;
+  quadrant: PsychosocialQuadrant;
+  weeklyContactLimit: number;
+};
+
+export type PsychosocialAssessmentInput = {
+  fearBehaviorPercent: number;
+  fearWorryPercent: number;
+  goldScore: number | null;
+  instrument: string;
+  assessedAt: string;
+};
+
+const PSYCHOSOCIAL_QUADRANTS: readonly PsychosocialQuadrant[] = [
+  'high_fear_normal_awareness',
+  'high_fear_impaired_awareness',
+  'low_fear_normal_awareness',
+  'low_fear_impaired_awareness',
+  'unknown_awareness',
+];
+
+const PSYCHOSOCIAL_AWARENESS: readonly PsychosocialAwareness[] = [
+  'normal',
+  'impaired',
+  'unknown',
+];
+
+export function parsePsychosocialProfile(value: unknown): PsychosocialProfile | null {
+  if (value === null) return null;
+  const data = objectValue(value, 'psychosocial profile');
+  const instrument = stringValue(data.instrument, 'psychosocial profile.instrument');
+  const fearPercent = integerValue(data.fear_percent, 'psychosocial profile.fear_percent');
+  if (fearPercent < 0 || fearPercent > 100) {
+    throw new Error('psychosocial profile.fear_percent 超出 0-100');
+  }
+  const awareness = stringValue(data.awareness, 'psychosocial profile.awareness');
+  if (!PSYCHOSOCIAL_AWARENESS.includes(awareness as PsychosocialAwareness)) {
+    throw new Error('psychosocial profile.awareness 无效');
+  }
+  const quadrant = stringValue(data.quadrant, 'psychosocial profile.quadrant');
+  if (!PSYCHOSOCIAL_QUADRANTS.includes(quadrant as PsychosocialQuadrant)) {
+    throw new Error('psychosocial profile.quadrant 无效');
+  }
+  const goldScore = data.gold_score === null
+    ? null
+    : integerValue(data.gold_score, 'psychosocial profile.gold_score');
+  const weeklyContactLimit = integerValue(
+    data.weekly_contact_limit,
+    'psychosocial profile.weekly_contact_limit',
+  );
+  return {
+    assessedAt: zonedDateTimeValue(data.assessed_at, 'psychosocial profile.assessed_at'),
+    instrument,
+    fearPercent,
+    fearHigh: booleanValue(data.fear_high, 'psychosocial profile.fear_high'),
+    goldScore,
+    awareness: awareness as PsychosocialAwareness,
+    quadrant: quadrant as PsychosocialQuadrant,
+    weeklyContactLimit,
+  };
+}
+
+export type FearDiscrepancy =
+  | 'aligned'
+  | 'implicit_higher'
+  | 'explicit_higher'
+  | 'unknown';
+
+export const FEAR_DISCREPANCIES: readonly FearDiscrepancy[] = [
+  'aligned',
+  'implicit_higher',
+  'explicit_higher',
+  'unknown',
+];
+
+/** 信念图里的一个节点在窗口内的观测统计。 */
+export type HypoglycemiaBeliefNode = {
+  beliefCode: string;
+  label: string;
+  mentions: number;
+  reframes: number;
+  denials: number;
+  latestQuote: string;
+  latestDetectedAt: string;
+  resolved: boolean;
+};
+
+/**
+ * 显性分数（量表）与内隐行为代理（聊天里记录的次数）的对照结果。
+ *
+ * `discrepancy` 只表达「两路证据一致不一致」，不是诊断。
+ */
+export type FearSummary = {
+  windowStart: string;
+  windowEnd: string;
+  behaviorCounts: Record<string, number>;
+  behaviorTotal: number;
+  monitoringWeekly: number;
+  avoidanceWeekly: number;
+  beliefs: HypoglycemiaBeliefNode[];
+  assessment: PsychosocialProfile | null;
+  discrepancy: FearDiscrepancy;
+  discrepancyNote: string;
+};
+
+function nonNegativeNumber(value: unknown, name: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw new Error(`${name} 必须是非负数`);
+  }
+  return value;
+}
+
+/** 允许空字符串的文本字段：说明性文案在「没有可比的两路证据」时会是空的。 */
+function textValue(value: unknown, name: string): string {
+  if (typeof value !== 'string') throw new Error(`${name} 必须是字符串`);
+  return value;
+}
+
+function beliefNodes(value: unknown, name: string): HypoglycemiaBeliefNode[] {
+  if (!Array.isArray(value)) throw new Error(`${name} 必须是数组`);
+  return value.map((item, index) => {
+    const label = `${name}[${index}]`;
+    const data = objectValue(item, label);
+    return {
+      beliefCode: stringValue(data.belief_code, `${label}.belief_code`),
+      label: stringValue(data.label, `${label}.label`),
+      mentions: integerValue(data.mentions, `${label}.mentions`),
+      reframes: integerValue(data.reframes, `${label}.reframes`),
+      denials: integerValue(data.denials, `${label}.denials`),
+      latestQuote: stringValue(data.latest_quote, `${label}.latest_quote`),
+      latestDetectedAt: zonedDateTimeValue(
+        data.latest_detected_at,
+        `${label}.latest_detected_at`,
+      ),
+      resolved: booleanValue(data.resolved, `${label}.resolved`),
+    };
+  });
+}
+
+export function parseFearSummary(value: unknown): FearSummary {
+  const data = objectValue(value, 'fear summary');
+  const rawCounts = objectValue(
+    data.behavior_counts,
+    'fear summary.behavior_counts',
+  );
+  const behaviorCounts: Record<string, number> = {};
+  for (const [kind, count] of Object.entries(rawCounts)) {
+    behaviorCounts[kind] = integerValue(
+      count,
+      `fear summary.behavior_counts.${kind}`,
+    );
+  }
+  const discrepancy = stringValue(data.discrepancy, 'fear summary.discrepancy');
+  if (!FEAR_DISCREPANCIES.includes(discrepancy as FearDiscrepancy)) {
+    throw new Error('fear summary.discrepancy 无效');
+  }
+  return {
+    windowStart: zonedDateTimeValue(
+      data.window_start,
+      'fear summary.window_start',
+    ),
+    windowEnd: zonedDateTimeValue(data.window_end, 'fear summary.window_end'),
+    behaviorCounts,
+    behaviorTotal: integerValue(
+      data.behavior_total,
+      'fear summary.behavior_total',
+    ),
+    monitoringWeekly: nonNegativeNumber(
+      data.monitoring_weekly,
+      'fear summary.monitoring_weekly',
+    ),
+    avoidanceWeekly: nonNegativeNumber(
+      data.avoidance_weekly,
+      'fear summary.avoidance_weekly',
+    ),
+    beliefs: beliefNodes(data.beliefs, 'fear summary.beliefs'),
+    assessment:
+      data.assessment === undefined || data.assessment === null
+        ? null
+        : parsePsychosocialProfile(data.assessment),
+    discrepancy: discrepancy as FearDiscrepancy,
+    discrepancyNote: textValue(
+      data.discrepancy_note,
+      'fear summary.discrepancy_note',
+    ),
+  };
+}
+export type BeliefOccurrence = 'mentioned' | 'reframed' | 'denied';
+
+const BELIEF_OCCURRENCES: BeliefOccurrence[] = ['mentioned', 'reframed', 'denied'];
+
+/**
+ * 一条行为记录。带 id 才能在 App 里删掉具体那一条——汇总卡片只给次数，
+ * 患者看着「夜间查血糖 6 次」却没法说「那次不算」，等于没给撤回权。
+ */
+export type FearBehaviorLog = {
+  id: string;
+  kind: string;
+  label: string;
+  count: number;
+  note: string | null;
+  occurredAt: string;
+};
+
+/** 一条信念观测，quote 是患者原话。 */
+export type BeliefEventRecord = {
+  id: string;
+  beliefCode: string;
+  label: string;
+  quote: string;
+  occurrence: BeliefOccurrence;
+  detectedAt: string;
+};
+
+export function parseFearBehaviorLogs(value: unknown): FearBehaviorLog[] {
+  if (!Array.isArray(value)) throw new Error('behavior logs 必须是数组');
+  return value.map((item, index) => {
+    const label = `behavior logs[${index}]`;
+    const data = objectValue(item, label);
+    return {
+      id: uuidValue(data.id, `${label}.id`),
+      kind: stringValue(data.kind, `${label}.kind`),
+      label: stringValue(data.label, `${label}.label`),
+      count: integerValue(data.count, `${label}.count`),
+      note:
+        data.note === null || data.note === undefined
+          ? null
+          : textValue(data.note, `${label}.note`),
+      occurredAt: zonedDateTimeValue(data.occurred_at, `${label}.occurred_at`),
+    };
+  });
+}
+
+export function parseBeliefEvents(value: unknown): BeliefEventRecord[] {
+  if (!Array.isArray(value)) throw new Error('belief events 必须是数组');
+  return value.map((item, index) => {
+    const label = `belief events[${index}]`;
+    const data = objectValue(item, label);
+    const occurrence = stringValue(
+      data.occurrence,
+      `${label}.occurrence`,
+    ) as BeliefOccurrence;
+    if (!BELIEF_OCCURRENCES.includes(occurrence)) {
+      throw new Error(`${label}.occurrence 无效`);
+    }
+    return {
+      id: uuidValue(data.id, `${label}.id`),
+      beliefCode: stringValue(data.belief_code, `${label}.belief_code`),
+      label: stringValue(data.label, `${label}.label`),
+      quote: stringValue(data.quote, `${label}.quote`),
+      occurrence,
+      detectedAt: zonedDateTimeValue(data.detected_at, `${label}.detected_at`),
+    };
+  });
+}
+
 export function parseChatStreamEvent(value: unknown): ChatStreamEvent {
   const data = objectValue(value, "stream event");
   const type = stringValue(data.type, "stream event.type");
@@ -1723,5 +2004,84 @@ export function readErrorPayload(value: unknown): {
           : typeof detail?.message === "string"
             ? detail.message
             : undefined,
+  };
+}
+export type GlucoseReading = {
+  id: string;
+  valueMgDl: number;
+  measuredAt: string;
+  context: string;
+  source: string;
+  note: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+};
+
+export type GlucoseSummary = {
+  days: number;
+  count: number;
+  averageMgDl: number | null;
+  minimumMgDl: number | null;
+  maximumMgDl: number | null;
+  below70Count: number;
+};
+
+function glucoseObject(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("血糖数据格式不正确");
+  }
+  return value as Record<string, unknown>;
+}
+
+function glucoseNumber(source: Record<string, unknown>, key: string): number {
+  const value = source[key];
+  if (typeof value !== "number") throw new Error(`血糖数据缺少 ${key}`);
+  return value;
+}
+
+function glucoseNullableNumber(
+  source: Record<string, unknown>,
+  key: string,
+): number | null {
+  const value = source[key];
+  return typeof value === "number" ? value : null;
+}
+
+function glucoseString(source: Record<string, unknown>, key: string): string {
+  const value = source[key];
+  if (typeof value !== "string") throw new Error(`血糖数据缺少 ${key}`);
+  return value;
+}
+
+export function parseGlucoseReading(value: unknown): GlucoseReading {
+  const data = glucoseObject(value);
+  const note = data.note;
+  const revoked = data.revoked_at;
+  return {
+    id: glucoseString(data, "id"),
+    valueMgDl: glucoseNumber(data, "value_mg_dl"),
+    measuredAt: glucoseString(data, "measured_at"),
+    context: glucoseString(data, "context"),
+    source: glucoseString(data, "source"),
+    note: typeof note === "string" ? note : null,
+    revokedAt: typeof revoked === "string" ? revoked : null,
+    createdAt: glucoseString(data, "created_at"),
+  };
+}
+
+export function parseGlucoseReadings(value: unknown): GlucoseReading[] {
+  if (!Array.isArray(value)) throw new Error("血糖列表格式不正确");
+  return value.map(parseGlucoseReading);
+}
+
+export function parseGlucoseSummary(value: unknown): GlucoseSummary {
+  const data = glucoseObject(value);
+  return {
+    days: glucoseNumber(data, "days"),
+    count: glucoseNumber(data, "count"),
+    averageMgDl: glucoseNullableNumber(data, "average_mg_dl"),
+    minimumMgDl: glucoseNullableNumber(data, "minimum_mg_dl"),
+    maximumMgDl: glucoseNullableNumber(data, "maximum_mg_dl"),
+    below70Count: glucoseNumber(data, "below_70_count"),
   };
 }

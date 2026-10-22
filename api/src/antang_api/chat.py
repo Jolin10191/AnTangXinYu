@@ -600,6 +600,14 @@ async def _fail_chat_run(
     agent_run.error_message = str(error)
     agent_run.finished_at = now
 
+    if "quota" in str(error).lower():
+        # 中转站余额不足时回 403 insufficient_user_quota，患者这一轮一个字都收不到。
+        # 单独记一条，值班的人不用去翻 403 原文才知道该充值了。
+        logger.bind(
+            run_id=str(prepared_run.run_id),
+            user_id=str(agent_run.user_id),
+        ).warning("chat_run_out_of_quota")
+
     await session.execute(
         update(AgentToolCall)
         .where(
@@ -742,11 +750,21 @@ async def stream_chat_run(
             if speech_cue is not None
             else ""
         )
-        companion_memory_context = await companion_memory.prepare_context(
-            session,
-            user_id,
-            prepared_run.user_message_id,
-        )
+        try:
+            companion_memory_context = await companion_memory.prepare_context(
+                session,
+                user_id,
+                prepared_run.user_message_id,
+            )
+        except Exception as error:
+            # 记忆是增强项：写入或召回失败不该让患者收不到任何回答。
+            # 现场有过 `Fact extraction failed` 把整轮聊天打成失败。
+            await session.rollback()
+            logger.bind(
+                user_id=str(user_id),
+                error_type=type(error).__name__,
+            ).opt(exception=True).warning("companion_memory_unavailable")
+            companion_memory_context = ""
         active_plans = list(
             await session.scalars(
                 select(CarePlan)

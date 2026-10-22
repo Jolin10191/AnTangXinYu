@@ -1,3 +1,4 @@
+import asyncio
 import time
 from datetime import datetime
 from typing import Literal
@@ -31,12 +32,19 @@ class CompanionMemory:
         retain_user_turns: int,
         recall_budget: Literal["low", "mid", "high"],
         recall_max_tokens: int,
+        recall_timeout_seconds: float = 8.0,
+        retain_timeout_seconds: float = 25.0,
     ) -> None:
         self.client = client
         self.mode = mode
         self.retain_user_turns = retain_user_turns
         self.recall_budget = recall_budget
         self.recall_max_tokens = recall_max_tokens
+        # 记忆是增强项，不是这一轮回答的前提。线上真实数据：一次召回在
+        # 4 核机器上重排 60 个候选要 67 秒，整轮聊天被它拖到 111 秒。
+        # 超时就当这轮没有记忆，绝不让患者等一个「锦上添花」。
+        self.recall_timeout_seconds = recall_timeout_seconds
+        self.retain_timeout_seconds = retain_timeout_seconds
 
     async def prepare_context(
         self,
@@ -148,22 +156,25 @@ class CompanionMemory:
             ]
             retain_started_at = time.perf_counter()
             try:
-                retain_response = await self.client.aretain(
-                    bank_id=f"antang-user-{user_id}",
-                    content="\n".join(segment_lines),
-                    timestamp=segment_turns[-1].user_created_at,
-                    context=(
-                        "安糖心语的陪伴对话。助手内容只用于理解用户话语，"
-                        "不能当作用户事实。"
+                retain_response = await asyncio.wait_for(
+                    self.client.aretain(
+                        bank_id=f"antang-user-{user_id}",
+                        content="\n".join(segment_lines),
+                        timestamp=segment_turns[-1].user_created_at,
+                        context=(
+                            "安糖心语的陪伴对话。助手内容只用于理解用户话语，"
+                            "不能当作用户事实。"
+                        ),
+                        document_id=f"chat-segment-{segment_end_message_id}",
+                        metadata={
+                            "source": "antang_chat",
+                            "start_message_id": str(segment_messages[0][0]),
+                            "through_message_id": str(segment_end_message_id),
+                        },
+                        update_mode="replace",
+                        retain_async=False,
                     ),
-                    document_id=f"chat-segment-{segment_end_message_id}",
-                    metadata={
-                        "source": "antang_chat",
-                        "start_message_id": str(segment_messages[0][0]),
-                        "through_message_id": str(segment_end_message_id),
-                    },
-                    update_mode="replace",
-                    retain_async=False,
+                    timeout=self.retain_timeout_seconds,
                 )
                 if (
                     not retain_response.success
@@ -171,6 +182,14 @@ class CompanionMemory:
                     or retain_response.items_count != 1
                 ):
                     raise RuntimeError("Hindsight 没有同步写入完整对话段")
+            except TimeoutError:
+                logger.bind(
+                    user_id=str(user_id),
+                    timeout_seconds=self.retain_timeout_seconds,
+                ).warning("companion_memory_retain_timeout")
+                # 记忆没写完不影响这一轮回答；影子模式和非影子模式都先放行，
+                # 下一段会把这段对话重新补上（游标还没前进）。
+                return ""
             except Exception as error:
                 if self.mode != "shadow":
                     raise
@@ -245,19 +264,31 @@ class CompanionMemory:
         query_timestamp: datetime,
     ) -> str:
         recall_started_at = time.perf_counter()
-        recall_response = await self.client.arecall(
-            bank_id=f"antang-user-{user_id}",
-            query=query,
-            types=["world", "experience", "observation"],
-            max_tokens=self.recall_max_tokens,
-            budget=self.recall_budget,
-            trace=False,
-            query_timestamp=query_timestamp.isoformat(),
-            include_entities=False,
-            include_chunks=False,
-            include_source_facts=False,
-            prefer_observations=True,
-        )
+        try:
+            recall_response = await asyncio.wait_for(
+                self.client.arecall(
+                    bank_id=f"antang-user-{user_id}",
+                    query=query,
+                    types=["world", "experience", "observation"],
+                    max_tokens=self.recall_max_tokens,
+                    budget=self.recall_budget,
+                    trace=False,
+                    query_timestamp=query_timestamp.isoformat(),
+                    include_entities=False,
+                    include_chunks=False,
+                    include_source_facts=False,
+                    prefer_observations=True,
+                ),
+                timeout=self.recall_timeout_seconds,
+            )
+        except TimeoutError:
+            # 超时不当故障抛给用户：这一轮没有记忆照样能回答。
+            logger.bind(
+                user_id=str(user_id),
+                timeout_seconds=self.recall_timeout_seconds,
+                latency_ms=round((time.perf_counter() - recall_started_at) * 1000),
+            ).warning("companion_memory_recall_timeout")
+            return ""
         memories = [
             result.text.strip()
             for result in recall_response.results

@@ -163,6 +163,34 @@ def test_core_prompt_allows_one_time_reminders_with_relative_times() -> None:
     assert "不支持的普通倒计时或提醒" not in SYSTEM_PROMPT
 
 
+def test_core_prompt_handles_over_correction_without_blame() -> None:
+    assert "低血糖后的强烈饥饿是升糖激素在推" in SYSTEM_PROMPT
+    assert "“低→猛补→反弹高”这个循环" in SYSTEM_PROMPT
+    assert "不要夸“补得对”" in SYSTEM_PROMPT
+
+
+def test_core_prompt_checks_denial_instead_of_agreeing() -> None:
+    assert "不要附和这句话就直接收尾" in SYSTEM_PROMPT
+    assert "这是核对，不是揭穿" in SYSTEM_PROMPT
+    assert "说明你心态好" in SYSTEM_PROMPT
+    assert "不要用“大家”“很多人”这种泛指" in SYSTEM_PROMPT
+
+
+def test_core_prompt_does_not_turn_a_reassurance_check_into_a_reason() -> None:
+    assert "不要用“距离上次测已经有一阵子”当理由松口" in SYSTEM_PROMPT
+    assert "“睡前再确认一次就踏实了”" in SYSTEM_PROMPT
+
+
+def test_core_prompt_keeps_calls_and_repetition_out_of_the_reply() -> None:
+    assert "调用语法绝对不能出现在正文里" in SYSTEM_PROMPT
+    assert "`to=`" in SYSTEM_PROMPT
+    assert "一次回复只讲一遍" in SYSTEM_PROMPT
+    assert "不要把同一段内容重复两三次" in SYSTEM_PROMPT
+    assert "不要写给自己看的批注、推演或草稿" in SYSTEM_PROMPT
+    assert "不要用 Markdown 记号" in SYSTEM_PROMPT
+    assert "必须至少原样复制一个" in SYSTEM_PROMPT
+
+
 async def test_core_model_rejects_missing_dynamic_prompt() -> None:
     messages: list[AnyMessage] = [HumanMessage(content="你好")]
     request: ModelRequest[AgentContext | None] = ModelRequest(
@@ -186,3 +214,32 @@ async def test_core_model_rejects_missing_dynamic_prompt() -> None:
 
     with pytest.raises(RuntimeError, match="缺少完整系统提示词"):
         await runtime_system_prompt.awrap_model_call(request, handler)
+
+
+def test_core_prompt_includes_a_live_heart_rate_reading_when_given() -> None:
+    rendered_prompt = render_core_system_prompt(
+        '{"occupation":"学生"}',
+        care_plan_context="[]",
+        live_heart_rate_context=(
+            '{"beats_per_minute": 89, "measured_at": "2026-07-26T22:00:00+08:00",'
+            ' "device_name": "HUAWEI Band 9-598"}'
+        ),
+    )
+
+    assert "[实时心率读数]" in rendered_prompt
+    assert "只在本次回复有效" in rendered_prompt
+    assert '"beats_per_minute": 89' in rendered_prompt
+    assert rendered_prompt.index("[当前健康档案]") < rendered_prompt.index("[实时心率读数]")
+    assert rendered_prompt.index("[实时心率读数]") < rendered_prompt.index("[当前主动关怀计划]")
+
+
+def test_core_prompt_omits_the_live_heart_rate_section_without_a_reading() -> None:
+    rendered_prompt = render_core_system_prompt('{"occupation":"学生"}')
+
+    assert "[实时心率读数]" not in rendered_prompt
+
+
+def test_core_prompt_only_calls_a_provided_reading_real_time() -> None:
+    assert "只有当本轮上下文明确给出了「实时心率读数」时，才可以把它称为实时" in SYSTEM_PROMPT
+    assert "不能当成趋势、平均值或一段时间的心率" in SYSTEM_PROMPT
+    assert "设备结果都是服务器已经同步的历史观测" in SYSTEM_PROMPT

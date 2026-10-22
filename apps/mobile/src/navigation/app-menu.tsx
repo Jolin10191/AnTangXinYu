@@ -6,11 +6,29 @@ import {
   SmartWatch01Icon,  // 新增：手环图标
   ChartLineData01Icon,  // 新增：看板图标
 } from '@hugeicons/core-free-icons';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import {
+  Alert,
+  Linking,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppIcon } from '../ui/icon';
 import { colors, radii, spacing, typefaces } from '../ui/theme';
+import { downloadAndInstall } from '../update/install';
+import {
+  checkForUpdate,
+  formatSize,
+  installedVersion,
+  type ReleaseInfo,
+} from '../update/release';
 
 export type ConversationAnchor = {
   group: string;
@@ -25,7 +43,7 @@ type Props = {
   onOpenHealth: () => void;
   onOpenSettings: () => void;
   onOpenDashboard?: () => void;
-  onOpenPatientAccess?: () => void;
+  onOpenGlucose?: () => void;
   onSelectConversation: (messageId: string) => void;
   username: string;
   visible: boolean;
@@ -47,13 +65,104 @@ function formatLastSync(value: string): string {
   }).format(new Date(value));
 }
 
+function UpdateRow() {
+  const [phase, setPhase] = useState<'idle' | 'checking' | 'installing'>('idle');
+  const [percent, setPercent] = useState(0);
+  const installed = installedVersion();
+  const busy = phase !== 'idle';
+
+  async function startInstall(release: ReleaseInfo) {
+    setPercent(0);
+    setPhase('installing');
+    try {
+      await downloadAndInstall(release, (progress) =>
+        setPercent(progress.percent),
+      );
+    } catch (error) {
+      Alert.alert(
+        '没能开始安装',
+        error instanceof Error ? error.message : '再试一次。',
+      );
+    } finally {
+      setPhase('idle');
+    }
+  }
+
+  async function handlePress() {
+    if (busy) {
+      return;
+    }
+    setPhase('checking');
+    try {
+      const result = await checkForUpdate();
+      if (result.kind === 'available') {
+        const { release } = result;
+        const actions = [
+          { text: '稍后', style: 'cancel' as const },
+          {
+            text: '去下载',
+            onPress: () => {
+              void Linking.openURL(release.apkUrl);
+            },
+          },
+        ];
+        if (Platform.OS === 'android') {
+          actions.push({
+            text: '直接安装',
+            onPress: () => {
+              void startInstall(release);
+            },
+          });
+        }
+        Alert.alert(
+          '有新版本',
+          `新版本 ${release.versionName}（${formatSize(release.sizeBytes)}）\n\n${release.notes}`,
+          actions,
+        );
+      } else {
+        Alert.alert('已是最新版本', `当前版本 ${result.installed.name}`);
+      }
+    } catch (error) {
+      Alert.alert(
+        '检查更新失败',
+        error instanceof Error ? error.message : '请确认网络后重试',
+      );
+    } finally {
+      setPhase('idle');
+    }
+  }
+
+  const action =
+    phase === 'checking'
+      ? '检查中…'
+      : phase === 'installing'
+        ? `下载 ${percent}%`
+        : '检查';
+
+  return (
+    <Pressable
+      accessibilityLabel="检查更新"
+      accessibilityRole="button"
+      disabled={busy}
+      onPress={handlePress}
+      style={styles.updateRow}
+    >
+      <View style={styles.updateCopy}>
+        <Text style={styles.updateTitle}>检查更新</Text>
+        <Text style={styles.updateHint}>当前版本 {installed.name}</Text>
+      </View>
+      <Text style={styles.updateAction}>{action}</Text>
+    </Pressable>
+  );
+}
+
 export function AppMenu({
   conversations,
   onClose,
   onOpenHealth,
   onOpenSettings,
   onOpenDashboard = () => { },
-  onOpenPatientAccess,
+  onOpenGlucose = () => { },
   onSelectConversation,
   username,
   visible,
@@ -119,16 +228,6 @@ export function AppMenu({
             </Pressable>
           </View>
 
-          {onOpenPatientAccess === undefined ? null : (
-            <Pressable accessibilityLabel="医护授权" accessibilityRole="button"
-              onPress={onOpenPatientAccess} style={styles.healthEntry}>
-              <View style={styles.healthCopy}>
-                <Text style={styles.healthTitle}>医护授权</Text>
-                <Text style={styles.healthHint}>指定医护只读查看，随时撤销</Text>
-              </View>
-              <AppIcon color={colors.muted} icon={ArrowRight01Icon} size={20} />
-            </Pressable>
-          )}
           {/* ===== 原有的健康档案入口 ===== */}
           <Pressable
             accessibilityLabel="健康档案"
@@ -165,6 +264,26 @@ export function AppMenu({
             <View style={styles.healthCopy}>
               <Text style={styles.healthTitle}>健康看板</Text>
               <Text style={styles.healthHint}>查看近 30 天已保存的手环记录</Text>
+            </View>
+            <AppIcon color={colors.muted} icon={ArrowRight01Icon} size={20} />
+          </Pressable>
+
+          {/* ===== 新增：血糖记录入口 ===== */}
+          <Pressable
+            accessibilityLabel="血糖记录"
+            accessibilityRole="button"
+            onPress={onOpenGlucose}
+            style={({ pressed }) => [
+              styles.healthEntry,
+              pressed && styles.healthEntryPressed,
+            ]}
+          >
+            <View style={styles.healthIcon}>
+              <AppIcon color={colors.primaryPressed} icon={ChartLineData01Icon} size={26} />
+            </View>
+            <View style={styles.healthCopy}>
+              <Text style={styles.healthTitle}>血糖记录</Text>
+              <Text style={styles.healthHint}>记一条血糖，看看近 7 天</Text>
             </View>
             <AppIcon color={colors.muted} icon={ArrowRight01Icon} size={20} />
           </Pressable>
@@ -210,6 +329,8 @@ export function AppMenu({
               {gadgetbridgeBusy ? '...' : gadgetbridgeConnected ? '同步' : '连接'}
             </Text>
           </Pressable>
+
+          <UpdateRow />
 
           <View style={styles.sectionHeading}>
             <AppIcon color={colors.muted} icon={Message01Icon} size={19} />
@@ -257,6 +378,34 @@ export function AppMenu({
 }
 
 const styles = StyleSheet.create({
+  updateRow: {
+    alignItems: 'center',
+    backgroundColor: colors.paperMuted,
+    borderRadius: radii.md,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  updateCopy: { flex: 1, gap: 2 },
+  updateTitle: {
+    color: colors.text,
+    fontFamily: typefaces.sans,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  updateHint: {
+    color: colors.muted,
+    fontFamily: typefaces.sans,
+    fontSize: 12,
+  },
+  updateAction: {
+    color: colors.primaryPressed,
+    fontFamily: typefaces.sans,
+    fontSize: 14,
+    fontWeight: '600',
+  },
   overlay: {
     flex: 1,
     flexDirection: 'row',

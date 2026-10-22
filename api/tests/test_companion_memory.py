@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any, Literal, cast
@@ -29,15 +30,21 @@ class FakeHindsight:
         self.retain_error: Exception | None = None
         self.recall_error: Exception | None = None
         self.recall_texts: list[str] = []
+        self.retain_delay: float = 0.0
+        self.recall_delay: float = 0.0
 
     async def aretain(self, **kwargs: Any) -> SimpleNamespace:
         self.retain_calls.append(kwargs)
+        if self.retain_delay:
+            await asyncio.sleep(self.retain_delay)
         if self.retain_error is not None:
             raise self.retain_error
         return SimpleNamespace(success=True, var_async=False, items_count=1)
 
     async def arecall(self, **kwargs: Any) -> SimpleNamespace:
         self.recall_calls.append(kwargs)
+        if self.recall_delay:
+            await asyncio.sleep(self.recall_delay)
         if self.recall_error is not None:
             raise self.recall_error
         return SimpleNamespace(
@@ -48,6 +55,9 @@ class FakeHindsight:
 def build_memory(
     client: FakeHindsight,
     mode: Literal["disabled", "shadow", "online"],
+    *,
+    recall_timeout_seconds: float = 8.0,
+    retain_timeout_seconds: float = 25.0,
 ) -> CompanionMemory:
     return CompanionMemory(
         cast(Hindsight, client),
@@ -55,6 +65,8 @@ def build_memory(
         retain_user_turns=3,
         recall_budget="low",
         recall_max_tokens=2_048,
+        recall_timeout_seconds=recall_timeout_seconds,
+        retain_timeout_seconds=retain_timeout_seconds,
     )
 
 
@@ -552,3 +564,54 @@ async def test_companion_memory_never_reads_another_users_turns(
     assert client.retain_calls[0]["bank_id"] == f"antang-user-{first_id}"
     assert "乙" not in client.retain_calls[0]["content"]
     assert await db_session.get(CompanionMemoryCursor, second_id) is None
+
+
+async def test_a_slow_recall_gives_up_so_the_turn_can_answer(
+    db_session: AsyncSession,
+) -> None:
+    user = await create_user(db_session, "memory_slow_recall")
+    for number in range(1, 4):
+        await create_turn(db_session, user.id, f"U{number}", f"A{number}")
+    current = await create_current_message(db_session, user.id, "U4")
+    await db_session.commit()
+    user_id = user.id
+    current_id = current.id
+    client = FakeHindsight()
+    client.recall_delay = 5
+    client.recall_texts = ["本该出现的记忆"]
+
+    context = await build_memory(
+        client,
+        "online",
+        recall_timeout_seconds=0.05,
+    ).prepare_context(db_session, user_id, current_id)
+
+    # 记忆超时不是故障：这一轮没有记忆照样往下走。
+    assert context == ""
+    assert len(client.retain_calls) == 1
+    assert len(client.recall_calls) == 1
+
+
+async def test_a_slow_retain_is_cut_off_and_the_cursor_stays_put(
+    db_session: AsyncSession,
+) -> None:
+    user = await create_user(db_session, "memory_slow_retain")
+    for number in range(1, 4):
+        await create_turn(db_session, user.id, f"U{number}", f"A{number}")
+    current = await create_current_message(db_session, user.id, "U4")
+    await db_session.commit()
+    user_id = user.id
+    current_id = current.id
+    client = FakeHindsight()
+    client.retain_delay = 5
+
+    context = await build_memory(
+        client,
+        "online",
+        retain_timeout_seconds=0.05,
+    ).prepare_context(db_session, user_id, current_id)
+
+    assert context == ""
+    # 游标没前进，下一段还会把这段补上。
+    assert await db_session.get(CompanionMemoryCursor, user_id) is None
+    assert client.recall_calls == []

@@ -361,6 +361,62 @@ describe('ApiClient chat', () => {
     }
   });
 
+  test('sends a recording for transcription and returns the text', async () => {
+    const sourceFile = new File(Paths.cache, `voice-upload-${Date.now()}.m4a`);
+    sourceFile.create();
+    sourceFile.write('fake-m4a');
+    const OriginalFormData = global.FormData;
+    const RNFormData = jest.requireActual(
+      'react-native/Libraries/Network/FormData',
+    ).default;
+    const { installFormDataPatch } = jest.requireActual(
+      'expo/src/winter/FormData',
+    );
+    global.FormData = installFormDataPatch(RNFormData);
+    const fetchMock = jest.fn(async (_input: string | URL, init?: RequestInit) => {
+      await convertFormDataAsync(init?.body as FormData);
+      return jsonResponse(200, { text: '我刚才有点慌' });
+    });
+    const client = new ApiClient(
+      'http://api.test',
+      new MemoryTokenStore(oldTokens),
+      jest.fn(),
+      fetchMock as FetchFunction,
+    );
+
+    try {
+      await expect(
+        client.transcribeVoice({
+          mimeType: 'audio/m4a',
+          name: 'voice.m4a',
+          uri: sourceFile.uri,
+        }),
+      ).resolves.toBe('我刚才有点慌');
+      expect(fetchMock.mock.calls[0][0]).toContain('/api/v1/voice/transcribe');
+    } finally {
+      global.FormData = OriginalFormData;
+      sourceFile.delete();
+    }
+  });
+
+  test('surfaces an empty transcription as an error instead of empty text', async () => {
+    const fetchMock = jest.fn(async () => jsonResponse(200, { text: '   ' }));
+    const client = new ApiClient(
+      'http://api.test',
+      new MemoryTokenStore(oldTokens),
+      jest.fn(),
+      fetchMock as FetchFunction,
+    );
+
+    await expect(
+      client.transcribeVoice({
+        mimeType: 'audio/m4a',
+        name: 'voice.m4a',
+        uri: 'file:///cache/voice.m4a',
+      }),
+    ).rejects.toThrow('转写结果是空的');
+  });
+
   test('retries a failed assistant message through the normal chat stream', async () => {
     const failedAssistantMessageId = '019b2222-2222-7222-8222-222222222222';
     const userMessageId = '019b1111-1111-7111-8111-111111111111';
@@ -839,4 +895,142 @@ describe('ApiClient proactive care settings', () => {
       health_notification_preview_enabled: true,
     });
   });
+});
+test('register sends the consent flag the server requires', async () => {
+  const store = new MemoryTokenStore(null);
+  let body: unknown;
+  const fetchMock = jest.fn(async (_url: string, init: { body?: unknown }) => {
+    body = JSON.parse(String(init.body));
+    return jsonResponse(201, {
+      access_token: 'access',
+      refresh_token: 'refresh',
+      token_type: 'bearer',
+      expires_in: 900,
+      user: {
+        id: '00000000-0000-0000-0000-000000000001',
+        username: 'aya',
+        role: 'patient',
+      },
+    });
+  });
+
+  const client = new ApiClient(
+    'http://api.test',
+    store,
+    jest.fn(),
+    fetchMock as unknown as FetchFunction,
+  );
+
+  await client.register('aya', 'correct-password');
+
+  expect(body).toEqual({
+    username: 'aya',
+    password: 'correct-password',
+    consent_accepted: true,
+  });
+});
+
+test('deleteAccount sends the password and clears the stored session', async () => {
+  const store = new MemoryTokenStore(oldTokens);
+  let method: string | undefined;
+  let body: unknown;
+  const fetchMock = jest.fn(async (_url: string, init: { method?: string; body?: unknown }) => {
+    method = init.method;
+    body = init.body === undefined ? undefined : JSON.parse(String(init.body));
+    return { status: 204, ok: true, headers: new Headers(), body: null, json: async () => null } as Awaited<
+      ReturnType<FetchFunction>
+    >;
+  });
+
+  const client = new ApiClient(
+    'http://api.test',
+    store,
+    jest.fn(),
+    fetchMock as unknown as FetchFunction,
+  );
+
+  await client.deleteAccount('correct-password');
+
+  expect(method).toBe('DELETE');
+  expect(body).toEqual({ password: 'correct-password' });
+  expect(store.tokens).toBeNull();
+});
+
+test('getFearBehaviorLogs reads the records with their labels and ids', async () => {
+  const store = new MemoryTokenStore(oldTokens);
+  let requestedUrl = '';
+  const fetchMock = jest.fn(async (url: string) => {
+    requestedUrl = url;
+    return {
+      status: 200,
+      ok: true,
+      headers: new Headers(),
+      body: null,
+      json: async () => [
+        {
+          id: '0f080e32-35c6-4f92-8fee-0cc98dcc7dde',
+          kind: 'night_check',
+          label: '夜间反复确认血糖',
+          count: 6,
+          note: null,
+          occurred_at: '2026-10-30T23:10:00+08:00',
+        },
+      ],
+    } as Awaited<ReturnType<FetchFunction>>;
+  });
+
+  const client = new ApiClient(
+    'http://api.test',
+    store,
+    jest.fn(),
+    fetchMock as unknown as FetchFunction,
+  );
+
+  const logs = await client.getFearBehaviorLogs();
+
+  expect(requestedUrl).toContain('/api/v1/health-profile/fear-behavior');
+  expect(logs).toEqual([
+    {
+      id: '0f080e32-35c6-4f92-8fee-0cc98dcc7dde',
+      kind: 'night_check',
+      label: '夜间反复确认血糖',
+      count: 6,
+      note: null,
+      occurredAt: '2026-10-30T23:10:00+08:00',
+    },
+  ]);
+});
+
+test('deleting a record calls the path that names that exact record', async () => {
+  const store = new MemoryTokenStore(oldTokens);
+  const seen: { url: string; method?: string }[] = [];
+  const fetchMock = jest.fn(async (url: string, init: { method?: string }) => {
+    seen.push({ url, method: init.method });
+    return {
+      status: 204,
+      ok: true,
+      headers: new Headers(),
+      body: null,
+      json: async () => null,
+    } as Awaited<ReturnType<FetchFunction>>;
+  });
+
+  const client = new ApiClient(
+    'http://api.test',
+    store,
+    jest.fn(),
+    fetchMock as unknown as FetchFunction,
+  );
+
+  await client.deleteFearBehaviorLog('0f080e32-35c6-4f92-8fee-0cc98dcc7dde');
+  await client.deleteBeliefEvent('7b1e5e10-2c6f-4a3b-9d1f-2b9c4d5e6f70');
+
+  expect(seen[0]?.method).toBe('DELETE');
+  expect(seen[0]?.url).toContain(
+    '/api/v1/health-profile/fear-behavior/0f080e32-35c6-4f92-8fee-0cc98dcc7dde',
+  );
+  expect(seen[1]?.method).toBe('DELETE');
+  expect(seen[1]?.url).toContain(
+    '/api/v1/health-profile/belief-events/7b1e5e10-2c6f-4a3b-9d1f-2b9c4d5e6f70',
+  );
 });

@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# 分配下一个 Android versionCode，并写进 apps/mobile/app.json。
+#
+# 规则：YYMMDD + 两位当日序号。它只会变大，永不变小，所以旧包一定小于新包，
+# App 的"检查更新"才能判断出"有新版本"。
+#
+#   ./scripts/android-version --next          只打印下一个可用值
+#   ./scripts/android-version --apply         写进 app.json
+#   ./scripts/android-version --check VALUE   校验某个值是否合法且大于当前值
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+app_json="$root/apps/mobile/app.json"
+python="${PYTHON:-python3}"
+
+mode="${1:---next}"
+extra="${2:-}"
+
+"$python" - "$app_json" "$mode" "$extra" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone, timedelta
+
+path, mode, extra = sys.argv[1], sys.argv[2], (sys.argv[3] if len(sys.argv) > 3 else "")
+with open(path, encoding="utf-8") as handle:
+    config = json.load(handle)
+android = config["expo"]["android"]
+current = int(android.get("versionCode") or 1)
+
+now = datetime.now(timezone(timedelta(hours=8)))
+prefix = int(now.strftime("%y%m%d"))
+day_floor = prefix * 100
+
+if mode == "--check":
+    value = int(extra)
+    if value <= current:
+        raise SystemExit(f"versionCode {value} 不大于当前值 {current}，用户不会看到更新")
+    if value // 100 != prefix:
+        print(f"提示：{value} 不是今天的日期前缀 {prefix}", file=sys.stderr)
+    print(value)
+    raise SystemExit(0)
+
+candidate = day_floor + 1 if current < day_floor + 1 else current + 1
+if candidate // 100 != prefix:
+    raise SystemExit(
+        f"当前值 {current} 已经跨到别的日期前缀，请手工确认后再发布"
+    )
+if mode == "--next":
+    print(candidate)
+    raise SystemExit(0)
+if mode == "--apply":
+    android["versionCode"] = candidate
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(config, handle, indent=2, ensure_ascii=False)
+        handle.write("\n")
+    print(f"versionCode {current} -> {candidate}")
+    raise SystemExit(0)
+raise SystemExit(f"未知参数 {mode}")
+PY

@@ -4,8 +4,9 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
+import httpx
 import pytest
 from langchain.chat_models import BaseChatModel
 from langchain_core.messages import (
@@ -20,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from antang_api import chat
 from antang_api.agents.core import CoreAgentGraph
+from antang_api.agents.relative_day import subjective_day
 from antang_api.agents.runtime import AgentContext
 from antang_api.chat import (
     ActiveAgentRunError,
@@ -40,6 +42,7 @@ from antang_api.models import (
     AgentToolCallStatus,
     CarePlan,
     CarePlanStatus,
+    GlucoseReading,
     Message,
     MessageAttachment,
     MessageAttachmentKind,
@@ -47,8 +50,10 @@ from antang_api.models import (
     MessageStatus,
     PersonalProfile,
     ProactiveCareSettings,
+    SpeechCue,
     User,
 )
+from antang_api.voice import SpeechCueData, record_speech_cue
 from antang_api.schemas.chat import (
     AgentActivityEvent,
     MessageCompletedEvent,
@@ -88,6 +93,56 @@ class FakeAgent:
 
         if self.error is not None:
             raise self.error
+
+
+class FlakyAgent:
+    """前几次抛断流错误，之后正常返回事件的 Agent。"""
+
+    def __init__(
+        self,
+        events: list[dict[str, Any]],
+        error: BaseException,
+        *,
+        failures: int = 1,
+        emit_before_failure: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self.events = events
+        self.error = error
+        self.failures = failures
+        self.emit_before_failure = emit_before_failure or []
+        self.attempts = 0
+
+    async def astream(
+        self,
+        _input: dict[str, Any],
+        *,
+        config: dict[str, Any],
+        context: AgentContext,
+        stream_mode: list[str],
+        version: str,
+    ) -> AsyncIterator[dict[str, Any]]:
+        self.attempts += 1
+
+        if self.attempts <= self.failures:
+            for event in self.emit_before_failure:
+                yield event
+            raise self.error
+
+        for event in self.events:
+            yield event
+
+
+def rendered_prompt(agent: FakeAgent) -> str:
+    """返回本轮真正交给模型的系统提示词。
+
+    `FakeAgent.context` 与 `AgentContext.rendered_system_prompt` 都可为空，
+    测试里每次都写两行 assert 太吵，这里收成一个助手，类型检查器也能跟着收窄。
+    """
+
+    assert agent.context is not None
+    prompt = agent.context.rendered_system_prompt
+    assert prompt is not None
+    return prompt
 
 
 class FakeCompanionMemory:
@@ -145,11 +200,23 @@ def message_event(
     step: int = 0,
     *,
     visibility: str = "user",
+    usage: tuple[int, int] | None = None,
 ) -> dict[str, Any]:
     return {
         "type": "messages",
         "data": (
-            AIMessageChunk(content=text),
+            AIMessageChunk(
+                content=text,
+                usage_metadata=(
+                    None
+                    if usage is None
+                    else {
+                        "input_tokens": usage[0],
+                        "output_tokens": usage[1],
+                        "total_tokens": usage[0] + usage[1],
+                    }
+                ),
+            ),
             {
                 "langgraph_node": "model",
                 "langgraph_step": step,
@@ -250,6 +317,7 @@ def values_event(content: str) -> dict[str, Any]:
 
 def test_new_tools_reuse_stable_activity_phases() -> None:
     assert chat.TOOL_ACTIVITY_PHASES["read_wearable_data"] == "reading"
+    assert chat.TOOL_ACTIVITY_PHASES["search_diabetes_knowledge"] == "reading"
     assert chat.TOOL_ACTIVITY_PHASES["delegate_health_profile"] == "organizing"
     assert chat.TOOL_ACTIVITY_PHASES["manage_care_plan"] == "organizing"
     assert AgentActivityEvent(phase="reading").phase == "reading"
@@ -651,11 +719,11 @@ async def test_stream_chat_run_completes_and_persists_result(
     assert fake_agent.context.user_id == user.id
     assert fake_agent.context.run_id == prepared_run.run_id
     assert fake_agent.context.input_message_count == 1
-    assert fake_agent.context.rendered_system_prompt is not None
-    assert "[当前健康档案]" in fake_agent.context.rendered_system_prompt
-    assert "[当前主动关怀计划]" in fake_agent.context.rendered_system_prompt
-    assert str(plan.id) in fake_agent.context.rendered_system_prompt
-    assert "晚饭后散步二十分钟" in fake_agent.context.rendered_system_prompt
+    prompt = rendered_prompt(fake_agent)
+    assert "[当前健康档案]" in prompt
+    assert "[当前主动关怀计划]" in prompt
+    assert str(plan.id) in prompt
+    assert "晚饭后散步二十分钟" in prompt
 
     message = await db_session.get(Message, prepared_run.assistant_message_id)
     run = await db_session.get(AgentRun, prepared_run.run_id)
@@ -666,6 +734,41 @@ async def test_stream_chat_run_completes_and_persists_result(
     assert run.status == AgentRunStatus.COMPLETED
     assert run.input_tokens == 21
     assert run.output_tokens == 3
+
+
+async def test_stream_chat_run_tells_the_model_which_day_it_is(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """提示词里的「今天」按用户的睡眠日算，不是日历日。"""
+
+    user = await create_user(db_session, "day_context")
+    prepared_run = await prepare_chat_run(db_session, user.id, uuid4(), "今天几号")
+    monkeypatch.setattr(
+        chat,
+        "prepare_chat_context",
+        AsyncMock(return_value=prepared_context()),
+    )
+    fake_agent = FakeAgent([message_event("收到"), values_event("收到。")])
+    # 算前后两次，避免测试刚好跨过凌晨 4 点的边界。
+    day_before = subjective_day(datetime.now(timezone.utc))
+
+    async for _ in stream_chat_run(
+        session=db_session,
+        model=cast("BaseChatModel", object()),
+        agent=cast("CoreAgentGraph", fake_agent),
+        tools=(),
+        companion_memory=DISABLED_COMPANION_MEMORY,
+        user_id=user.id,
+        prepared_run=prepared_run,
+    ):
+        pass
+
+    day_after = subjective_day(datetime.now(timezone.utc))
+    rendered = rendered_prompt(fake_agent)
+    assert "[当前时间]" in rendered
+    assert "用户口中的「今天」" in rendered
+    assert str(day_before) in rendered or str(day_after) in rendered
 
 
 async def test_stream_chat_run_never_forwards_internal_subagent_text(
@@ -710,10 +813,12 @@ async def test_stream_chat_run_never_forwards_internal_subagent_text(
     assert "子 Agent" not in text
 
 
-async def test_stream_chat_run_fails_before_core_when_companion_memory_fails(
+async def test_stream_chat_run_answers_even_when_companion_memory_fails(
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """记忆服务写不进去时，这一轮照常回答，只是不带记忆。"""
+
     user = await create_user(db_session, "memory_failure")
     prepared_run = await prepare_chat_run(
         db_session,
@@ -723,7 +828,7 @@ async def test_stream_chat_run_fails_before_core_when_companion_memory_fails(
     )
     prepare_context_mock = AsyncMock(return_value=prepared_context())
     monkeypatch.setattr(chat, "prepare_chat_context", prepare_context_mock)
-    fake_agent = FakeAgent([])
+    fake_agent = FakeAgent([message_event("在的。"), values_event("在的。")])
 
     events = [
         event
@@ -741,13 +846,15 @@ async def test_stream_chat_run_fails_before_core_when_companion_memory_fails(
         )
     ]
 
-    assert events[-1].type == "message_failed"
-    assert fake_agent.config is None
-    prepare_context_mock.assert_not_awaited()
+    completed = cast("MessageCompletedEvent", events[-1])
+    assert completed.type == "message_completed"
+    text = "".join(event.delta for event in events if isinstance(event, TextDeltaEvent))
+    assert text == "在的。"
+    prepare_context_mock.assert_awaited()
+    assert "[相关陪伴记忆]" not in rendered_prompt(fake_agent)
     run = await db_session.get(AgentRun, prepared_run.run_id)
     assert run is not None
-    assert run.status == AgentRunStatus.FAILED
-    assert run.error_type == "RuntimeError"
+    assert run.status == AgentRunStatus.COMPLETED
 
 
 async def test_stream_chat_run_validates_and_persists_cited_sources(
@@ -1166,3 +1273,466 @@ async def test_stream_chat_run_marks_closed_generator_cancelled(
     assert message.content == "已经发送的部分"
     assert run is not None
     assert run.status == AgentRunStatus.CANCELLED
+
+
+async def _low_reading(
+    db_session: AsyncSession,
+    user_id: UUID,
+    *,
+    minutes_ago: int = 30,
+    source: str = "manual",
+    reviewed_at: datetime | None = None,
+) -> GlucoseReading:
+    """在窗口内造一条偏低读数，默认还没复盘。"""
+
+    reading = GlucoseReading(
+        user_id=user_id,
+        value_mg_dl=58,
+        measured_at=datetime.now(timezone.utc) - timedelta(minutes=minutes_ago),
+        context="other",
+        source=source,
+        reviewed_at=reviewed_at,
+    )
+    db_session.add(reading)
+    await db_session.flush()
+    return reading
+
+
+async def test_stream_chat_run_opens_the_hypo_review_once(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """24 小时内有未复盘的偏低时，这一轮要带上复盘话题，答完才打标记。"""
+
+    user = await create_user(db_session, "hypo_review_due")
+    reading = await _low_reading(db_session, user.id, source="manual")
+    prepared_run = await prepare_chat_run(db_session, user.id, uuid4(), "嗯")
+    monkeypatch.setattr(
+        chat,
+        "prepare_chat_context",
+        AsyncMock(return_value=prepared_context()),
+    )
+    answer = "你说的那次低血糖，后来补了什么、有没有再测一次？"
+    fake_agent = FakeAgent([message_event(answer), values_event(answer)])
+
+    events = [
+        event
+        async for event in stream_chat_run(
+            session=db_session,
+            model=cast("BaseChatModel", object()),
+            agent=cast("CoreAgentGraph", fake_agent),
+            tools=(),
+            companion_memory=DISABLED_COMPANION_MEMORY,
+            user_id=user.id,
+            prepared_run=prepared_run,
+        )
+    ]
+
+    assert events[-1].type == "message_completed"
+    assert fake_agent.context is not None
+    prompt = rendered_prompt(fake_agent)
+    assert "[低血糖之后的复盘]" in prompt
+    assert "你说的那次" in prompt
+
+    reviewed = await db_session.get(GlucoseReading, reading.id)
+    assert reviewed is not None
+    assert reviewed.reviewed_at is not None
+
+
+async def test_stream_chat_run_does_not_ask_about_a_reviewed_reading(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """问过的那次不再问第二遍。"""
+
+    user = await create_user(db_session, "hypo_review_done")
+    await _low_reading(
+        db_session,
+        user.id,
+        reviewed_at=datetime.now(timezone.utc),
+    )
+    prepared_run = await prepare_chat_run(db_session, user.id, uuid4(), "你好")
+    monkeypatch.setattr(
+        chat,
+        "prepare_chat_context",
+        AsyncMock(return_value=prepared_context()),
+    )
+    fake_agent = FakeAgent([message_event("收到。"), values_event("收到。")])
+
+    events = [
+        event
+        async for event in stream_chat_run(
+            session=db_session,
+            model=cast("BaseChatModel", object()),
+            agent=cast("CoreAgentGraph", fake_agent),
+            tools=(),
+            companion_memory=DISABLED_COMPANION_MEMORY,
+            user_id=user.id,
+            prepared_run=prepared_run,
+        )
+    ]
+
+    assert events[-1].type == "message_completed"
+    assert fake_agent.context is not None
+    assert "[低血糖之后的复盘]" not in rendered_prompt(fake_agent)
+
+
+async def test_failed_run_does_not_consume_the_hypo_review(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """失败的轮次用户没收到问题，下一次还得再问。"""
+
+    user = await create_user(db_session, "hypo_review_failed")
+    reading = await _low_reading(db_session, user.id)
+    reading_id = reading.id
+    prepared_run = await prepare_chat_run(db_session, user.id, uuid4(), "嗯")
+    monkeypatch.setattr(
+        chat,
+        "prepare_chat_context",
+        AsyncMock(return_value=prepared_context()),
+    )
+    fake_agent = FakeAgent([message_event("收到"), values_event("另一句话")])
+
+    events = [
+        event
+        async for event in stream_chat_run(
+            session=db_session,
+            model=cast("BaseChatModel", object()),
+            agent=cast("CoreAgentGraph", fake_agent),
+            tools=(),
+            companion_memory=DISABLED_COMPANION_MEMORY,
+            user_id=user.id,
+            prepared_run=prepared_run,
+        )
+    ]
+
+    assert events[-1].type == "message_failed"
+    # 失败路径 rollback 过会话，ORM 对象已过期；直接查列，别在异步上下文里
+    # 触发懒加载。
+    reviewed_at = await db_session.scalar(
+        select(GlucoseReading.reviewed_at).where(GlucoseReading.id == reading_id)
+    )
+    assert reviewed_at is None
+
+
+async def _speech_cue(
+    db_session: AsyncSession,
+    user_id: UUID,
+    *,
+    minutes_ago: int = 1,
+) -> SpeechCue:
+    cue = SpeechCueData(pace="fast", energy="low", breathing="audible", confidence=0.6)
+    row = await record_speech_cue(
+        db_session,
+        user_id=user_id,
+        cue=cue,
+        model_name="gemini-3.8-flash",
+        now=datetime.now(timezone.utc) - timedelta(minutes=minutes_ago),
+    )
+    await db_session.flush()
+    return row
+
+
+async def test_stream_chat_run_tells_the_model_how_it_was_said(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """说过的话带着听感进来，但只是提示，不是本轮任务。"""
+
+    user = await create_user(db_session, "cue_due")
+    cue = await _speech_cue(db_session, user.id)
+    prepared_run = await prepare_chat_run(db_session, user.id, uuid4(), "我睡不着")
+    monkeypatch.setattr(
+        chat,
+        "prepare_chat_context",
+        AsyncMock(return_value=prepared_context()),
+    )
+    fake_agent = FakeAgent([message_event("我在。"), values_event("我在。")])
+
+    events = [
+        event
+        async for event in stream_chat_run(
+            session=db_session,
+            model=cast("BaseChatModel", object()),
+            agent=cast("CoreAgentGraph", fake_agent),
+            tools=(),
+            companion_memory=DISABLED_COMPANION_MEMORY,
+            user_id=user.id,
+            prepared_run=prepared_run,
+        )
+    ]
+
+    assert events[-1].type == "message_completed"
+    assert fake_agent.context is not None
+    prompt = rendered_prompt(fake_agent)
+    assert "[语音状态]" in prompt
+    assert "语速偏快" in prompt
+    # 用完即弃：这一轮之后它不该再影响下一句。
+    consumed = await db_session.get(SpeechCue, cue.id)
+    assert consumed is not None
+    assert consumed.consumed_at is not None
+
+
+async def test_stream_chat_run_ignores_a_stale_cue(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """十几分钟前那句话的语气，不该被带进新话题。"""
+
+    user = await create_user(db_session, "cue_stale")
+    await _speech_cue(db_session, user.id, minutes_ago=30)
+    prepared_run = await prepare_chat_run(db_session, user.id, uuid4(), "今天吃什么")
+    monkeypatch.setattr(
+        chat,
+        "prepare_chat_context",
+        AsyncMock(return_value=prepared_context()),
+    )
+    fake_agent = FakeAgent([message_event("收到。"), values_event("收到。")])
+
+    events = [
+        event
+        async for event in stream_chat_run(
+            session=db_session,
+            model=cast("BaseChatModel", object()),
+            agent=cast("CoreAgentGraph", fake_agent),
+            tools=(),
+            companion_memory=DISABLED_COMPANION_MEMORY,
+            user_id=user.id,
+            prepared_run=prepared_run,
+        )
+    ]
+
+    assert events[-1].type == "message_completed"
+    assert fake_agent.context is not None
+    assert "[语音状态]" not in rendered_prompt(fake_agent)
+
+
+async def test_a_failed_run_leaves_the_cue_for_next_time(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """回答没送到用户手里，这条听感就还没算用掉。"""
+
+    user = await create_user(db_session, "cue_failed")
+    cue = await _speech_cue(db_session, user.id)
+    cue_id = cue.id
+    prepared_run = await prepare_chat_run(db_session, user.id, uuid4(), "我有点慌")
+    monkeypatch.setattr(
+        chat,
+        "prepare_chat_context",
+        AsyncMock(return_value=prepared_context()),
+    )
+    fake_agent = FakeAgent([message_event("收到"), values_event("另一句话")])
+
+    events = [
+        event
+        async for event in stream_chat_run(
+            session=db_session,
+            model=cast("BaseChatModel", object()),
+            agent=cast("CoreAgentGraph", fake_agent),
+            tools=(),
+            companion_memory=DISABLED_COMPANION_MEMORY,
+            user_id=user.id,
+            prepared_run=prepared_run,
+        )
+    ]
+
+    assert events[-1].type == "message_failed"
+    consumed_at = await db_session.scalar(
+        select(SpeechCue.consumed_at).where(SpeechCue.id == cue_id)
+    )
+    assert consumed_at is None
+
+
+async def test_a_broken_stream_is_retried_before_the_user_sees_anything(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """上游在开口前就断开时，患者不该看到「回复失败」。"""
+
+    user = await create_user(db_session, "retry_ok")
+    prepared_run = await prepare_chat_run(db_session, user.id, uuid4(), "在吗")
+    monkeypatch.setattr(
+        chat,
+        "prepare_chat_context",
+        AsyncMock(return_value=prepared_context()),
+    )
+    fake_agent = FlakyAgent(
+        [message_event("在的。"), values_event("在的。")],
+        httpx.RemoteProtocolError("peer closed connection"),
+    )
+
+    events = [
+        event
+        async for event in stream_chat_run(
+            session=db_session,
+            model=cast("BaseChatModel", object()),
+            agent=cast("CoreAgentGraph", fake_agent),
+            tools=(),
+            companion_memory=DISABLED_COMPANION_MEMORY,
+            user_id=user.id,
+            prepared_run=prepared_run,
+        )
+    ]
+
+    assert fake_agent.attempts == 2
+    assert events[-1].type == "message_completed"
+    run = await db_session.get(AgentRun, prepared_run.run_id)
+    assert run is not None
+    assert run.status == AgentRunStatus.COMPLETED
+
+
+async def test_a_stream_that_broke_after_speaking_is_not_retried(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """已经发出去的字不能重发一遍，宁可这一轮失败让用户重试。"""
+
+    user = await create_user(db_session, "retry_partial")
+    prepared_run = await prepare_chat_run(db_session, user.id, uuid4(), "在吗")
+    monkeypatch.setattr(
+        chat,
+        "prepare_chat_context",
+        AsyncMock(return_value=prepared_context()),
+    )
+    fake_agent = FlakyAgent(
+        [message_event("在的。"), values_event("在的。")],
+        httpx.RemoteProtocolError("peer closed connection"),
+        emit_before_failure=[message_event("我在")],
+    )
+
+    events = [
+        event
+        async for event in stream_chat_run(
+            session=db_session,
+            model=cast("BaseChatModel", object()),
+            agent=cast("CoreAgentGraph", fake_agent),
+            tools=(),
+            companion_memory=DISABLED_COMPANION_MEMORY,
+            user_id=user.id,
+            prepared_run=prepared_run,
+        )
+    ]
+
+    assert fake_agent.attempts == 1
+    assert events[-1].type == "message_failed"
+
+
+async def test_a_contract_error_is_not_retried(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """本地契约错误重试也是同一个错，只会让用户多等一次。"""
+
+    user = await create_user(db_session, "retry_contract")
+    prepared_run = await prepare_chat_run(db_session, user.id, uuid4(), "在吗")
+    monkeypatch.setattr(
+        chat,
+        "prepare_chat_context",
+        AsyncMock(return_value=prepared_context()),
+    )
+    fake_agent = FlakyAgent(
+        [message_event("在的。"), values_event("在的。")],
+        RuntimeError("Core Agent 返回了空回答"),
+    )
+
+    events = [
+        event
+        async for event in stream_chat_run(
+            session=db_session,
+            model=cast("BaseChatModel", object()),
+            agent=cast("CoreAgentGraph", fake_agent),
+            tools=(),
+            companion_memory=DISABLED_COMPANION_MEMORY,
+            user_id=user.id,
+            prepared_run=prepared_run,
+        )
+    ]
+
+    assert fake_agent.attempts == 1
+    assert events[-1].type == "message_failed"
+
+
+async def test_an_exhausted_quota_is_visible_to_the_operator(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """中转站余额不足时回 403，患者一个字都收不到；日志要直接说明是余额问题。"""
+
+    user = await create_user(db_session, "quota_out")
+    prepared_run = await prepare_chat_run(db_session, user.id, uuid4(), "在吗")
+    monkeypatch.setattr(
+        chat,
+        "prepare_chat_context",
+        AsyncMock(return_value=prepared_context()),
+    )
+    fake_agent = FlakyAgent(
+        [message_event("在的。"), values_event("在的。")],
+        RuntimeError("Error code: 403 - {'code': 'insufficient_user_quota'}"),
+    )
+    logged: list[str] = []
+    sink = chat.logger.add(logged.append, level="WARNING", format="{message}")
+
+    try:
+        events = [
+            event
+            async for event in stream_chat_run(
+                session=db_session,
+                model=cast("BaseChatModel", object()),
+                agent=cast("CoreAgentGraph", fake_agent),
+                tools=(),
+                companion_memory=DISABLED_COMPANION_MEMORY,
+                user_id=user.id,
+                prepared_run=prepared_run,
+            )
+        ]
+    finally:
+        chat.logger.remove(sink)
+
+    assert events[-1].type == "message_failed"
+    assert any("chat_run_out_of_quota" in str(entry) for entry in logged)
+
+
+async def test_token_usage_is_not_inflated_by_repeated_chunk_snapshots(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """中转站在每个分片上重复累计用量，只该记一次真实值。"""
+
+    user = await create_user(db_session, "usage_snapshot")
+    prepared_run = await prepare_chat_run(db_session, user.id, uuid4(), "在吗")
+    monkeypatch.setattr(
+        chat,
+        "prepare_chat_context",
+        AsyncMock(return_value=prepared_context()),
+    )
+    fake_agent = FakeAgent(
+        [
+            message_event("在", step=0, usage=(6_000, 3)),
+            message_event("的。", step=0, usage=(6_200, 9)),
+            values_event("在的。"),
+        ]
+    )
+
+    events = [
+        event
+        async for event in stream_chat_run(
+            session=db_session,
+            model=cast("BaseChatModel", object()),
+            agent=cast("CoreAgentGraph", fake_agent),
+            tools=(),
+            companion_memory=DISABLED_COMPANION_MEMORY,
+            user_id=user.id,
+            prepared_run=prepared_run,
+        )
+    ]
+
+    completed = events[-1]
+    assert completed.type == "message_completed"
+    assert completed.input_tokens == 6_200
+    assert completed.output_tokens == 9
+    run = await db_session.get(AgentRun, prepared_run.run_id)
+    assert run is not None
+    assert run.input_tokens == 6_200
+    assert run.output_tokens == 9

@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -9,8 +10,34 @@ import {
 import { act, create } from 'react-test-renderer';
 
 import { ApiError, type ApiClient } from '../api/client';
-import type { HealthProfile } from '../api/types';
+import type { FearSummary, HealthProfile } from '../api/types';
+import { LiveHeartRateProvider } from '../live-heart-rate/LiveHeartRateProvider';
 import { HealthOverviewScreen, sourceLabel } from './health-overview-screen';
+
+/** 档案页里的「行为记录」卡片默认是空记录，避免每个用例都要写一份。 */
+function emptyFearSummary(): FearSummary {
+  return {
+    windowStart: '2026-10-03T09:00:00+08:00',
+    windowEnd: '2026-10-31T09:00:00+08:00',
+    behaviorCounts: {},
+    behaviorTotal: 0,
+    monitoringWeekly: 0,
+    avoidanceWeekly: 0,
+    beliefs: [],
+    assessment: null,
+    discrepancy: 'unknown',
+    discrepancyNote: '',
+  };
+}
+
+/** 档案页里的实时心率卡片从共享 Provider 取 controller，渲染时补上这层 Provider。 */
+function screenElement(element: ReactElement) {
+  return <LiveHeartRateProvider active>{element}</LiveHeartRateProvider>;
+}
+
+function createScreen(element: ReactElement) {
+  return create(screenElement(element));
+}
 
 jest.mock('expo-crypto', () => ({
   randomUUID: jest.fn(() => '019b9999-9999-7999-8999-999999999999'),
@@ -116,12 +143,19 @@ describe('HealthOverviewScreen', () => {
   test('renders only real profile and wearable values with non-real-time context', async () => {
     const api = {
       getHealthProfile: jest.fn().mockResolvedValue(profile),
+      getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
+      getFearBehaviorLogs: jest.fn().mockResolvedValue([]),
+      getBeliefEvents: jest.fn().mockResolvedValue([]),
+      deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
+      deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
+      getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+      recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     const onClose = jest.fn();
     let tree: ReturnType<typeof create>;
 
     await act(async () => {
-      tree = create(<HealthOverviewScreen api={api} onClose={onClose} />);
+      tree = createScreen(<HealthOverviewScreen api={api} onClose={onClose} />);
     });
 
     expect(api.getHealthProfile).toHaveBeenCalledWith(expect.any(AbortSignal));
@@ -170,11 +204,18 @@ describe('HealthOverviewScreen', () => {
   test('gives each empty section an honest next step', async () => {
     const api = {
       getHealthProfile: jest.fn().mockResolvedValue(emptyProfile),
+      getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
+      getFearBehaviorLogs: jest.fn().mockResolvedValue([]),
+      getBeliefEvents: jest.fn().mockResolvedValue([]),
+      deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
+      deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
+      getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+      recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     let tree: ReturnType<typeof create>;
 
     await act(async () => {
-      tree = create(
+      tree = createScreen(
         <HealthOverviewScreen api={api} onClose={jest.fn()} />,
       );
     });
@@ -218,12 +259,19 @@ describe('HealthOverviewScreen', () => {
         .fn()
         .mockResolvedValueOnce(profile)
         .mockResolvedValueOnce(refreshedProfile),
+      getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
+      getFearBehaviorLogs: jest.fn().mockResolvedValue([]),
+      getBeliefEvents: jest.fn().mockResolvedValue([]),
+      deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
+      deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
+      getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+      recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     const onSyncWearable = jest.fn().mockReturnValue(syncPromise);
     let tree: ReturnType<typeof create>;
 
     await act(async () => {
-      tree = create(
+      tree = createScreen(
         <HealthOverviewScreen
           api={api}
           onClose={jest.fn()}
@@ -281,11 +329,18 @@ describe('HealthOverviewScreen', () => {
     };
     const api = {
       getHealthProfile: jest.fn().mockResolvedValueOnce(stale).mockResolvedValueOnce(current),
+      getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
+      getFearBehaviorLogs: jest.fn().mockResolvedValue([]),
+      getBeliefEvents: jest.fn().mockResolvedValue([]),
+      deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
+      deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
+      getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+      recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     const onClose = jest.fn();
     let tree: ReturnType<typeof create>;
     await act(async () => {
-      tree = create(
+      tree = createScreen(
         <HealthOverviewScreen api={api} onClose={onClose} wearableSyncCompletedAt={null} />,
       );
     });
@@ -298,11 +353,13 @@ describe('HealthOverviewScreen', () => {
 
     await act(async () => {
       tree!.update(
-        <HealthOverviewScreen
-          api={api}
-          onClose={onClose}
-          wearableSyncCompletedAt="2026-09-26T12:06:00Z"
-        />,
+        screenElement(
+          <HealthOverviewScreen
+            api={api}
+            onClose={onClose}
+            wearableSyncCompletedAt="2026-09-26T12:06:00Z"
+          />,
+        ),
       );
     });
     expect(api.getHealthProfile).toHaveBeenCalledTimes(2);
@@ -311,11 +368,20 @@ describe('HealthOverviewScreen', () => {
   });
 
   test('shows a Health Connect sync error instead of reloading stale readings', async () => {
-    const api = { getHealthProfile: jest.fn().mockResolvedValue(profile) } as unknown as ApiClient;
+    const api = {
+      getHealthProfile: jest.fn().mockResolvedValue(profile),
+      getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
+      getFearBehaviorLogs: jest.fn().mockResolvedValue([]),
+      getBeliefEvents: jest.fn().mockResolvedValue([]),
+      deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
+      deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
+      getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+      recordPsychosocialAssessment: jest.fn(),
+    } as unknown as ApiClient;
     const onSyncWearable = jest.fn().mockRejectedValue(new Error('Health Connect 读取失败'));
     let tree: ReturnType<typeof create>;
     await act(async () => {
-      tree = create(
+      tree = createScreen(
         <HealthOverviewScreen
           api={api}
           onClose={jest.fn()}
@@ -337,11 +403,18 @@ describe('HealthOverviewScreen', () => {
         .fn()
         .mockRejectedValueOnce(new Error('网络暂时不可用'))
         .mockResolvedValueOnce(emptyProfile),
+      getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
+      getFearBehaviorLogs: jest.fn().mockResolvedValue([]),
+      getBeliefEvents: jest.fn().mockResolvedValue([]),
+      deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
+      deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
+      getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+      recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     let tree: ReturnType<typeof create>;
 
     await act(async () => {
-      tree = create(
+      tree = createScreen(
         <HealthOverviewScreen api={api} onClose={jest.fn()} />,
       );
     });
@@ -384,11 +457,18 @@ describe('HealthOverviewScreen', () => {
           },
         }),
       changeHealthProfile: jest.fn().mockResolvedValue({ status: 'applied' }),
+      getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
+      getFearBehaviorLogs: jest.fn().mockResolvedValue([]),
+      getBeliefEvents: jest.fn().mockResolvedValue([]),
+      deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
+      deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
+      getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+      recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     let tree: ReturnType<typeof create>;
 
     await act(async () => {
-      tree = create(<HealthOverviewScreen api={api} onClose={jest.fn()} />);
+      tree = createScreen(<HealthOverviewScreen api={api} onClose={jest.fn()} />);
     });
     act(() =>
       tree!.root.findByProps({ accessibilityLabel: '编辑身高' }).props.onPress(),
@@ -456,11 +536,18 @@ describe('HealthOverviewScreen', () => {
         .mockResolvedValueOnce(editedAllergy)
         .mockResolvedValueOnce(emptyProfile),
       changeHealthProfile: jest.fn().mockResolvedValue({ status: 'applied' }),
+      getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
+      getFearBehaviorLogs: jest.fn().mockResolvedValue([]),
+      getBeliefEvents: jest.fn().mockResolvedValue([]),
+      deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
+      deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
+      getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+      recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     let tree: ReturnType<typeof create>;
 
     await act(async () => {
-      tree = create(<HealthOverviewScreen api={api} onClose={jest.fn()} />);
+      tree = createScreen(<HealthOverviewScreen api={api} onClose={jest.fn()} />);
     });
     act(() =>
       tree!.root.findByProps({ accessibilityLabel: '新增健康情况' }).props.onPress(),
@@ -558,11 +645,18 @@ describe('HealthOverviewScreen', () => {
           new ApiError('档案版本冲突', 409, 'health_profile_changed'),
         )
         .mockResolvedValueOnce({ status: 'applied' }),
+      getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
+      getFearBehaviorLogs: jest.fn().mockResolvedValue([]),
+      getBeliefEvents: jest.fn().mockResolvedValue([]),
+      deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
+      deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
+      getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+      recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     let tree: ReturnType<typeof create>;
 
     await act(async () => {
-      tree = create(<HealthOverviewScreen api={api} onClose={jest.fn()} />);
+      tree = createScreen(<HealthOverviewScreen api={api} onClose={jest.fn()} />);
     });
     act(() =>
       tree!.root.findByProps({ accessibilityLabel: '填写性别' }).props.onPress(),
@@ -620,11 +714,18 @@ describe('HealthOverviewScreen', () => {
         .mockRejectedValueOnce(new Error('刷新连接中断'))
         .mockResolvedValueOnce(savedProfile),
       changeHealthProfile: jest.fn().mockResolvedValue({ status: 'applied' }),
+      getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
+      getFearBehaviorLogs: jest.fn().mockResolvedValue([]),
+      getBeliefEvents: jest.fn().mockResolvedValue([]),
+      deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
+      deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
+      getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+      recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     let tree: ReturnType<typeof create>;
 
     await act(async () => {
-      tree = create(<HealthOverviewScreen api={api} onClose={jest.fn()} />);
+      tree = createScreen(<HealthOverviewScreen api={api} onClose={jest.fn()} />);
     });
     act(() =>
       tree!.root.findByProps({ accessibilityLabel: '新增健康情况' }).props.onPress(),
@@ -685,11 +786,18 @@ describe('HealthOverviewScreen', () => {
         .mockResolvedValueOnce(emptyProfile)
         .mockResolvedValueOnce({ ...emptyProfile, healthFacts: [allergy] }),
       changeHealthProfile,
+      getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
+      getFearBehaviorLogs: jest.fn().mockResolvedValue([]),
+      getBeliefEvents: jest.fn().mockResolvedValue([]),
+      deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
+      deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
+      getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+      recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     let tree: ReturnType<typeof create>;
 
     await act(async () => {
-      tree = create(<HealthOverviewScreen api={api} onClose={jest.fn()} />);
+      tree = createScreen(<HealthOverviewScreen api={api} onClose={jest.fn()} />);
     });
     act(() =>
       tree!.root.findByProps({ accessibilityLabel: '新增健康情况' }).props.onPress(),
@@ -746,11 +854,18 @@ describe('HealthOverviewScreen', () => {
         .mockResolvedValueOnce(refreshed)
         .mockResolvedValueOnce(saved),
       changeHealthProfile,
+      getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
+      getFearBehaviorLogs: jest.fn().mockResolvedValue([]),
+      getBeliefEvents: jest.fn().mockResolvedValue([]),
+      deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
+      deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
+      getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+      recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     let tree: ReturnType<typeof create>;
 
     await act(async () => {
-      tree = create(<HealthOverviewScreen api={api} onClose={jest.fn()} />);
+      tree = createScreen(<HealthOverviewScreen api={api} onClose={jest.fn()} />);
     });
     act(() =>
       tree!.root.findByProps({ accessibilityLabel: '填写性别' }).props.onPress(),

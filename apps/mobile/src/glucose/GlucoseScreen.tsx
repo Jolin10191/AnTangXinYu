@@ -1,0 +1,370 @@
+import { useCallback, useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+
+import type { ApiClient } from '../api/client';
+import type { GlucoseReading, GlucoseSummary } from '../api/types';
+
+const CONTEXTS: { value: string; label: string }[] = [
+  { value: 'fasting', label: '空腹' },
+  { value: 'pre_meal', label: '餐前' },
+  { value: 'post_meal', label: '餐后' },
+  { value: 'bedtime', label: '睡前' },
+  { value: 'night', label: '夜间' },
+];
+
+const CONTEXT_LABELS: Record<string, string> = Object.fromEntries(
+  CONTEXTS.map(item => [item.value, item.label]),
+);
+
+const DAYS = 14;
+
+type Props = {
+  api: Pick<
+    ApiClient,
+    | 'getGlucoseReadings'
+    | 'getGlucoseSummary'
+    | 'createGlucoseReading'
+    | 'revokeGlucoseReading'
+  >;
+};
+
+function formatTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const hours = `${date.getHours()}`.padStart(2, '0');
+  const minutes = `${date.getMinutes()}`.padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
+function formatDay(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${date.getMonth() + 1} 月 ${date.getDate()} 日`;
+}
+
+function groupByDay(readings: GlucoseReading[]): [string, GlucoseReading[]][] {
+  const groups = new Map<string, GlucoseReading[]>();
+  for (const reading of readings) {
+    const key = formatDay(reading.measuredAt);
+    const bucket = groups.get(key);
+    if (bucket === undefined) groups.set(key, [reading]);
+    else bucket.push(reading);
+  }
+  return [...groups.entries()];
+}
+
+export function GlucoseScreen({ api }: Props) {
+  const [readings, setReadings] = useState<GlucoseReading[]>([]);
+  const [summary, setSummary] = useState<GlucoseSummary | null>(null);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [value, setValue] = useState('');
+  const [context, setContext] = useState('fasting');
+  const [note, setNote] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const [list, brief] = await Promise.all([
+        api.getGlucoseReadings(DAYS),
+        api.getGlucoseSummary(7),
+      ]);
+      setReadings(list);
+      setSummary(brief);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '血糖记录读取失败');
+    } finally {
+      setLoading(false);
+    }
+  }, [api]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      await Promise.resolve();
+      if (cancelled) return;
+      await load();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [load]);
+
+  const save = useCallback(async () => {
+    const parsed = Number.parseInt(value.trim(), 10);
+    if (!Number.isFinite(parsed) || parsed < 20 || parsed > 600) {
+      setError('请输入 20 到 600 之间的血糖值');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await api.createGlucoseReading({
+        valueMgDl: parsed,
+        measuredAt: new Date().toISOString(),
+        context,
+        note: note.trim() === '' ? null : note.trim(),
+      });
+      setValue('');
+      setNote('');
+      await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '这条血糖没有保存成功');
+    } finally {
+      setSaving(false);
+    }
+  }, [api, context, load, note, value]);
+
+  const revoke = useCallback(
+    async (reading: GlucoseReading) => {
+      setError(null);
+      try {
+        await api.revokeGlucoseReading(reading.id);
+        await load();
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : '撤回没有成功');
+      }
+    },
+    [api, load],
+  );
+
+  return (
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <Text style={styles.eyebrow}>血糖记录</Text>
+      <Text style={styles.title}>记一条血糖</Text>
+      <Text style={styles.lead}>
+        数值和时刻是我们最需要的，备注可以写也可以不写。
+      </Text>
+
+      <View style={styles.card}>
+        <View style={styles.valueRow}>
+          <TextInput
+            value={value}
+            onChangeText={setValue}
+            placeholder="0"
+            keyboardType="number-pad"
+            maxLength={3}
+            style={styles.valueInput}
+            accessibilityLabel="血糖数值"
+          />
+          <Text style={styles.unit}>mg/dL</Text>
+        </View>
+
+        <View style={styles.chipRow}>
+          {CONTEXTS.map(item => {
+            const active = item.value === context;
+            return (
+              <Pressable
+                key={item.value}
+                onPress={() => setContext(item.value)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                style={[styles.chip, active && styles.chipActive]}
+              >
+                <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                  {item.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <TextInput
+          value={note}
+          onChangeText={setNote}
+          placeholder="比如：刚吃了两碗饭（可不写）"
+          maxLength={200}
+          style={styles.noteInput}
+          accessibilityLabel="血糖备注"
+        />
+
+        <Pressable
+          onPress={() => void save()}
+          disabled={saving}
+          accessibilityRole="button"
+          style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+        >
+          {saving ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <Text style={styles.saveText}>保存这条记录</Text>
+          )}
+        </Pressable>
+
+        {error === null ? null : <Text style={styles.errorText}>{error}</Text>}
+      </View>
+
+      {summary === null ? null : (
+        <Pressable
+          onPress={() => setSummaryOpen(open => !open)}
+          accessibilityRole="button"
+          style={styles.summaryCard}
+        >
+          <Text style={styles.summaryTitle}>
+            {summaryOpen ? '收起近 7 天概况' : '看看近 7 天概况'}
+          </Text>
+          {summaryOpen ? (
+            <View style={styles.summaryBody}>
+              <Text style={styles.summaryLine}>记录 {summary.count} 条</Text>
+              <Text style={styles.summaryLine}>
+                平均{' '}
+                {summary.averageMgDl === null ? '—' : Math.round(summary.averageMgDl)}
+                {'  '}最低{' '}
+                {summary.minimumMgDl === null ? '—' : Math.round(summary.minimumMgDl)}
+                {'  '}最高{' '}
+                {summary.maximumMgDl === null ? '—' : Math.round(summary.maximumMgDl)}
+              </Text>
+              <Text style={styles.summaryLine}>
+                低于 70 的 {summary.below70Count} 条
+              </Text>
+            </View>
+          ) : null}
+        </Pressable>
+      )}
+
+      <Text style={styles.sectionTitle}>最近 {DAYS} 天</Text>
+
+      {loading ? (
+        <ActivityIndicator style={styles.loading} color="#0F766E" />
+      ) : readings.length === 0 ? (
+        <Text style={styles.empty}>
+          还没有记录。测完顺手记一条，下次聊天的时候糖糖就能看到。
+        </Text>
+      ) : (
+        groupByDay(readings).map(([day, items]) => (
+          <View key={day} style={styles.dayGroup}>
+            <Text style={styles.dayLabel}>{day}</Text>
+            {items.map(item => {
+              const revoked = item.revokedAt !== null;
+              return (
+                <View key={item.id} style={styles.row}>
+                  <View style={styles.rowMain}>
+                    <Text style={[styles.rowValue, revoked && styles.revokedText]}>
+                      {Math.round(item.valueMgDl)}
+                      <Text style={styles.rowUnit}> mg/dL</Text>
+                    </Text>
+                    <Text style={styles.rowMeta}>
+                      {formatTime(item.measuredAt)} ·{' '}
+                      {CONTEXT_LABELS[item.context] ?? '其他'}
+                      {item.note === null ? '' : ` · ${item.note}`}
+                    </Text>
+                  </View>
+                  {revoked ? (
+                    <Text style={styles.revokedTag}>已撤回</Text>
+                  ) : (
+                    <Pressable
+                      onPress={() => void revoke(item)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`撤回 ${Math.round(item.valueMgDl)} 这条记录`}
+                      style={styles.revokeButton}
+                    >
+                      <Text style={styles.revokeText}>撤回</Text>
+                    </Pressable>
+                  )}
+                </View>
+              );
+            })}
+          </View>
+        ))
+      )}
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: '#F4F6F5' },
+  content: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 48 },
+  eyebrow: { fontSize: 12, letterSpacing: 1, color: '#0F766E', fontWeight: '600' },
+  title: { marginTop: 6, fontSize: 26, fontWeight: '700', color: '#12211D' },
+  lead: { marginTop: 8, fontSize: 13, lineHeight: 20, color: '#5A6B66' },
+  card: {
+    marginTop: 16,
+    padding: 16,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+  },
+  valueRow: { flexDirection: 'row', alignItems: 'flex-end' },
+  valueInput: {
+    flex: 1,
+    fontSize: 44,
+    fontWeight: '700',
+    color: '#12211D',
+    padding: 0,
+  },
+  unit: { marginBottom: 8, marginLeft: 8, fontSize: 14, color: '#7A8B86' },
+  chipRow: { marginTop: 12, flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#EEF3F1',
+  },
+  chipActive: { backgroundColor: '#0F766E' },
+  chipText: { fontSize: 13, color: '#41524D' },
+  chipTextActive: { color: '#FFFFFF', fontWeight: '600' },
+  noteInput: {
+    marginTop: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#F4F6F5',
+    fontSize: 13,
+    color: '#12211D',
+  },
+  saveButton: {
+    marginTop: 14,
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: '#0F766E',
+    alignItems: 'center',
+  },
+  saveButtonDisabled: { opacity: 0.6 },
+  saveText: { fontSize: 15, fontWeight: '600', color: '#FFFFFF' },
+  errorText: { marginTop: 10, fontSize: 12, color: '#B42318' },
+  summaryCard: {
+    marginTop: 14,
+    padding: 16,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+  },
+  summaryTitle: { fontSize: 14, fontWeight: '600', color: '#0F766E' },
+  summaryBody: { marginTop: 10, gap: 4 },
+  summaryLine: { fontSize: 13, lineHeight: 20, color: '#41524D' },
+  sectionTitle: {
+    marginTop: 24,
+    marginBottom: 8,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#41524D',
+  },
+  loading: { marginTop: 12 },
+  empty: { marginTop: 8, fontSize: 13, lineHeight: 20, color: '#7A8B86' },
+  dayGroup: { marginTop: 12 },
+  dayLabel: { fontSize: 12, color: '#7A8B86', marginBottom: 6 },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    marginBottom: 8,
+  },
+  rowMain: { flex: 1 },
+  rowValue: { fontSize: 18, fontWeight: '700', color: '#12211D' },
+  rowUnit: { fontSize: 12, fontWeight: '400', color: '#7A8B86' },
+  rowMeta: { marginTop: 4, fontSize: 12, color: '#7A8B86' },
+  revokedText: { color: '#B0BCB8' },
+  revokedTag: { fontSize: 12, color: '#B0BCB8' },
+  revokeButton: { paddingHorizontal: 10, paddingVertical: 6 },
+  revokeText: { fontSize: 12, color: '#B42318' },
+});

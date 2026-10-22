@@ -21,6 +21,8 @@ from antang_api.models import (
     AgentRunStatus,
     CarePlan,
     CarePlanStatus,
+    FearBehaviorLog,
+    HypoglycemiaBeliefEvent,
     LoginSession,
     Message,
     MessageRole,
@@ -1693,3 +1695,78 @@ async def test_task_that_expires_during_drafting_never_creates_a_message(
         )
         assert len(runs) == 1
         assert runs[0].status == AgentRunStatus.FAILED
+
+
+async def test_proactive_context_carries_recent_behaviors_and_beliefs(
+    committed_user_id: UUID,
+) -> None:
+    """主动消息必须知道最近的行为与信念。
+
+    否则关怀会踩空：用户整夜在查血糖，主动消息还在问「今天过得怎么样」。
+    """
+
+    now = datetime.now(timezone.utc)
+    async with session_factory() as session:
+        care_settings = await session.get(ProactiveCareSettings, committed_user_id)
+        assert care_settings is not None
+        care_settings.routine_cadence = RoutineCareCadence.EVERY_3_DAYS
+        care_settings.quiet_hours_start = datetime.min.time()
+        care_settings.quiet_hours_end = datetime.min.time()
+        session.add_all(
+            [
+                FearBehaviorLog(
+                    user_id=committed_user_id,
+                    kind="night_check",
+                    count=2,
+                    occurred_at=now - timedelta(hours=8),
+                    note="半夜醒了就去测，怕低血糖",
+                ),
+                HypoglycemiaBeliefEvent(
+                    user_id=committed_user_id,
+                    belief_code="hypo_causes_coma",
+                    quote="总怕半夜低血糖昏过去没人知道",
+                    occurrence="mentioned",
+                    detected_at=now - timedelta(hours=8),
+                ),
+                ProactiveCareTask(
+                    user_id=committed_user_id,
+                    kind=ProactiveCareTaskKind.ROUTINE_CHECK_IN,
+                    status=ProactiveCareTaskStatus.SCHEDULED,
+                    due_at=now - timedelta(minutes=1),
+                    expires_at=now + timedelta(hours=12),
+                ),
+            ]
+        )
+        await session.commit()
+
+    draft_graph = FakeGraph(
+        ProactiveCareDecision(
+            action="send",
+            message="昨晚睡得断断续续的吧？今天想先聊哪一头？",
+            reason="到了已授权的日常问候时间，且最近夜间有反复确认",
+        )
+    )
+    processor = ProactiveCareProcessor(
+        agent=cast(Any, draft_graph),
+        auditor=cast(
+            Any,
+            FakeGraph(ProactiveCareAudit(decision="approve", reason="内容克制")),
+        ),
+        companion_memory=cast(Any, FakeMemory()),
+        token_model=cast(Any, FakeTokenModel()),
+        model_name="test-model",
+    )
+
+    assert (
+        await ProactiveCareWorker(process_task=processor.process).run_once(now=now)
+        is True
+    )
+
+    assert draft_graph.calls, "主动关怀应当调用起草 Agent"
+    payload = json.loads(draft_graph.calls[0][0]["messages"][0].content)
+    behavior_context = payload["behavior_context"]
+    assert "[近期行为与低血糖信念]" in behavior_context
+    assert "夜间反复确认血糖 2 次" in behavior_context
+    assert "低血糖会让我昏迷" in behavior_context
+    # 次数只供起草时决定问什么，不允许出现在发给用户的话里。
+    assert "不要在回复里报这些次数" in behavior_context
