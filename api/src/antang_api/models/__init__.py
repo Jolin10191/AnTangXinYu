@@ -1,4 +1,12 @@
 from antang_api.models.agent_tool_call import AgentToolCall, AgentToolCallStatus
+from antang_api.models.behavior import (
+    BEHAVIOR_KINDS,
+    BELIEF_OCCURRENCES,
+    HYPOGLYCEMIA_BELIEFS,
+    FearBehaviorLog,
+    HypoglycemiaBeliefEvent,
+)
+from antang_api.models.glucose import GLUCOSE_CONTEXTS, GLUCOSE_SOURCES, GlucoseReading
 from antang_api.models.chat import (
     AgentRun,
     AgentRunStatus,
@@ -24,6 +32,8 @@ from antang_api.models.health_profile import (
     ProfileOperation,
     ProfileTargetType,
 )
+from antang_api.models.knowledge import KnowledgeChunk, KnowledgeDocument
+from antang_api.models.psychosocial import PsychosocialAssessment
 from antang_api.models.proactive_care import (
     CarePlan,
     CarePlanStatus,
@@ -38,7 +48,18 @@ from antang_api.models.proactive_care import (
     PushPlatform,
     RoutineCareCadence,
 )
-from antang_api.models.user import LoginSession, User
+from antang_api.models.user import LoginSession, User, UserRole
+from antang_api.models.clinician_application import (
+    ApplicationStatus,
+    ClinicianApplication,
+)
+from antang_api.models.patient_access import PatientAccessGrant, PatientAccessAudit
+from antang_api.models.voice import (
+    SPEECH_BREATHING,
+    SPEECH_ENERGIES,
+    SPEECH_PACES,
+    SpeechCue,
+)
 from antang_api.models.wearable import (
     WearableImport,
     WearableObservation,
@@ -51,6 +72,14 @@ __all__ = [
     "AgentToolCallStatus",
     "AgentRun",
     "AgentRunStatus",
+    "BEHAVIOR_KINDS",
+    "BELIEF_OCCURRENCES",
+    "FearBehaviorLog",
+    "GLUCOSE_CONTEXTS",
+    "GLUCOSE_SOURCES",
+    "GlucoseReading",
+    "HYPOGLYCEMIA_BELIEFS",
+    "HypoglycemiaBeliefEvent",
     "LoginSession",
     "Message",
     "MessageAttachment",
@@ -58,6 +87,11 @@ __all__ = [
     "MessageRole",
     "MessageStatus",
     "User",
+    "UserRole",
+    "ApplicationStatus",
+    "ClinicianApplication",
+    "PatientAccessGrant",
+    "PatientAccessAudit",
     "ConversationSummary",
     "CompanionMemoryCursor",
     "CarePlan",
@@ -68,12 +102,15 @@ __all__ = [
     "HealthFactStatus",
     "HealthFactType",
     "HealthProfileChange",
+    "KnowledgeChunk",
+    "KnowledgeDocument",
     "PersonalProfile",
     "PersonalProfileField",
     "ProfileChangeMode",
     "ProfileChangeStatus",
     "ProfileOperation",
     "ProfileTargetType",
+    "PsychosocialAssessment",
     "ProactiveCareSettings",
     "ProactiveCareTask",
     "ProactiveCareTaskKind",
@@ -84,6 +121,10 @@ __all__ = [
     "PushPermissionState",
     "PushPlatform",
     "RoutineCareCadence",
+    "SPEECH_BREATHING",
+    "SPEECH_ENERGIES",
+    "SPEECH_PACES",
+    "SpeechCue",
     "WearableImport",
     "WearableObservation",
     "WearableRecordTombstone",

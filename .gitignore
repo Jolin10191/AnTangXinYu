@@ -24,6 +24,7 @@ __pycache__/
 
 *.apk
 *.aab
+apps/mobile/local-preview.json
 
 # Word temp files
 ~$*
@@ -35,3 +36,6 @@ artifacts/
 .codex/
 
 *.docx
+
+# Local meeting handouts are not source deliverables.
+docs/meetings/

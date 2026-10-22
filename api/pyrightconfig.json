@@ -1,4 +1,5 @@
 {
+  "pythonVersion": "3.12",
   "include": ["src", "migrations", "tests", "evals"],
   "extraPaths": ["src"],
   "venvPath": ".",

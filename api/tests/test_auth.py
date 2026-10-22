@@ -46,7 +46,7 @@ async def test_register_login_and_duplicate_username(
 
     register_response = await client.post(
         "/api/v1/auth/register",
-        json={"username": username, "password": password},
+        json={"consent_accepted": True, "username": username, "password": password},
     )
 
     assert register_response.status_code == 201
@@ -60,7 +60,7 @@ async def test_register_login_and_duplicate_username(
 
     duplicate_response = await client.post(
         "/api/v1/auth/register",
-        json={"username": username.upper(), "password": password},
+        json={"consent_accepted": True, "username": username.upper(), "password": password},
     )
 
     assert duplicate_response.status_code == 409
@@ -90,7 +90,7 @@ async def test_access_refresh_and_logout_lifecycle(
     username = unique_username("session")
     register_response = await client.post(
         "/api/v1/auth/register",
-        json={"username": username, "password": "correct-password"},
+        json={"consent_accepted": True, "username": username, "password": "correct-password"},
     )
     auth = register_response.json()
 
@@ -221,6 +221,7 @@ async def test_legacy_access_token_refreshes_without_forcing_a_new_login(
     response = await client.post(
         "/api/v1/auth/register",
         json={
+            "consent_accepted": True,
             "username": unique_username("legacy_access"),
             "password": "correct-password",
         },
@@ -269,6 +270,7 @@ async def test_registration_rejects_password_shorter_than_eight_characters(
     response = await client.post(
         "/api/v1/auth/register",
         json={
+            "consent_accepted": True,
             "username": unique_username("password"),
             "password": "1234567",
         },
@@ -286,6 +288,7 @@ async def test_access_token_session_must_belong_to_the_same_user(
     first = await client.post(
         "/api/v1/auth/register",
         json={
+            "consent_accepted": True,
             "username": unique_username("token_owner_a"),
             "password": "correct-password",
         },
@@ -293,6 +296,7 @@ async def test_access_token_session_must_belong_to_the_same_user(
     second = await client.post(
         "/api/v1/auth/register",
         json={
+            "consent_accepted": True,
             "username": unique_username("token_owner_b"),
             "password": "correct-password",
         },

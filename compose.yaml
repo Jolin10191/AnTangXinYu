@@ -91,7 +91,7 @@ services:
     stop_grace_period: 30s
 
   api:
-    image: antang-api:local
+    image: ${ANTANG_API_IMAGE:-antang-api:local}
     restart: unless-stopped
     build:
       context: ./api
@@ -122,7 +122,7 @@ services:
       start_period: 10s
 
   proactive-care-worker:
-    image: antang-api:local
+    image: ${ANTANG_API_IMAGE:-antang-api:local}
     command:
       - /app/.venv/bin/python
       - -m

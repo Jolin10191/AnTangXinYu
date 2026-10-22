@@ -40,11 +40,13 @@ from antang_api.models import (
     MessageAttachmentKind,
     User,
 )
-from antang_api.routers.auth import get_current_user
+from antang_api.patient_access import get_patient_user
+from antang_api.settings import settings
 from antang_api.schemas.chat import (
     AttachmentUploadResponse,
     ChatAttachmentResponse,
     ChatMessageResponse,
+    LiveHeartRateReading,
     MessageHistoryResponse,
     SendMessageRequest,
     encode_stream_event,
@@ -54,6 +56,14 @@ router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
 
 MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 SUPPORTED_ATTACHMENT_TYPES = {"application/pdf", "image/jpeg", "image/png"}
+
+
+def require_chat_enabled() -> None:
+    if settings.local_basic_mode:
+        raise HTTPException(
+            503,
+            "当前为本地基础联调，智能聊天尚未配置。注册、档案和医护授权可正常使用。",
+        )
 
 
 async def _message_responses(
@@ -94,7 +104,7 @@ async def _message_responses(
 async def upload_attachment(
     kind: Annotated[MessageAttachmentKind, Form()],
     file: Annotated[UploadFile, File()],
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_patient_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AttachmentUploadResponse:
     """保存一份待发送的图片或 PDF。"""
@@ -129,7 +139,7 @@ async def upload_attachment(
 @router.get("/attachments/{attachment_id}/content", response_class=Response)
 async def get_attachment_content(
     attachment_id: UUID,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_patient_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> Response:
     """返回当前用户上传的图片或报告原文件。"""
@@ -154,6 +164,7 @@ def _stream_response(
     session: AsyncSession,
     user: User,
     prepared_run: PreparedChatRun,
+    live_heart_rate: LiveHeartRateReading | None = None,
 ) -> StreamingResponse:
     model = cast(BaseChatModel, http_request.app.state.chat_model)
     agent = cast(CoreAgentGraph, http_request.app.state.core_agent)
@@ -172,6 +183,7 @@ def _stream_response(
             companion_memory=companion_memory,
             user_id=user.id,
             prepared_run=prepared_run,
+            live_heart_rate=live_heart_rate,
         ):
             yield encode_stream_event(event)
 
@@ -185,11 +197,13 @@ def _stream_response(
     )
 
 
-@router.post("/messages", response_model=None)
+@router.post(
+    "/messages", response_model=None, dependencies=[Depends(require_chat_enabled)]
+)
 async def send_message(
     request: SendMessageRequest,
     http_request: Request,  # FastAPI 原生的请求对象（包含 app 引用）
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_patient_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> StreamingResponse | JSONResponse:
     """保存用户消息，并以 NDJSON 持续返回 Core Agent 的执行事件。"""
@@ -225,14 +239,24 @@ async def send_message(
             content={"code": "attachment_unavailable", "message": str(error)},
         )
 
-    return _stream_response(http_request, session, user, prepared_run)
+    return _stream_response(
+        http_request,
+        session,
+        user,
+        prepared_run,
+        request.live_heart_rate,
+    )
 
 
-@router.post("/messages/{failed_assistant_message_id}/retry", response_model=None)
+@router.post(
+    "/messages/{failed_assistant_message_id}/retry",
+    response_model=None,
+    dependencies=[Depends(require_chat_enabled)],
+)
 async def retry_message(
     failed_assistant_message_id: UUID,
     http_request: Request,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_patient_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> StreamingResponse | JSONResponse:
     """重试失败或取消的回答，不创建第二条用户消息。"""
@@ -267,7 +291,7 @@ async def retry_message(
 
 @router.get("/messages", response_model=MessageHistoryResponse)
 async def get_message_history(
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_patient_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
     before: Annotated[UUID | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
@@ -324,7 +348,7 @@ async def get_message_history(
 )
 async def get_message_window(
     message_id: UUID,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_patient_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> MessageHistoryResponse:
     """返回目标消息前后各最多 25 条消息，供旧通知准确定位。"""
@@ -374,5 +398,3 @@ async def get_message_window(
         ),
         next_before=None,
     )
-    AttachmentUploadResponse,
-    ChatAttachmentResponse,

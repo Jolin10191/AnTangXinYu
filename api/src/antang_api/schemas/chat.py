@@ -26,6 +26,16 @@ ActivityPhase: TypeAlias = Literal[
 ]
 
 
+class LiveHeartRateReading(BaseModel):
+    """手机正在进行的一次实时心率广播中最近的一条读数。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    beats_per_minute: int = Field(ge=20, le=300)
+    measured_at: datetime
+    device_name: str | None = Field(default=None, max_length=100)
+
+
 class SendMessageRequest(BaseModel):
     """手机发送一条用户消息时提交的数据。"""
 
@@ -33,6 +43,8 @@ class SendMessageRequest(BaseModel):
     client_message_id: UUID
     content: MessageContent
     attachment_id: UUID | None = None
+    # 手机此刻正在接收的实时心率广播读数；没有实时监测时为 None。
+    live_heart_rate: LiveHeartRateReading | None = None
 
     @model_validator(mode="after")
     def validate_content(self) -> "SendMessageRequest":

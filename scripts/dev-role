@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ $# -lt 4 ]]; then
+    echo '用法：bash scripts/dev-role 用户名 clinician|researcher|patient --actor 维护者标识' >&2
+    exit 2
+fi
+username="$1"
+role="$2"
+shift 2
+exec "$project_dir/api/.venv/bin/python" "$project_dir/scripts/local_dev.py" role --username "$username" --role "$role" "$@"

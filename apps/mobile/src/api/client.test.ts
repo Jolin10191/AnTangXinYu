@@ -88,7 +88,7 @@ describe('ApiClient authentication', () => {
       .mockResolvedValueOnce(
         jsonResponse(200, {
           id: '019b1111-1111-7111-8111-111111111111',
-          username: 'medivh',
+          username: 'medivh', role: 'patient',
         }),
       );
     const expired = jest.fn();
@@ -101,7 +101,7 @@ describe('ApiClient authentication', () => {
 
     await expect(client.me()).resolves.toEqual({
       id: '019b1111-1111-7111-8111-111111111111',
-      username: 'medivh',
+      username: 'medivh', role: 'patient',
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
@@ -183,7 +183,7 @@ describe('ApiClient authentication', () => {
             expires_in: accountBTokens.expiresIn,
             user: {
               id: '019b2222-2222-7222-8222-222222222222',
-              username: 'account-b',
+              username: 'account-b', role: 'patient',
             },
           }),
         );
@@ -201,7 +201,7 @@ describe('ApiClient authentication', () => {
     const accountARequest = client.me();
     await refreshStarted;
     await expect(client.login('account-b', 'password-b')).resolves.toMatchObject({
-      username: 'account-b',
+      username: 'account-b', role: 'patient',
     });
 
     resolveRefresh(
@@ -285,7 +285,7 @@ describe('ApiClient authentication', () => {
             expires_in: accountBTokens.expiresIn,
             user: {
               id: '019b2222-2222-7222-8222-222222222222',
-              username: 'account-b',
+              username: 'account-b', role: 'patient',
             },
           }),
         );

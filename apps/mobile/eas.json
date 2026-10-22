@@ -7,12 +7,14 @@
     "development": {
       "node": "24.18.0",
       "environment": "development",
+      "env": { "EXPO_PUBLIC_API_URL": "http://127.0.0.1:8000" },
       "developmentClient": true,
       "distribution": "internal"
     },
     "preview": {
       "node": "24.18.0",
       "environment": "preview",
+      "env": { "EXPO_PUBLIC_API_URL": "http://127.0.0.1:8000" },
       "distribution": "internal"
     },
     "production": {

@@ -1,6 +1,6 @@
-import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
-import { ArrowRight01Icon } from '@hugeicons/core-free-icons';
-import { useRef, useState } from 'react';
+import { StatusBar as ExpoStatusBar } from "expo-status-bar";
+import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
+import { useRef, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -11,16 +11,16 @@ import {
   Text,
   TextInput,
   View,
-} from 'react-native';
+} from "react-native";
 
-import { type ApiClient, errorMessage } from '../api/client';
-import type { User } from '../api/types';
-import { BrandMark } from '../ui/brand-mark';
-import { AppIcon } from '../ui/icon';
-import { colors, radii, spacing, typefaces } from '../ui/theme';
+import { type ApiClient, errorMessage } from "../api/client";
+import type { User } from "../api/types";
+import { BrandMark } from "../ui/brand-mark";
+import { AppIcon } from "../ui/icon";
+import { colors, radii, spacing, typefaces } from "../ui/theme";
 
-type AuthMode = 'login' | 'register';
-type FocusedField = 'username' | 'password' | null;
+type AuthMode = "login" | "register";
+type FocusedField = "username" | "password" | null;
 
 type Props = {
   api: ApiClient;
@@ -29,16 +29,29 @@ type Props = {
 };
 
 export function AuthScreen({ api, initialMessage, onAuthenticated }: Props) {
-  const [mode, setMode] = useState<AuthMode>('login');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const [mode, setMode] = useState<AuthMode>("login");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [consentAccepted, setConsentAccepted] = useState(false);
+  const [showConsent, setShowConsent] = useState(false);
+  const [organization, setOrganization] = useState("");
+  const [registrationKind, setRegistrationKind] = useState<
+    "patient" | "clinician"
+  >("patient");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(initialMessage ?? null);
   const [focusedField, setFocusedField] = useState<FocusedField>(null);
   const passwordInput = useRef<TextInput>(null);
 
   const canSubmit =
-    username.trim().length >= 3 && password.length >= 8 && !submitting;
+    username.trim().length >= 3 &&
+    password.length >= 8 &&
+    !submitting &&
+    (mode === "login" ||
+      (consentAccepted &&
+        fullName.trim().length > 0 &&
+        (registrationKind === "patient" || organization.trim().length > 0)));
 
   async function submit() {
     if (!canSubmit) return;
@@ -47,9 +60,16 @@ export function AuthScreen({ api, initialMessage, onAuthenticated }: Props) {
     setError(null);
     try {
       const user =
-        mode === 'login'
+        mode === "login"
           ? await api.login(username.trim(), password)
-          : await api.register(username.trim(), password);
+          : await api.register(username.trim(), password, {
+              consentAccepted,
+              fullName: fullName.trim(),
+              registrationKind,
+              ...(registrationKind === "clinician"
+                ? { organization: organization.trim() }
+                : {}),
+            });
       onAuthenticated(user);
     } catch (caught) {
       setError(errorMessage(caught));
@@ -60,13 +80,16 @@ export function AuthScreen({ api, initialMessage, onAuthenticated }: Props) {
 
   function switchMode(nextMode: AuthMode) {
     setMode(nextMode);
-    setPassword('');
+    setRegistrationKind("patient");
+    setConsentAccepted(false);
+    setShowConsent(false);
+    setPassword("");
     setError(null);
   }
 
   return (
     <KeyboardAvoidingView
-      behavior={process.env.EXPO_OS === 'ios' ? 'padding' : 'height'}
+      behavior={process.env.EXPO_OS === "ios" ? "padding" : "height"}
       style={styles.screen}
     >
       <View
@@ -95,13 +118,23 @@ export function AuthScreen({ api, initialMessage, onAuthenticated }: Props) {
 
           <View style={styles.card}>
             <View style={styles.cardHeading}>
-              <Text accessibilityRole="header" selectable style={styles.cardTitle}>
-                {mode === 'login' ? '欢迎回来' : '从今天开始'}
+              <Text
+                accessibilityRole="header"
+                selectable
+                style={styles.cardTitle}
+              >
+                {mode === "login"
+                  ? "欢迎回来"
+                  : registrationKind === "clinician"
+                    ? "申请医护账号"
+                    : "从今天开始"}
               </Text>
               <Text selectable style={styles.cardIntro}>
-                {mode === 'login'
-                  ? '输入账号信息进入应用。'
-                  : '创建账号后即可开始使用。'}
+                {mode === "login"
+                  ? "输入账号信息进入应用。"
+                  : registrationKind === "clinician"
+                    ? "提交后由开发协作者审批，通过后获得医护身份。"
+                    : "创建账号后即可开始使用。"}
               </Text>
             </View>
 
@@ -109,19 +142,19 @@ export function AuthScreen({ api, initialMessage, onAuthenticated }: Props) {
               <Pressable
                 accessibilityLabel="切换到登录"
                 accessibilityRole="tab"
-                accessibilityState={{ selected: mode === 'login' }}
+                accessibilityState={{ selected: mode === "login" }}
                 hitSlop={4}
-                onPress={() => switchMode('login')}
+                onPress={() => switchMode("login")}
                 style={({ pressed }) => [
                   styles.modeButton,
-                  mode === 'login' && styles.modeButtonActive,
+                  mode === "login" && styles.modeButtonActive,
                   pressed && styles.modeButtonPressed,
                 ]}
               >
                 <Text
                   style={[
                     styles.modeText,
-                    mode === 'login' && styles.modeTextActive,
+                    mode === "login" && styles.modeTextActive,
                   ]}
                 >
                   登录
@@ -130,19 +163,19 @@ export function AuthScreen({ api, initialMessage, onAuthenticated }: Props) {
               <Pressable
                 accessibilityLabel="切换到注册"
                 accessibilityRole="tab"
-                accessibilityState={{ selected: mode === 'register' }}
+                accessibilityState={{ selected: mode === "register" }}
                 hitSlop={4}
-                onPress={() => switchMode('register')}
+                onPress={() => switchMode("register")}
                 style={({ pressed }) => [
                   styles.modeButton,
-                  mode === 'register' && styles.modeButtonActive,
+                  mode === "register" && styles.modeButtonActive,
                   pressed && styles.modeButtonPressed,
                 ]}
               >
                 <Text
                   style={[
                     styles.modeText,
-                    mode === 'register' && styles.modeTextActive,
+                    mode === "register" && styles.modeTextActive,
                   ]}
                 >
                   注册
@@ -150,7 +183,79 @@ export function AuthScreen({ api, initialMessage, onAuthenticated }: Props) {
               </Pressable>
             </View>
 
+            {mode === "login" ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="医护人员注册"
+                onPress={() => {
+                  switchMode("register");
+                  setRegistrationKind("clinician");
+                }}
+              >
+                <Text style={styles.modeTextActive}>医护人员注册 →</Text>
+              </Pressable>
+            ) : (
+              <View style={styles.modeRow}>
+                {(["patient", "clinician"] as const).map((kind) => (
+                  <Pressable
+                    key={kind}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      kind === "patient" ? "选择患者注册" : "选择医护注册"
+                    }
+                    accessibilityState={{ selected: registrationKind === kind }}
+                    style={[
+                      styles.modeButton,
+                      registrationKind === kind && styles.modeButtonActive,
+                    ]}
+                    onPress={() => {
+                      setRegistrationKind(kind);
+                      setError(null);
+                    }}
+                  >
+                    <Text
+                      style={
+                        registrationKind === kind
+                          ? styles.modeTextActive
+                          : styles.modeText
+                      }
+                    >
+                      {kind === "patient" ? "患者注册" : "医护注册"}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+
             <View style={styles.fields}>
+              {mode !== "register" ? null : (
+                <View style={styles.field}>
+                  <Text style={styles.label}>姓名</Text>
+                  <TextInput
+                    accessibilityLabel="姓名"
+                    value={fullName}
+                    onChangeText={setFullName}
+                    maxLength={64}
+                    placeholder="请输入姓名"
+                    autoComplete="name"
+                    style={styles.input}
+                  />
+                </View>
+              )}
+              {mode !== "register" ||
+              registrationKind !== "clinician" ? null : (
+                <View style={styles.field}>
+                  <Text style={styles.label}>所属机构</Text>
+                  <TextInput
+                    accessibilityLabel="所属机构"
+                    value={organization}
+                    onChangeText={setOrganization}
+                    maxLength={128}
+                    placeholder="医院或工作机构"
+                    style={styles.input}
+                  />
+                </View>
+              )}
               <View style={styles.field}>
                 <View style={styles.labelRow}>
                   <Text nativeID="username-label" style={styles.label}>
@@ -161,19 +266,19 @@ export function AuthScreen({ api, initialMessage, onAuthenticated }: Props) {
                 <TextInput
                   accessibilityLabel="用户名"
                   autoCapitalize="none"
-                  autoComplete={mode === 'login' ? 'username' : 'username-new'}
+                  autoComplete={mode === "login" ? "username" : "username-new"}
                   autoCorrect={false}
                   maxLength={32}
                   onBlur={() => setFocusedField(null)}
                   onChangeText={setUsername}
-                  onFocus={() => setFocusedField('username')}
+                  onFocus={() => setFocusedField("username")}
                   onSubmitEditing={() => passwordInput.current?.focus()}
                   placeholder="请输入用户名"
                   placeholderTextColor={colors.faint}
                   returnKeyType="next"
                   style={[
                     styles.input,
-                    focusedField === 'username' && styles.inputFocused,
+                    focusedField === "username" && styles.inputFocused,
                   ]}
                   textContentType="username"
                   value={username}
@@ -192,12 +297,12 @@ export function AuthScreen({ api, initialMessage, onAuthenticated }: Props) {
                   accessibilityLabel="密码"
                   autoCapitalize="none"
                   autoComplete={
-                    mode === 'login' ? 'current-password' : 'new-password'
+                    mode === "login" ? "current-password" : "new-password"
                   }
                   maxLength={128}
                   onBlur={() => setFocusedField(null)}
                   onChangeText={setPassword}
-                  onFocus={() => setFocusedField('password')}
+                  onFocus={() => setFocusedField("password")}
                   onSubmitEditing={() => void submit()}
                   placeholder="请输入密码"
                   placeholderTextColor={colors.faint}
@@ -205,15 +310,50 @@ export function AuthScreen({ api, initialMessage, onAuthenticated }: Props) {
                   secureTextEntry
                   style={[
                     styles.input,
-                    focusedField === 'password' && styles.inputFocused,
+                    focusedField === "password" && styles.inputFocused,
                   ]}
                   textContentType={
-                    mode === 'login' ? 'password' : 'newPassword'
+                    mode === "login" ? "password" : "newPassword"
                   }
                   value={password}
                 />
               </View>
             </View>
+
+            {mode !== "register" ? null : (
+              <View style={styles.field}>
+                <Pressable
+                  accessibilityLabel="阅读知情同意与隐私说明"
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: showConsent }}
+                  onPress={() => setShowConsent((value) => !value)}
+                >
+                  <Text style={[styles.label, { color: colors.primary }]}>
+                    阅读知情同意与隐私说明
+                  </Text>
+                </Pressable>
+                {!showConsent ? null : (
+                  <Text selectable style={styles.cardIntro}>
+                    应用会保存账号、对话和你提供的健康资料，用于健康记录与陪伴。
+                    你可以查看和维护个人档案；向指定医护授权后，对方可只读查看授权范围内的资料，你可以随时撤销后续访问。
+                    管理人员的身份本身不授予患者健康资料访问权。你可以申请注销账号并删除个人资料。
+                    应用不能替代专业诊疗或紧急救助。
+                  </Text>
+                )}
+                <Pressable
+                  accessibilityLabel="同意知情同意与隐私说明"
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: consentAccepted }}
+                  onPress={() => setConsentAccepted((value) => !value)}
+                  style={{ paddingVertical: spacing.sm }}
+                >
+                  <Text style={styles.label}>
+                    {consentAccepted ? "☑" : "☐"}{" "}
+                    我已阅读并同意知情同意与隐私说明
+                  </Text>
+                </Pressable>
+              </View>
+            )}
 
             {error === null ? null : (
               <View
@@ -231,10 +371,12 @@ export function AuthScreen({ api, initialMessage, onAuthenticated }: Props) {
             <Pressable
               accessibilityLabel={
                 submitting
-                  ? '正在提交'
-                  : mode === 'login'
-                    ? '登录并进入安糖心语'
-                    : '创建安糖心语账号'
+                  ? "正在提交"
+                  : mode === "login"
+                    ? "登录并进入安糖心语"
+                    : registrationKind === "clinician"
+                      ? "提交医护注册申请"
+                      : "创建安糖心语账号"
               }
               accessibilityRole="button"
               accessibilityState={{ busy: submitting, disabled: !canSubmit }}
@@ -251,9 +393,17 @@ export function AuthScreen({ api, initialMessage, onAuthenticated }: Props) {
               ) : (
                 <>
                   <Text style={styles.submitText}>
-                    {mode === 'login' ? '进入安糖心语' : '创建账号'}
+                    {mode === "login"
+                      ? "进入安糖心语"
+                      : registrationKind === "clinician"
+                        ? "提交医护注册申请"
+                        : "创建账号"}
                   </Text>
-                  <AppIcon color={colors.paper} icon={ArrowRight01Icon} size={20} />
+                  <AppIcon
+                    color={colors.paper}
+                    icon={ArrowRight01Icon}
+                    size={20}
+                  />
                 </>
               )}
             </Pressable>
@@ -268,26 +418,26 @@ export function AuthScreen({ api, initialMessage, onAuthenticated }: Props) {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    overflow: 'hidden',
+    overflow: "hidden",
     backgroundColor: colors.background,
   },
   scrollContent: {
     flexGrow: 1,
-    justifyContent: 'center',
+    justifyContent: "center",
     paddingTop:
-      (process.env.EXPO_OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0) +
+      (process.env.EXPO_OS === "android" ? (StatusBar.currentHeight ?? 0) : 0) +
       spacing.xl,
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xxl,
   },
   content: {
-    width: '100%',
+    width: "100%",
     maxWidth: 480,
-    alignSelf: 'center',
+    alignSelf: "center",
     gap: spacing.xl,
   },
   greenWash: {
-    position: 'absolute',
+    position: "absolute",
     width: 172,
     height: 172,
     bottom: -86,
@@ -297,7 +447,7 @@ const styles = StyleSheet.create({
     opacity: 0.72,
   },
   hero: {
-    alignItems: 'center',
+    alignItems: "center",
     gap: spacing.xs,
     paddingHorizontal: spacing.xs,
   },
@@ -305,7 +455,7 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontFamily: typefaces.sansMedium,
     fontSize: 27,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 0.6,
   },
   heroText: {
@@ -319,9 +469,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
     borderRadius: radii.xl,
-    borderCurve: 'continuous',
+    borderCurve: "continuous",
     backgroundColor: colors.paper,
-    boxShadow: '0 10px 28px rgba(23, 48, 46, 0.07)',
+    boxShadow: "0 10px 28px rgba(23, 48, 46, 0.07)",
   },
   cardHeading: {
     gap: spacing.xxs,
@@ -330,7 +480,7 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontFamily: typefaces.sansMedium,
     fontSize: 23,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   cardIntro: {
     color: colors.muted,
@@ -339,24 +489,24 @@ const styles = StyleSheet.create({
     lineHeight: 21,
   },
   modeRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: spacing.xxs,
     padding: spacing.xxs,
     borderRadius: radii.md,
-    borderCurve: 'continuous',
+    borderCurve: "continuous",
     backgroundColor: colors.paperMuted,
   },
   modeButton: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     minHeight: 42,
     borderRadius: radii.sm,
-    borderCurve: 'continuous',
+    borderCurve: "continuous",
   },
   modeButtonActive: {
     backgroundColor: colors.paper,
-    boxShadow: '0 2px 8px rgba(39, 60, 53, 0.08)',
+    boxShadow: "0 2px 8px rgba(39, 60, 53, 0.08)",
   },
   modeButtonPressed: {
     opacity: 0.72,
@@ -376,9 +526,9 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   labelRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
     gap: spacing.sm,
     paddingHorizontal: 2,
   },
@@ -402,17 +552,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
     borderRadius: radii.md,
-    borderCurve: 'continuous',
+    borderCurve: "continuous",
     backgroundColor: colors.white,
   },
   inputFocused: {
     borderColor: colors.primary,
     backgroundColor: colors.paper,
-    boxShadow: '0 0 0 3px rgba(29, 91, 73, 0.10)',
+    boxShadow: "0 0 0 3px rgba(29, 91, 73, 0.10)",
   },
   errorBox: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+    flexDirection: "row",
+    alignItems: "flex-start",
     gap: spacing.sm,
     padding: spacing.sm,
     borderRadius: radii.sm,
@@ -433,13 +583,13 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   submitButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: spacing.xs,
     minHeight: 54,
     borderRadius: radii.md,
-    borderCurve: 'continuous',
+    borderCurve: "continuous",
     backgroundColor: colors.primary,
   },
   submitButtonDisabled: {

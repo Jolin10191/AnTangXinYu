@@ -12,18 +12,24 @@ from antang_api.agents.tool_middleware import ToolPersistenceMiddleware
 from antang_api.chat import recover_interrupted_chat_runs
 from antang_api.companion_memory import CompanionMemory
 from antang_api.database import engine, session_factory
+from antang_api.knowledge import warm_knowledge_index
 from antang_api.llm import (
     build_chat_model,
     build_non_streaming_model,
 )
 from antang_api.log_config import configure_logging
 from antang_api.routers.auth import router as auth_router
+from antang_api.routers.administration import router as administration_router
 from antang_api.routers.chat import router as chat_router
 from antang_api.routers.health_profile import router as health_profile_router
+from antang_api.routers.patient_access import router as patient_access_router
 from antang_api.routers.proactive_care import router as proactive_care_router
+from antang_api.routers.voice import router as voice_router
 from antang_api.settings import settings
 from antang_api.tools import (
+    build_behavior_tools,
     build_care_plan_tool,
+    build_knowledge_search_tool,
     build_profile_tool,
     build_wearable_read_tool,
     build_web_tools,
@@ -35,6 +41,15 @@ configure_logging()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """管理数据库、外部客户端、checkpointer 和两类 Agent 的生命周期。"""
+
+    if settings.local_basic_mode:
+        try:
+            async with session_factory() as session:
+                await recover_interrupted_chat_runs(session)
+            yield
+        finally:
+            await engine.dispose()
+        return
 
     hindsight_client = Hindsight(
         base_url=settings.hindsight_base_url,
@@ -50,6 +65,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         async with session_factory() as session:
             await recover_interrupted_chat_runs(session)
+            await warm_knowledge_index(session)
 
         async with AsyncPostgresSaver.from_conn_string(
             settings.langgraph_database_url
@@ -76,6 +92,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     session_factory=session_factory,
                 )
                 care_plan_tool = build_care_plan_tool(session_factory)
+                behavior_tools = build_behavior_tools(session_factory)
+                knowledge_tool = build_knowledge_search_tool(session_factory)
                 web_tools = build_web_tools(
                     tavily_client,
                     search_max_snippet_chars=(settings.tavily_search_max_snippet_chars),
@@ -84,8 +102,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 core_tools = (
                     *web_tools,
                     wearable_tool,
+                    knowledge_tool,
                     health_profile_delegate,
                     care_plan_tool,
+                    *behavior_tools,
                 )
                 tool_middleware = ToolPersistenceMiddleware(
                     session_factory,
@@ -95,6 +115,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
                 app.state.chat_model = chat_model
                 app.state.core_tools = core_tools
+                # 注销账号要连带清掉 Hindsight 里的陪伴记忆，路由从这里取客户端。
+                app.state.hindsight_client = hindsight_client
                 app.state.companion_memory = CompanionMemory(
                     hindsight_client,
                     mode=settings.hindsight_mode,
@@ -122,11 +144,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(auth_router)
+app.include_router(administration_router)
+app.include_router(patient_access_router)
 app.include_router(chat_router)
 app.include_router(health_profile_router)
 app.include_router(proactive_care_router)
+app.include_router(voice_router)
 
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "mode": "local-basic" if settings.local_basic_mode else "full",
+    }

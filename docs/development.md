@@ -2,7 +2,7 @@
 
 ## 先选你要做的事
 
-只改手机端，先用团队后端和开发 APK，不必先搭数据库。修改后端时，再配置 Python、uv 和 Docker。项目有 Health Connect 原生模块，手机端使用开发 APK。
+默认先在本机开发和审核，审核通过后再更新线上。当前实时联调、基础模式、手机连接和本机账号设置统一见 [本地开发与审核](local-development.md)。项目有原生模块，实时反馈使用开发 APK。
 
 Windows 使用 WSL Ubuntu。以下命令都在 Ubuntu 终端运行；先确认 `node --version` 是 24.x，`command -v node` 指向 Linux 路径。
 
@@ -10,13 +10,13 @@ Windows 使用 WSL Ubuntu。以下命令都在 Ubuntu 终端运行；先确认 `
 
 完成 README 的安装步骤后，从最新 `master` 新建自己的分支。分支名描述这次工作，例如 `feature/wearable-import`。
 
-示例配置已填好当前联调 API 地址。从 [README 的开发包链接](../README.md#安装包与维护) 安装 APK；后续原生代码有变化时向维护者取得新包。安装后在 `apps/mobile` 执行：
+先按本地开发说明启动本机后端，再安装开发 APK；后续原生代码变化时重新构建。随后在 `apps/mobile` 执行：
 
 ```bash
 npm run dev
 ```
 
-在开发 APK 中打开电脑提供的开发服务。手机需要能够访问该电脑；WSL 用户要同时检查 Windows 防火墙和 WSL 网络。若二维码地址不可达，先解决网络连通，不要通过改业务代码处理连接问题。
+在开发 APK 中打开电脑提供的开发服务。普通局域网直接连接；校园网等隔离设备的网络关闭原 Metro，再从项目根目录运行 `bash scripts/dev-tunnel`，扫描新的 HTTPS 隧道连接码。手机无需与电脑处于同一 Wi-Fi，业务仍在本机运行。具体步骤见 [本地开发与审核](local-development.md)。
 
 改完后，在仓库根目录执行 `bash scripts/check mobile`。这会检查类型、Lint、单元测试，并实际生成 Android JS bundle。日常快速检查可在 `apps/mobile` 执行 `npm run check`。
 

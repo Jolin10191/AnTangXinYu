@@ -7,7 +7,26 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from antang_api.behavioral import (
+    BEHAVIOR_KIND_LABELS,
+    delete_behavior_log,
+    delete_belief_event,
+    read_behavior_logs,
+    read_belief_events,
+    read_fear_summary,
+)
 from antang_api.database import get_session
+from antang_api.health_profile.glucose import (
+    list_glucose_readings,
+    record_glucose_reading,
+    revoke_glucose_reading,
+    summarize_glucose,
+)
+from antang_api.schemas.glucose import (
+    GlucoseReadingCreate,
+    GlucoseReadingResponse,
+    GlucoseSummaryResponse,
+)
 from antang_api.health_profile.errors import (
     HealthProfileChangedError,
     HealthProfileInvariantError,
@@ -33,15 +52,26 @@ from antang_api.health_profile.wearable_service import (
     read_wearable_observations,
 )
 from antang_api.proactive_care.service import record_health_import
+from antang_api.psychosocial import (
+    PsychosocialProfile,
+    read_latest_assessment_row,
+    record_assessment,
+)
 from antang_api.models import (
+    HYPOGLYCEMIA_BELIEFS,
     HealthProfileChange,
     ProfileChangeMode,
     ProfileChangeStatus,
+    PsychosocialAssessment,
     User,
     WearableRecordType,
 )
-from antang_api.routers.auth import get_current_user
+from antang_api.patient_access import get_patient_user
 from antang_api.schemas.health_profile import (
+    BehaviorLogResponse,
+    BeliefEventResponse,
+    BeliefNodeResponse,
+    FearSummaryResponse,
     HealthProfileChangeRequest,
     HealthProfileChangeResponse,
     HealthProfileResponse,
@@ -53,6 +83,8 @@ from antang_api.schemas.health_profile import (
     ProfileCardDecisionResponse,
     ProfileCardResponse,
     ProfileCardsResponse,
+    PsychosocialAssessmentRequest,
+    PsychosocialProfileResponse,
     WearableImportRequest,
     WearableImportResponse,
     WearableDashboardResponse,
@@ -61,16 +93,25 @@ from antang_api.schemas.health_profile import (
 
 router = APIRouter(prefix="/api/v1/health-profile", tags=["health-profile"])
 
+# 信念枚举 → 中文标签。与行为词表同理，只在服务端留一份，客户端不再各写一套。
+_BELIEF_LABELS = dict(HYPOGLYCEMIA_BELIEFS)
+
 
 @router.get("", response_model=HealthProfileResponse)
 async def get_health_profile(
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_patient_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> HealthProfileResponse:
-    snapshot = await load_health_profile_snapshot(session, user.id)
+    return await read_health_profile(session, user.id)
+
+
+async def read_health_profile(
+    session: AsyncSession, user_id: UUID
+) -> HealthProfileResponse:
+    snapshot = await load_health_profile_snapshot(session, user_id)
     latest = await read_latest_wearable_observations(
         session,
-        user_id=user.id,
+        user_id=user_id,
     )
     trend_end = datetime.now(UTC)
     trend_start = trend_end - timedelta(hours=6)
@@ -85,7 +126,7 @@ async def get_health_profile(
     heart_rate_observations = (
         await read_wearable_observations(
             session,
-            user_id=user.id,
+            user_id=user_id,
             record_types=[WearableRecordType.HEART_RATE],
             start=trend_start,
             end=trend_end,
@@ -125,7 +166,7 @@ async def get_health_profile(
 
 @router.get("/cards", response_model=ProfileCardsResponse)
 async def get_profile_cards(
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_patient_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
     limit: Annotated[int, Query(ge=1, le=50)] = 50,
 ) -> ProfileCardsResponse:
@@ -177,7 +218,7 @@ async def get_profile_cards(
 )
 async def change_health_profile(
     request: HealthProfileChangeRequest,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_patient_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> HealthProfileChangeResponse:
     try:
@@ -227,7 +268,7 @@ async def change_health_profile(
 async def answer_card(
     card_id: UUID,
     request: ProfileCardAnswerRequest,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_patient_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> ProfileCardDecisionResponse | JSONResponse:
     try:
@@ -285,7 +326,7 @@ async def answer_card(
 async def decide_card(
     card_id: UUID,
     request: ProfileCardDecisionRequest,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_patient_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> ProfileCardDecisionResponse | JSONResponse:
     try:
@@ -340,7 +381,7 @@ async def decide_card(
 )
 async def import_wearable_records(
     request: WearableImportRequest,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_patient_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> WearableImportResponse:
     try:
@@ -369,7 +410,7 @@ async def import_wearable_records(
     response_model=HealthConnectRecordIdsResponse,
 )
 async def get_health_connect_record_ids(
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_patient_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
     record_type: WearableRecordType,
     after: Annotated[str | None, Query(min_length=1, max_length=255)] = None,
@@ -387,7 +428,248 @@ async def get_health_connect_record_ids(
 
 @router.get("/wearable-dashboard", response_model=WearableDashboardResponse)
 async def get_wearable_dashboard(
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_patient_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> WearableDashboardResponse:
     return await read_wearable_dashboard(session, user_id=user.id)
+
+
+def _psychosocial_response(row: PsychosocialAssessment) -> PsychosocialProfileResponse:
+    profile = PsychosocialProfile(
+        fear_behavior_percent=row.fear_behavior_percent,
+        fear_worry_percent=row.fear_worry_percent,
+        gold_score=row.gold_score,
+    )
+    return PsychosocialProfileResponse(
+        assessed_at=row.assessed_at,
+        instrument=row.instrument,
+        fear_percent=profile.fear_percent,
+        fear_high=profile.fear_high,
+        gold_score=profile.gold_score,
+        awareness=profile.awareness,
+        quadrant=profile.quadrant,
+        weekly_contact_limit=profile.weekly_contact_limit,
+    )
+
+
+@router.get(
+    "/psychosocial-assessment",
+    response_model=PsychosocialProfileResponse | None,
+)
+async def get_psychosocial_assessment(
+    user: Annotated[User, Depends(get_patient_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> PsychosocialProfileResponse | None:
+    row = await read_latest_assessment_row(session, user.id)
+    if row is None:
+        return None
+    return _psychosocial_response(row)
+
+
+@router.post(
+    "/psychosocial-assessment",
+    response_model=PsychosocialProfileResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def record_psychosocial_assessment(
+    request: PsychosocialAssessmentRequest,
+    user: Annotated[User, Depends(get_patient_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> PsychosocialProfileResponse:
+    row = await record_assessment(
+        session,
+        user_id=user.id,
+        fear_behavior_percent=request.fear_behavior_percent,
+        fear_worry_percent=request.fear_worry_percent,
+        gold_score=request.gold_score,
+        instrument=request.instrument,
+        assessed_at=request.assessed_at,
+    )
+    response = _psychosocial_response(row)
+    await session.commit()
+    return response
+
+
+@router.get("/fear-summary", response_model=FearSummaryResponse)
+async def get_fear_summary(
+    user: Annotated[User, Depends(get_patient_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    days: Annotated[int, Query(ge=7, le=90)] = 28,
+) -> FearSummaryResponse:
+    """显性分数与行为代理的对照，供 App 在心理社会卡片下展示。"""
+
+    summary = await read_fear_summary(session, user_id=user.id, days=days)
+    assessment = (
+        _psychosocial_response(summary.assessment_row)
+        if summary.assessment_row is not None
+        else None
+    )
+    return FearSummaryResponse(
+        window_start=summary.window_start,
+        window_end=summary.window_end,
+        behavior_counts=summary.behavior_counts,
+        behavior_total=summary.behavior_total,
+        monitoring_weekly=summary.monitoring_weekly,
+        avoidance_weekly=summary.avoidance_weekly,
+        beliefs=[
+            BeliefNodeResponse(
+                belief_code=node.belief_code,
+                label=node.label,
+                mentions=node.mentions,
+                reframes=node.reframes,
+                denials=node.denials,
+                latest_quote=node.latest_quote,
+                latest_detected_at=node.latest_detected_at,
+                resolved=node.resolved,
+            )
+            for node in summary.beliefs
+        ],
+        assessment=assessment,
+        discrepancy=summary.discrepancy,
+        discrepancy_note=summary.discrepancy_note,
+    )
+
+
+@router.post(
+    "/glucose-readings",
+    response_model=GlucoseReadingResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_glucose_reading(
+    payload: GlucoseReadingCreate,
+    user: Annotated[User, Depends(get_patient_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> GlucoseReadingResponse:
+    """录入一条血糖读数。患者手工填写，报告解析将来也走这里。"""
+
+    reading = await record_glucose_reading(
+        session,
+        user_id=user.id,
+        value_mg_dl=payload.value_mg_dl,
+        measured_at=payload.measured_at,
+        context=payload.context,
+        note=payload.note,
+    )
+    await session.commit()
+    return GlucoseReadingResponse.model_validate(reading)
+
+
+@router.get("/glucose-readings", response_model=list[GlucoseReadingResponse])
+async def get_glucose_readings(
+    user: Annotated[User, Depends(get_patient_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    days: Annotated[int, Query(ge=1, le=90)] = 14,
+) -> list[GlucoseReadingResponse]:
+    """按时间倒序返回最近的读数，已撤回的不返回。"""
+
+    readings = await list_glucose_readings(session, user_id=user.id, days=days)
+    return [GlucoseReadingResponse.model_validate(item) for item in readings]
+
+
+@router.get("/glucose-readings/summary", response_model=GlucoseSummaryResponse)
+async def get_glucose_summary(
+    user: Annotated[User, Depends(get_patient_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    days: Annotated[int, Query(ge=1, le=90)] = 7,
+) -> GlucoseSummaryResponse:
+    """窗口内的读数统计，供界面展示条数与区间。"""
+
+    summary = await summarize_glucose(session, user_id=user.id, days=days)
+    return GlucoseSummaryResponse.model_validate(summary)
+
+
+@router.delete("/glucose-readings/{reading_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_glucose_reading(
+    reading_id: UUID,
+    user: Annotated[User, Depends(get_patient_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    """撤回一条读数：数据不再被读取，但保留"记录过又撤回"这个事实。"""
+
+    revoked = await revoke_glucose_reading(
+        session, user_id=user.id, reading_id=reading_id
+    )
+    if revoked is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="没有这条血糖记录"
+        )
+    await session.commit()
+
+
+@router.get("/fear-behavior", response_model=list[BehaviorLogResponse])
+async def list_fear_behavior_logs(
+    user: Annotated[User, Depends(get_patient_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    days: Annotated[int, Query(ge=1, le=90)] = 28,
+) -> list[BehaviorLogResponse]:
+    """逐条列出行为记录，供 App 做「我的记录」并逐条撤回。
+
+    汇总卡片只给次数，删不了；要让人自己删，得先看到是哪一条、哪一天。
+    """
+
+    rows = await read_behavior_logs(session, user_id=user.id, days=days)
+    return [
+        BehaviorLogResponse(
+            id=row.id,
+            kind=row.kind,
+            label=BEHAVIOR_KIND_LABELS.get(row.kind, row.kind),
+            count=row.count,
+            note=row.note,
+            occurred_at=row.occurred_at,
+        )
+        for row in rows
+    ]
+
+
+@router.get("/belief-events", response_model=list[BeliefEventResponse])
+async def list_hypoglycemia_belief_events(
+    user: Annotated[User, Depends(get_patient_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    days: Annotated[int, Query(ge=1, le=365)] = 90,
+) -> list[BeliefEventResponse]:
+    """逐条列出信念观测，带患者原话；删掉一条就是连那句原话一起删。"""
+
+    rows = await read_belief_events(session, user_id=user.id, days=days)
+    return [
+        BeliefEventResponse(
+            id=row.id,
+            belief_code=row.belief_code,
+            label=_BELIEF_LABELS.get(row.belief_code, row.belief_code),
+            quote=row.quote,
+            occurrence=cast(Literal["mentioned", "reframed", "denied"], row.occurrence),
+            detected_at=row.detected_at,
+        )
+        for row in rows
+    ]
+
+
+@router.delete("/fear-behavior/{log_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_fear_behavior_log(
+    log_id: UUID,
+    user: Annotated[User, Depends(get_patient_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    """患者撤回一条「因为怕低血糖而做的事」记录：真删，不留痕。"""
+
+    deleted = await delete_behavior_log(session, user_id=user.id, log_id=log_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="没有这条记录"
+        )
+    await session.commit()
+
+
+@router.delete("/belief-events/{event_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_hypoglycemia_belief_event(
+    event_id: UUID,
+    user: Annotated[User, Depends(get_patient_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    """患者撤回一次信念观测：连同那句原话一起真删。"""
+
+    deleted = await delete_belief_event(session, user_id=user.id, event_id=event_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="没有这条记录"
+        )
+    await session.commit()

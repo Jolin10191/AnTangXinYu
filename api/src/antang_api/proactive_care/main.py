@@ -10,7 +10,7 @@ from antang_api.agents.proactive_care import (
 )
 from antang_api.companion_memory import CompanionMemory
 from antang_api.database import engine
-from antang_api.llm import build_non_streaming_model
+from antang_api.llm import build_proactive_care_model
 from antang_api.log_config import configure_logging
 from antang_api.proactive_care.processor import ProactiveCareProcessor
 from antang_api.proactive_care.push import ExpoPushClient, PushDeliveryWorker
@@ -20,6 +20,11 @@ from antang_api.settings import settings
 
 async def run_worker() -> None:
     """创建 Worker 独享的外部客户端与 Agent，并持续处理持久任务。"""
+
+    if settings.local_basic_mode:
+        raise RuntimeError(
+            "本地基础联调未启用主动关怀，请配置完整 AI 服务后启动 Worker。"
+        )
 
     configure_logging()
     hindsight_client = Hindsight(
@@ -41,7 +46,9 @@ async def run_worker() -> None:
                 settings.langgraph_database_url
             ) as checkpointer:
                 await checkpointer.setup()
-                model = build_non_streaming_model()
+                # 主动关怀改用自己那把模型：worker 在后台慢慢跑，不占对话流；
+                # 但真正发消息的是它，所以这里宁可用更稳的那个。
+                model = build_proactive_care_model()
                 processor = ProactiveCareProcessor(
                     agent=build_proactive_care_agent(model, checkpointer),
                     auditor=build_proactive_care_auditor(model, checkpointer),
@@ -53,7 +60,7 @@ async def run_worker() -> None:
                         recall_max_tokens=settings.hindsight_recall_max_tokens,
                     ),
                     token_model=model,
-                    model_name=settings.hachimi_model_name,
+                    model_name=settings.resolved_proactive_model_name,
                 )
                 access_token = (
                     settings.expo_push_access_token.get_secret_value()

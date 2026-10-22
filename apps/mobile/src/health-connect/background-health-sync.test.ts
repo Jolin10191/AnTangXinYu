@@ -103,7 +103,7 @@ describe('background Health Connect sync', () => {
     jest.mocked(secureHealthConnectTokenStore.loadBackgroundState).mockResolvedValue(
       readyState,
     );
-    jest.mocked(appClient.me).mockResolvedValue({ id: userId, username: 'alice' });
+    jest.mocked(appClient.me).mockResolvedValue({ id: userId, username: 'alice', role: 'patient' });
     jest.mocked(appClient.getSessionSignal).mockReturnValue(
       sessionController.signal,
     );
@@ -144,7 +144,7 @@ describe('background Health Connect sync', () => {
 
     jest.mocked(appClient.me).mockResolvedValueOnce({
       id: '019b2222-2222-7222-8222-222222222222',
-      username: 'bob',
+      username: 'bob', role: 'patient',
     });
     await expect(runBackgroundHealthSync()).resolves.toBe('skipped');
 

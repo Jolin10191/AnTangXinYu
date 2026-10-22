@@ -105,7 +105,7 @@ describe('ChatScreen', () => {
         <ChatScreen
           api={api}
           onSignedOut={jest.fn()}
-          user={{ id: 'user-1', username: 'demo' }}
+          user={{ id: 'user-1', username: 'demo', role: 'patient' }}
         />,
       );
       await Promise.resolve();
@@ -157,7 +157,7 @@ describe('ChatScreen', () => {
         <ChatScreen
           api={api}
           onSignedOut={jest.fn()}
-          user={{ id: 'user-1', username: 'demo' }}
+          user={{ id: 'user-1', username: 'demo', role: 'patient' }}
         />,
       );
       await Promise.resolve();
