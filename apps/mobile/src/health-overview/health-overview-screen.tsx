@@ -52,6 +52,7 @@ export type HealthOverviewScreenProps = {
     | 'getFearSummary'
     | 'getHealthProfile'
     | 'getPsychosocialAssessment'
+    | 'getPsychosocialInstrument'
     | 'recordPsychosocialAssessment'
   >;
   onClose: () => void;

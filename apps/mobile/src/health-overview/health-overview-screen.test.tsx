@@ -10,9 +10,33 @@ import {
 import { act, create } from 'react-test-renderer';
 
 import { ApiError, type ApiClient } from '../api/client';
-import type { FearSummary, HealthProfile } from '../api/types';
+import type { FearSummary, HealthProfile, PsychosocialInstrument } from '../api/types';
 import { LiveHeartRateProvider } from '../live-heart-rate/LiveHeartRateProvider';
 import { HealthOverviewScreen, sourceLabel } from './health-overview-screen';
+
+/** 沟通方式题库现在由服务端给；这一页的用例只需要一份能渲染的题库。 */
+function instrumentStub(): PsychosocialInstrument {
+  return {
+    id: 'antang-behavior-v1',
+    title: '糖糖怎么跟你说话',
+    instructions: '六个问题，约一分钟。',
+    disclaimer: '不是标准化量表。',
+    options: [
+      { value: 0, label: '从不' },
+      { value: 1, label: '很少' },
+      { value: 2, label: '有时' },
+      { value: 3, label: '经常' },
+      { value: 4, label: '几乎每天' },
+    ],
+    questions: [
+      { id: 'repeat-test', kind: 'behavior', text: '反复测血糖。' },
+      { id: 'night-worry', kind: 'worry', text: '担心夜里低血糖。' },
+    ],
+    goldLabel: '你能感觉到低血糖吗？',
+    goldHint: '1 = 能，7 = 不能',
+    goldOptions: [1, 2, 3, 4, 5, 6, 7].map((value) => ({ value, label: String(value) })),
+  };
+}
 
 /** 档案页里的「行为记录」卡片默认是空记录，避免每个用例都要写一份。 */
 function emptyFearSummary(): FearSummary {
@@ -149,6 +173,7 @@ describe('HealthOverviewScreen', () => {
       deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
       deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+    getPsychosocialInstrument: jest.fn().mockResolvedValue(instrumentStub()),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     const onClose = jest.fn();
@@ -210,6 +235,7 @@ describe('HealthOverviewScreen', () => {
       deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
       deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+    getPsychosocialInstrument: jest.fn().mockResolvedValue(instrumentStub()),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     let tree: ReturnType<typeof create>;
@@ -265,6 +291,7 @@ describe('HealthOverviewScreen', () => {
       deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
       deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+    getPsychosocialInstrument: jest.fn().mockResolvedValue(instrumentStub()),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     const onSyncWearable = jest.fn().mockReturnValue(syncPromise);
@@ -335,6 +362,7 @@ describe('HealthOverviewScreen', () => {
       deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
       deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+    getPsychosocialInstrument: jest.fn().mockResolvedValue(instrumentStub()),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     const onClose = jest.fn();
@@ -376,6 +404,7 @@ describe('HealthOverviewScreen', () => {
       deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
       deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+    getPsychosocialInstrument: jest.fn().mockResolvedValue(instrumentStub()),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     const onSyncWearable = jest.fn().mockRejectedValue(new Error('Health Connect 读取失败'));
@@ -409,6 +438,7 @@ describe('HealthOverviewScreen', () => {
       deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
       deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+    getPsychosocialInstrument: jest.fn().mockResolvedValue(instrumentStub()),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     let tree: ReturnType<typeof create>;
@@ -463,6 +493,7 @@ describe('HealthOverviewScreen', () => {
       deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
       deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+    getPsychosocialInstrument: jest.fn().mockResolvedValue(instrumentStub()),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     let tree: ReturnType<typeof create>;
@@ -542,6 +573,7 @@ describe('HealthOverviewScreen', () => {
       deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
       deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+    getPsychosocialInstrument: jest.fn().mockResolvedValue(instrumentStub()),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     let tree: ReturnType<typeof create>;
@@ -651,6 +683,7 @@ describe('HealthOverviewScreen', () => {
       deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
       deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+    getPsychosocialInstrument: jest.fn().mockResolvedValue(instrumentStub()),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     let tree: ReturnType<typeof create>;
@@ -720,6 +753,7 @@ describe('HealthOverviewScreen', () => {
       deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
       deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+    getPsychosocialInstrument: jest.fn().mockResolvedValue(instrumentStub()),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     let tree: ReturnType<typeof create>;
@@ -792,6 +826,7 @@ describe('HealthOverviewScreen', () => {
       deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
       deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+    getPsychosocialInstrument: jest.fn().mockResolvedValue(instrumentStub()),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     let tree: ReturnType<typeof create>;
@@ -860,6 +895,7 @@ describe('HealthOverviewScreen', () => {
       deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
       deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
+    getPsychosocialInstrument: jest.fn().mockResolvedValue(instrumentStub()),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
     let tree: ReturnType<typeof create>;

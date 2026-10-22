@@ -1032,3 +1032,97 @@ test('deleting a record calls the path that names that exact record', async () =
     '/api/v1/health-profile/belief-events/7b1e5e10-2c6f-4a3b-9d1f-2b9c4d5e6f70',
   );
 });
+
+test('getPsychosocialInstrument asks the server which questions to show', async () => {
+  const store = new MemoryTokenStore(oldTokens);
+  let requestedUrl = '';
+  const fetchMock = jest.fn(async (url: string) => {
+    requestedUrl = url;
+    return {
+      status: 200,
+      ok: true,
+      headers: new Headers(),
+      body: null,
+      json: async () => ({
+        id: 'antang-behavior-v1',
+        title: '沟通方式自评',
+        instructions: '六个问题，约一分钟。',
+        disclaimer: '不是标准化量表。',
+        options: [
+          { value: 0, label: '从不' },
+          { value: 4, label: '几乎每天' },
+        ],
+        questions: [
+          { id: 'repeat-test', kind: 'behavior', text: '反复测血糖。' },
+          { id: 'night-worry', kind: 'worry', text: '担心夜里低血糖。' },
+        ],
+        gold_label: '你能感觉到低血糖吗？',
+        gold_hint: '1 = 能，7 = 不能',
+        gold_options: [
+          { value: 1, label: '1' },
+          { value: 7, label: '7' },
+        ],
+      }),
+    } as Awaited<ReturnType<FetchFunction>>;
+  });
+
+  const client = new ApiClient(
+    'http://api.test',
+    store,
+    jest.fn(),
+    fetchMock as unknown as FetchFunction,
+  );
+
+  const instrument = await client.getPsychosocialInstrument();
+
+  expect(requestedUrl).toContain('/api/v1/health-profile/psychosocial-instrument');
+  expect(instrument.id).toBe('antang-behavior-v1');
+  expect(instrument.questions.map((question) => question.kind)).toEqual([
+    'behavior',
+    'worry',
+  ]);
+  expect(instrument.goldOptions).toEqual([
+    { value: 1, label: '1' },
+    { value: 7, label: '7' },
+  ]);
+});
+
+test('a questionnaire that repeats a question id is rejected instead of half shown', async () => {
+  const store = new MemoryTokenStore(oldTokens);
+  const fetchMock = jest.fn(async () => {
+    return {
+      status: 200,
+      ok: true,
+      headers: new Headers(),
+      body: null,
+      json: async () => ({
+        id: 'antang-behavior-v1',
+        title: '沟通方式自评',
+        instructions: '六个问题。',
+        disclaimer: '不是标准化量表。',
+        options: [
+          { value: 0, label: '从不' },
+          { value: 4, label: '几乎每天' },
+        ],
+        questions: [
+          { id: 'same', kind: 'behavior', text: '第一题。' },
+          { id: 'same', kind: 'worry', text: '第二题。' },
+        ],
+        gold_label: '你能感觉到低血糖吗？',
+        gold_hint: '1 = 能，7 = 不能',
+        gold_options: [{ value: 1, label: '1' }],
+      }),
+    } as Awaited<ReturnType<FetchFunction>>;
+  });
+
+  const client = new ApiClient(
+    'http://api.test',
+    store,
+    jest.fn(),
+    fetchMock as unknown as FetchFunction,
+  );
+
+  await expect(client.getPsychosocialInstrument()).rejects.toThrow(
+    'psychosocial instrument.questions 里 id 重复：same',
+  );
+});

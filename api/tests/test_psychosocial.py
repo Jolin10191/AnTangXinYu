@@ -286,3 +286,63 @@ async def test_assessment_rejects_naive_time_and_unknown_fields(
             },
         )
         assert out_of_range.status_code == 422
+
+
+async def test_the_app_asks_the_server_what_to_ask(db_session: AsyncSession) -> None:
+    """题目由服务端下发，换量表不用重打安装包。"""
+
+    async for client in _client(db_session):
+        anonymous = await client.get("/api/v1/health-profile/psychosocial-instrument")
+        assert anonymous.status_code == 401
+
+        headers, _ = await _register(client)
+        response = await client.get(
+            "/api/v1/health-profile/psychosocial-instrument",
+            headers=headers,
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["id"] == "antang-behavior-v1"
+        assert body["title"] == "沟通方式自评"
+        assert "六个问题" in body["instructions"]
+        assert "不是标准化量表" in body["disclaimer"]
+
+        options = body["options"]
+        assert [option["value"] for option in options] == [0, 1, 2, 3, 4]
+        assert [option["label"] for option in options] == [
+            "从不",
+            "很少",
+            "有时",
+            "经常",
+            "几乎每天",
+        ]
+        assert [option["value"] for option in body["gold_options"]] == list(range(1, 8))
+
+        questions = body["questions"]
+        assert len(questions) == 6
+        assert [question["kind"] for question in questions] == [
+            "behavior",
+            "behavior",
+            "behavior",
+            "worry",
+            "worry",
+            "worry",
+        ]
+        assert len({question["id"] for question in questions}) == len(questions)
+        assert all(question["text"].startswith("过去一个月") for question in questions)
+        assert body["gold_hint"] == "1 = 总能感觉到，7 = 完全感觉不到"
+
+        # App 拿到的 id 原样回传就能存进库：两边不能各写一份字符串。
+        created = await client.post(
+            "/api/v1/health-profile/psychosocial-assessment",
+            headers=headers,
+            json={
+                "fear_behavior_percent": 100,
+                "fear_worry_percent": 0,
+                "gold_score": 2,
+                "instrument": body["id"],
+                "assessed_at": "2026-10-31T09:00:00+00:00",
+            },
+        )
+        assert created.status_code == 201
+        assert created.json()["instrument"] == body["id"]
