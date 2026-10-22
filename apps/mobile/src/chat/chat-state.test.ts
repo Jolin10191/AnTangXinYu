@@ -101,8 +101,26 @@ describe('chatReducer', () => {
       content: '已经生成的部分',
       status: 'failed',
     });
-    expect(state.error).toBe('AI 回复失败：ModelError');
+    expect(state.error).toBe('回复失败了，再试一次。');
     expect(state.activity).toBeNull();
+  });
+
+  test('tells the patient what to do instead of naming the error type', () => {
+    const failed = (errorType: string) =>
+      chatReducer(
+        chatReducer(startedState(), {
+          type: 'stream-event',
+          event: { type: 'text_delta', delta: '在' },
+        }),
+        {
+          type: 'stream-event',
+          event: { type: 'message_failed', code: 'agent_run_failed', errorType },
+        },
+      ).error;
+
+    expect(failed('PermissionDeniedError')).toBe('服务暂时不可用，稍后再试。');
+    expect(failed('ConnectionError')).toBe('网络连不上，检查一下网络再试。');
+    expect(failed('SomeNewError')).toBe('回复失败了，再试一次。');
   });
 
   test('new optimistic messages start without sources', () => {

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from antang_api.context.compaction import (
     InsufficientMessagesForCompactionError,
     SUMMARY_PROMPT_VERSION,
+    SUMMARY_SYSTEM_PROMPT,
     compact_conversation,
     select_messages_to_compact,
 )
@@ -216,6 +217,31 @@ async def test_compaction_snapshots_form_a_chain(
     assert second_summary.content == "第二份连续性摘要"
     assert second_summary.input_tokens == 160
     assert second_summary.output_tokens == 30
+    # 第二次压缩必须把上一份摘要放在原始对话前面，让模型在旧摘要上续写而不是重写。
+    assert compaction_inputs[1].startswith("现有摘要（其中的信息必须延续）：")
+    assert compaction_inputs[1].index("第一份连续性摘要") < compaction_inputs[1].index(
+        "后续原始对话"
+    )
+
+
+def test_summary_prompt_keeps_the_sections_a_later_turn_needs() -> None:
+    """摘要按固定栏目输出，栏目顺序稳定，且明确禁止猜测。"""
+
+    sections = [
+        "[用户稳定信息]",
+        "[近期事件]",
+        "[未完成的约定]",
+        "[担忧与信念]",
+        "[对话偏好]",
+        "[可以忘记的]",
+    ]
+
+    positions = [SUMMARY_SYSTEM_PROMPT.index(section) for section in sections]
+
+    assert positions == sorted(positions)
+    assert "「现有摘要」里的信息必须延续" in SUMMARY_SYSTEM_PROMPT
+    assert "没有提到的不要猜" in SUMMARY_SYSTEM_PROMPT
+    assert "不要把犹豫改成确定" in SUMMARY_SYSTEM_PROMPT
 
 
 async def test_compaction_preserves_proactive_question_and_short_reply(
@@ -275,8 +301,8 @@ async def test_compaction_preserves_proactive_question_and_short_reply(
     ) -> AIMessage:
         system_message, input_message = model_messages
         assert isinstance(system_message, SystemMessage)
-        assert "主动发起" in system_message.text
-        assert "简短回复" in system_message.text
+        assert "助手开场" in system_message.text
+        assert "「对」「好」" in system_message.text
         assert isinstance(input_message, HumanMessage)
         assert input_message.text.index("助手: 你昨天") < input_message.text.index(
             "助手: 不用详细说"
@@ -309,6 +335,6 @@ async def test_compaction_preserves_proactive_question_and_short_reply(
         messages_to_keep=1,
     )
 
-    assert SUMMARY_PROMPT_VERSION == "v2"
-    assert summary.prompt_version == "v2"
+    assert SUMMARY_PROMPT_VERSION == "v3"
+    assert summary.prompt_version == "v3"
     assert summary.through_message_id == expected_summary_boundary

@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     hindsight_retain_user_turns: int = Field(default=3, gt=0)
     hindsight_recall_budget: Literal["low", "mid", "high"] = "low"
     hindsight_recall_max_tokens: int = Field(default=2_048, gt=0)
+    # 单次记忆请求等待上限；online 超时仍明确失败，保持既有行为。
+    hindsight_recall_timeout_seconds: float = Field(default=8, gt=0)
+    hindsight_retain_timeout_seconds: float = Field(default=25, gt=0)
 
     database_url: str = Field(pattern=r"^postgresql\+psycopg://")
     jwt_secret: SecretStr = Field(min_length=32)

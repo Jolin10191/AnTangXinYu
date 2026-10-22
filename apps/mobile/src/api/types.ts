@@ -531,6 +531,16 @@ export function parseAttachmentUpload(value: unknown): ChatAttachment {
   return parseAttachment(value, "attachment");
 }
 
+/** 转写只回一段文字：音频在服务端用完就丢，没有 id 也没有下载地址。 */
+export function parseTranscription(value: unknown): string {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('转写结果必须是对象');
+  }
+  const text = stringValue((value as Record<string, unknown>).text, 'text').trim();
+  if (text.length === 0) throw new Error('转写结果是空的');
+  return text;
+}
+
 function booleanValue(value: unknown, name: string): boolean {
   if (typeof value !== "boolean") throw new Error(`${name} 必须是布尔值`);
   return value;
@@ -1851,6 +1861,75 @@ export function parseFearSummary(value: unknown): FearSummary {
     ),
   };
 }
+export type BeliefOccurrence = 'mentioned' | 'reframed' | 'denied';
+
+const BELIEF_OCCURRENCES: BeliefOccurrence[] = ['mentioned', 'reframed', 'denied'];
+
+/**
+ * 一条行为记录。带 id 才能在 App 里删掉具体那一条——汇总卡片只给次数，
+ * 患者看着「夜间查血糖 6 次」却没法说「那次不算」，等于没给撤回权。
+ */
+export type FearBehaviorLog = {
+  id: string;
+  kind: string;
+  label: string;
+  count: number;
+  note: string | null;
+  occurredAt: string;
+};
+
+/** 一条信念观测，quote 是患者原话。 */
+export type BeliefEventRecord = {
+  id: string;
+  beliefCode: string;
+  label: string;
+  quote: string;
+  occurrence: BeliefOccurrence;
+  detectedAt: string;
+};
+
+export function parseFearBehaviorLogs(value: unknown): FearBehaviorLog[] {
+  if (!Array.isArray(value)) throw new Error('behavior logs 必须是数组');
+  return value.map((item, index) => {
+    const label = `behavior logs[${index}]`;
+    const data = objectValue(item, label);
+    return {
+      id: uuidValue(data.id, `${label}.id`),
+      kind: stringValue(data.kind, `${label}.kind`),
+      label: stringValue(data.label, `${label}.label`),
+      count: integerValue(data.count, `${label}.count`),
+      note:
+        data.note === null || data.note === undefined
+          ? null
+          : textValue(data.note, `${label}.note`),
+      occurredAt: zonedDateTimeValue(data.occurred_at, `${label}.occurred_at`),
+    };
+  });
+}
+
+export function parseBeliefEvents(value: unknown): BeliefEventRecord[] {
+  if (!Array.isArray(value)) throw new Error('belief events 必须是数组');
+  return value.map((item, index) => {
+    const label = `belief events[${index}]`;
+    const data = objectValue(item, label);
+    const occurrence = stringValue(
+      data.occurrence,
+      `${label}.occurrence`,
+    ) as BeliefOccurrence;
+    if (!BELIEF_OCCURRENCES.includes(occurrence)) {
+      throw new Error(`${label}.occurrence 无效`);
+    }
+    return {
+      id: uuidValue(data.id, `${label}.id`),
+      beliefCode: stringValue(data.belief_code, `${label}.belief_code`),
+      label: stringValue(data.label, `${label}.label`),
+      quote: stringValue(data.quote, `${label}.quote`),
+      occurrence,
+      detectedAt: zonedDateTimeValue(data.detected_at, `${label}.detected_at`),
+    };
+  });
+}
+
 export function parseChatStreamEvent(value: unknown): ChatStreamEvent {
   const data = objectValue(value, "stream event");
   const type = stringValue(data.type, "stream event.type");

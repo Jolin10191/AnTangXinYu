@@ -31,6 +31,8 @@ properties 包含 `storePassword`、`keyAlias`、`keyPassword`。构建脚本将
 
 ## 更新检查与分发
 
-患者侧边栏的「检查更新」读取所选后端地址的 `/download/latest.json`，比较 versionCode，确认后交给系统浏览器下载 APK。清单不可用会明确报错。
+患者侧边栏的「检查更新」读取所选后端地址的 `/download/latest.json`，比较 versionCode，确认后可在应用内下载并交给 Android 系统安装器；权限不足或安装器启动失败会明确报错。清单不可用会明确报错。
 
 本仓库没有可执行的 APK 上传发布脚本；不能根据旧分支文档中的 `publish-apk.ps1` 假设它存在。由维护者先核对 APK 的签名、包名、versionCode、API 地址和 SHA256，再上传审核过的文件与清单。清单字段为 `version_name`、`version_code`、`apk_url`、`sha256`、`size_bytes`、`notes`；清单版本必须与 APK 一致且大于已发布版本。Android 安装仍由用户确认。
+
+作者后续更新增加了 `expo-intent-launcher` 安装器入口和安装未知应用权限。缓存下载目前只核对文件大小，端上未计算 SHA256；发布端仍需校验 APK 哈希和团队签名。这些改动需要重新编译安装包，尚未真机验收。

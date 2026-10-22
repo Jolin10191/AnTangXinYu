@@ -11,6 +11,7 @@ import {
   Alert,
   Linking,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -21,7 +22,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppIcon } from '../ui/icon';
 import { colors, radii, spacing, typefaces } from '../ui/theme';
-import { checkForUpdate, formatSize, installedVersion } from '../update/release';
+import { downloadAndInstall } from '../update/install';
+import {
+  checkForUpdate,
+  formatSize,
+  installedVersion,
+  type ReleaseInfo,
+} from '../update/release';
 
 export type ConversationAnchor = {
   group: string;
@@ -60,30 +67,58 @@ function formatLastSync(value: string): string {
 }
 
 function UpdateRow() {
-  const [checking, setChecking] = useState(false);
+  const [phase, setPhase] = useState<'idle' | 'checking' | 'installing'>('idle');
+  const [percent, setPercent] = useState(0);
   const installed = installedVersion();
+  const busy = phase !== 'idle';
+
+  async function startInstall(release: ReleaseInfo) {
+    setPercent(0);
+    setPhase('installing');
+    try {
+      await downloadAndInstall(release, (progress) =>
+        setPercent(progress.percent),
+      );
+    } catch (error) {
+      Alert.alert(
+        '没能开始安装',
+        error instanceof Error ? error.message : '再试一次。',
+      );
+    } finally {
+      setPhase('idle');
+    }
+  }
 
   async function handlePress() {
-    if (checking) {
+    if (busy) {
       return;
     }
-    setChecking(true);
+    setPhase('checking');
     try {
       const result = await checkForUpdate();
       if (result.kind === 'available') {
         const { release } = result;
+        const actions = [
+          { text: '稍后', style: 'cancel' as const },
+          {
+            text: '去下载',
+            onPress: () => {
+              void Linking.openURL(release.apkUrl);
+            },
+          },
+        ];
+        if (Platform.OS === 'android') {
+          actions.push({
+            text: '直接安装',
+            onPress: () => {
+              void startInstall(release);
+            },
+          });
+        }
         Alert.alert(
           '有新版本',
           `新版本 ${release.versionName}（${formatSize(release.sizeBytes)}）\n\n${release.notes}`,
-          [
-            { text: '稍后', style: 'cancel' },
-            {
-              text: '去下载',
-              onPress: () => {
-                void Linking.openURL(release.apkUrl);
-              },
-            },
-          ],
+          actions,
         );
       } else {
         Alert.alert('已是最新版本', `当前版本 ${result.installed.name}`);
@@ -94,15 +129,22 @@ function UpdateRow() {
         error instanceof Error ? error.message : '请确认网络后重试',
       );
     } finally {
-      setChecking(false);
+      setPhase('idle');
     }
   }
+
+  const action =
+    phase === 'checking'
+      ? '检查中…'
+      : phase === 'installing'
+        ? `下载 ${percent}%`
+        : '检查';
 
   return (
     <Pressable
       accessibilityLabel="检查更新"
       accessibilityRole="button"
-      disabled={checking}
+      disabled={busy}
       onPress={handlePress}
       style={styles.updateRow}
     >
@@ -110,7 +152,7 @@ function UpdateRow() {
         <Text style={styles.updateTitle}>检查更新</Text>
         <Text style={styles.updateHint}>当前版本 {installed.name}</Text>
       </View>
-      <Text style={styles.updateAction}>{checking ? '检查中…' : '检查'}</Text>
+      <Text style={styles.updateAction}>{action}</Text>
     </Pressable>
   );
 }

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from antang_api.agents.core import render_core_system_prompt
 from antang_api.psychosocial.hypo_review import (
     LOW_READING_MG_DL,
-    review_is_due,
     render_hypo_review_prompt,
+    review_is_due,
 )
 
 
@@ -48,3 +49,17 @@ def test_reported_and_automatic_openings_differ() -> None:
 
     assert automatic != reported
     assert "你说的那次" in reported
+
+
+def test_core_prompt_carries_the_review_only_when_asked() -> None:
+    """复盘片段是逐轮附上的：没有该问的事件时，提示词里不能出现这个话题。"""
+
+    without_review = render_core_system_prompt("档案")
+
+    assert "[低血糖之后的复盘]" not in without_review
+
+    review = render_hypo_review_prompt(reported_by_user=True)
+    with_review = render_core_system_prompt("档案", hypo_review_context=review)
+
+    assert with_review.endswith(review)
+    assert "档案" in with_review

@@ -5,6 +5,7 @@ import {
   FileChartLineIcon,
   FolderHeartIcon,
   Menu01Icon,
+  Mic01Icon,
   StopIcon,
 } from '@hugeicons/core-free-icons';
 import { randomUUID } from 'expo-crypto';
@@ -48,6 +49,9 @@ import {
   ReportPickerScreen,
 } from './attachment-flows';
 import { chatReducer, initialChatState } from './chat-state';
+import { formatVoiceDuration, mergeTranscriptIntoDraft } from './voice-recording';
+import { useVoiceInput } from './useVoiceInput';
+import { VOICE_INPUT_ENABLED } from '../config';
 import { MessageSources } from './MessageSources';
 import { HealthProfileCards } from '../health-profile/health-profile-cards';
 import { useHealthProfileCards } from '../health-profile/use-health-profile-cards';
@@ -306,6 +310,19 @@ function ChatScreenContent({ api, user, onSignedOut }: Props) {
   }, [state.messages, targetMessageId]);
 
   const busy = state.sending || state.historyLoading || uploadingAttachment;
+  const transcribeVoice = useCallback(
+    (recording: { mimeType: string; name: string; uri: string }) =>
+      api.transcribeVoice(recording),
+    [api],
+  );
+  const handleTranscript = useCallback((text: string) => {
+    setDraft((current) => mergeTranscriptIntoDraft(current, text));
+  }, []);
+  const voice = useVoiceInput(transcribeVoice, handleTranscript);
+  const voiceBusy = voice.phase !== 'idle';
+  const showVoiceButton =
+    VOICE_INPUT_ENABLED &&
+    (voiceBusy || (draft.trim().length === 0 && attachment === null && !busy));
   async function loadOlder() {
     if (state.nextBefore === null || state.historyLoading) return;
     dispatch({ type: 'history-loading' });
@@ -869,6 +886,16 @@ function ChatScreenContent({ api, user, onSignedOut }: Props) {
             />
           </View>
         )}
+        {voice.error !== null && (
+          <Pressable
+            accessibilityLabel="关掉这条提示"
+            accessibilityRole="button"
+            onPress={voice.dismissError}
+            style={styles.voiceError}
+          >
+            <Text style={styles.voiceErrorText}>{voice.error}</Text>
+          </Pressable>
+        )}
         <View style={styles.composer}>
           <Pressable
             accessibilityLabel="添加文件"
@@ -884,23 +911,56 @@ function ChatScreenContent({ api, user, onSignedOut }: Props) {
           </Pressable>
           <TextInput
             ref={inputRef}
-            editable={!busy}
+            editable={!busy && !voiceBusy}
             maxLength={2000}
             multiline
             onChangeText={setDraft}
             placeholder={
-              uploadingAttachment
-                ? '正在上传附件…'
-                : state.pendingRequestId !== null
-                  ? '正在回复…'
-                  : state.historyLoading
-                    ? '正在读取对话…'
-                    : '输入健康问题或说说近况…'
+              voice.phase === 'recording'
+                ? `正在录音 ${formatVoiceDuration(voice.durationMillis)}，说完再按一下`
+                : voice.phase === 'transcribing'
+                  ? '正在转成文字…'
+                  : uploadingAttachment
+                    ? '正在上传附件…'
+                    : state.pendingRequestId !== null
+                      ? '正在回复…'
+                      : state.historyLoading
+                        ? '正在读取对话…'
+                        : '输入健康问题或说说近况…'
             }
             placeholderTextColor={colors.faint}
             style={styles.input}
             value={draft}
           />
+          {showVoiceButton && (
+            <Pressable
+              accessibilityLabel={
+                voice.phase === 'recording' ? '结束录音' : '用语音说'
+              }
+              accessibilityRole="button"
+              disabled={voice.phase === 'transcribing'}
+              onPress={() =>
+                void (voice.phase === 'recording' ? voice.stop() : voice.start())
+              }
+              style={({ pressed }) => [
+                styles.voiceButton,
+                voice.phase === 'recording' && styles.voiceButtonActive,
+                pressed && styles.sendButtonPressed,
+              ]}
+            >
+              {voice.phase === 'transcribing' ? (
+                <ActivityIndicator color={colors.muted} size="small" />
+              ) : (
+                <AppIcon
+                  color={
+                    voice.phase === 'recording' ? colors.white : colors.muted
+                  }
+                  icon={voice.phase === 'recording' ? StopIcon : Mic01Icon}
+                  size={22}
+                />
+              )}
+            </Pressable>
+          )}
           <Pressable
             accessibilityLabel={
               state.pendingRequestId !== null ? '停止生成回复' : '发送消息'
@@ -1439,6 +1499,28 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     borderWidth: 0,
     backgroundColor: colors.paper,
+  },
+  voiceButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.pill,
+  },
+  voiceButtonActive: { backgroundColor: colors.danger },
+  voiceError: {
+    marginHorizontal: spacing.sm,
+    marginTop: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.md,
+    backgroundColor: colors.dangerSoft,
+  },
+  voiceErrorText: {
+    color: colors.danger,
+    fontFamily: typefaces.sans,
+    fontSize: 13,
+    lineHeight: 18,
   },
   sendButton: {
     width: 42,

@@ -144,6 +144,10 @@ describe('HealthOverviewScreen', () => {
     const api = {
       getHealthProfile: jest.fn().mockResolvedValue(profile),
       getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
+      getFearBehaviorLogs: jest.fn().mockResolvedValue([]),
+      getBeliefEvents: jest.fn().mockResolvedValue([]),
+      deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
+      deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
@@ -201,6 +205,10 @@ describe('HealthOverviewScreen', () => {
     const api = {
       getHealthProfile: jest.fn().mockResolvedValue(emptyProfile),
       getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
+      getFearBehaviorLogs: jest.fn().mockResolvedValue([]),
+      getBeliefEvents: jest.fn().mockResolvedValue([]),
+      deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
+      deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
@@ -252,6 +260,10 @@ describe('HealthOverviewScreen', () => {
         .mockResolvedValueOnce(profile)
         .mockResolvedValueOnce(refreshedProfile),
       getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
+      getFearBehaviorLogs: jest.fn().mockResolvedValue([]),
+      getBeliefEvents: jest.fn().mockResolvedValue([]),
+      deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
+      deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
@@ -318,6 +330,10 @@ describe('HealthOverviewScreen', () => {
     const api = {
       getHealthProfile: jest.fn().mockResolvedValueOnce(stale).mockResolvedValueOnce(current),
       getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
+      getFearBehaviorLogs: jest.fn().mockResolvedValue([]),
+      getBeliefEvents: jest.fn().mockResolvedValue([]),
+      deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
+      deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
@@ -355,6 +371,10 @@ describe('HealthOverviewScreen', () => {
     const api = {
       getHealthProfile: jest.fn().mockResolvedValue(profile),
       getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
+      getFearBehaviorLogs: jest.fn().mockResolvedValue([]),
+      getBeliefEvents: jest.fn().mockResolvedValue([]),
+      deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
+      deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
@@ -384,6 +404,10 @@ describe('HealthOverviewScreen', () => {
         .mockRejectedValueOnce(new Error('网络暂时不可用'))
         .mockResolvedValueOnce(emptyProfile),
       getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
+      getFearBehaviorLogs: jest.fn().mockResolvedValue([]),
+      getBeliefEvents: jest.fn().mockResolvedValue([]),
+      deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
+      deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
@@ -434,6 +458,10 @@ describe('HealthOverviewScreen', () => {
         }),
       changeHealthProfile: jest.fn().mockResolvedValue({ status: 'applied' }),
       getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
+      getFearBehaviorLogs: jest.fn().mockResolvedValue([]),
+      getBeliefEvents: jest.fn().mockResolvedValue([]),
+      deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
+      deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
@@ -509,6 +537,10 @@ describe('HealthOverviewScreen', () => {
         .mockResolvedValueOnce(emptyProfile),
       changeHealthProfile: jest.fn().mockResolvedValue({ status: 'applied' }),
       getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
+      getFearBehaviorLogs: jest.fn().mockResolvedValue([]),
+      getBeliefEvents: jest.fn().mockResolvedValue([]),
+      deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
+      deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
@@ -614,6 +646,10 @@ describe('HealthOverviewScreen', () => {
         )
         .mockResolvedValueOnce({ status: 'applied' }),
       getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
+      getFearBehaviorLogs: jest.fn().mockResolvedValue([]),
+      getBeliefEvents: jest.fn().mockResolvedValue([]),
+      deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
+      deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
@@ -679,6 +715,10 @@ describe('HealthOverviewScreen', () => {
         .mockResolvedValueOnce(savedProfile),
       changeHealthProfile: jest.fn().mockResolvedValue({ status: 'applied' }),
       getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
+      getFearBehaviorLogs: jest.fn().mockResolvedValue([]),
+      getBeliefEvents: jest.fn().mockResolvedValue([]),
+      deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
+      deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
@@ -747,6 +787,10 @@ describe('HealthOverviewScreen', () => {
         .mockResolvedValueOnce({ ...emptyProfile, healthFacts: [allergy] }),
       changeHealthProfile,
       getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
+      getFearBehaviorLogs: jest.fn().mockResolvedValue([]),
+      getBeliefEvents: jest.fn().mockResolvedValue([]),
+      deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
+      deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;
@@ -811,6 +855,10 @@ describe('HealthOverviewScreen', () => {
         .mockResolvedValueOnce(saved),
       changeHealthProfile,
       getFearSummary: jest.fn().mockResolvedValue(emptyFearSummary()),
+      getFearBehaviorLogs: jest.fn().mockResolvedValue([]),
+      getBeliefEvents: jest.fn().mockResolvedValue([]),
+      deleteFearBehaviorLog: jest.fn().mockResolvedValue(undefined),
+      deleteBeliefEvent: jest.fn().mockResolvedValue(undefined),
       getPsychosocialAssessment: jest.fn().mockResolvedValue(null),
       recordPsychosocialAssessment: jest.fn(),
     } as unknown as ApiClient;

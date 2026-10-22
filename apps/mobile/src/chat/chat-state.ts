@@ -27,6 +27,24 @@ export const initialChatState: ChatState = {
   retrySourceMessageId: null,
 };
 
+/**
+ * 患者看到的失败文案。错误类型是给我们看的，不该原样出现在手机屏幕上；
+ * 按「患者下一步能做什么」分组：换个时间再试、重发一次、检查网络。
+ */
+const FAILURE_MESSAGES: Record<string, string> = {
+  AuthenticationError: '服务暂时不可用，稍后再试。',
+  PermissionDeniedError: '服务暂时不可用，稍后再试。',
+  RateLimitError: '现在有点忙，等一下再发一次。',
+  APITimeoutError: '等太久了，再发一次试试。',
+  TimeoutError: '等太久了，再发一次试试。',
+  ConnectionError: '网络连不上，检查一下网络再试。',
+  RemoteProtocolError: '连接断了，再发一次试试。',
+};
+
+export function failureMessage(errorType: string): string {
+  return FAILURE_MESSAGES[errorType] ?? '回复失败了，再试一次。';
+}
+
 type ChatAction =
   | { type: 'history-loading' }
   | { type: 'history-replaced'; messages: ChatMessage[]; nextBefore: string | null }
@@ -255,7 +273,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         sending: false,
         activity: null,
         pendingRequestId: null,
-        error: `AI 回复失败：${event.errorType}`,
+        error: failureMessage(event.errorType),
       };
     }
 

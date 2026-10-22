@@ -123,6 +123,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     retain_user_turns=settings.hindsight_retain_user_turns,
                     recall_budget=settings.hindsight_recall_budget,
                     recall_max_tokens=settings.hindsight_recall_max_tokens,
+                    recall_timeout_seconds=settings.hindsight_recall_timeout_seconds,
+                    retain_timeout_seconds=settings.hindsight_retain_timeout_seconds,
                 )
                 app.state.core_agent = build_core_agent(
                     chat_model,

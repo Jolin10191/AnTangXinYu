@@ -120,6 +120,29 @@ describe("AuthScreen", () => {
         .props.onPress();
     });
 
+    // 勾上知情同意之后才能提交注册（注册页默认不勾）。
+    expect(
+      tree!.root.findByProps({ accessibilityLabel: '创建安糖心语账号' }).props
+        .accessibilityState.disabled,
+    ).toBe(false);
+
+    act(() => {
+      tree!.root
+        .findByProps({ accessibilityLabel: '同意知情同意与隐私说明' })
+        .props.onPress();
+    });
+
+    expect(
+      tree!.root.findByProps({ accessibilityLabel: '创建安糖心语账号' }).props
+        .accessibilityState.disabled,
+    ).toBe(true);
+
+    act(() => {
+      tree!.root
+        .findByProps({ accessibilityLabel: "同意知情同意与隐私说明" })
+        .props.onPress();
+    });
+
     await act(async () => {
       tree!.root
         .findByProps({ accessibilityLabel: "创建安糖心语账号" })
