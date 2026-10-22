@@ -109,3 +109,21 @@ async def test_server_account_deletion_remains_available_with_new_roles(client):
             },
         )
     ).status_code == 401
+
+
+async def test_deployed_instrument_remains_available_only_to_patients(client, db_session):
+    path = "/api/v1/health-profile/psychosocial-instrument"
+    assert (await client.get(path)).status_code == 401
+    patient, headers = await signup(client)
+    response = await client.get(path, headers=headers)
+    assert response.status_code == 200
+    instrument = response.json()
+    assert instrument["id"] == "antang-behavior-v1"
+    assert len(instrument["questions"]) == 6
+    assert {q["kind"] for q in instrument["questions"]} == {"behavior", "worry"}
+    assert [option["value"] for option in instrument["options"]] == list(range(5))
+    assert [option["value"] for option in instrument["gold_options"]] == list(range(1, 8))
+    assert "不是标准化量表" in instrument["disclaimer"]
+    for role in (UserRole.CLINICIAN, UserRole.RESEARCHER):
+        await set_user_role(db_session, username=patient["user"]["username"], role=role, maintainer="test-sync")
+        assert (await client.get(path, headers=headers)).status_code == 403
