@@ -930,6 +930,7 @@ export class ApiClient {
       {
         method: 'POST',
         body: JSON.stringify({
+          answers: input.answers,
           fear_behavior_percent: input.fearBehaviorPercent,
           fear_worry_percent: input.fearWorryPercent,
           gold_score: input.goldScore,

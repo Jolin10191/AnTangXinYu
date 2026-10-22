@@ -525,16 +525,28 @@ class HealthProfileResponse(BaseModel):
     heart_rate_trend: list[HeartRateTrendPointResponse]
 
 
+class InstrumentAnswerRequest(BaseModel):
+    """患者在一道题上的选择。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: Annotated[str, Field(min_length=1, max_length=64)]
+    value: Annotated[int, Field(ge=0, le=100)]
+
+
 class PsychosocialAssessmentRequest(BaseModel):
-    """一次 HFS-II 与 Gold score 评估的得分率。
+    """一次心理社会评估：可以交逐题答案，也可以只交两个百分比。
 
     存百分比而不是原始分，因为 HFS 有 33 题、13 题、9 题三个版本，分母不同。
+    带 `answers` 时百分比由服务端按当前题库重算（换量表不用重打包）；不带时沿用
+    客户端算好的百分比，保证还没升级的 App 仍能提交。
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    fear_behavior_percent: Annotated[int, Field(ge=0, le=100)]
-    fear_worry_percent: Annotated[int, Field(ge=0, le=100)]
+    answers: list[InstrumentAnswerRequest] | None = None
+    fear_behavior_percent: Annotated[int, Field(ge=0, le=100)] | None = None
+    fear_worry_percent: Annotated[int, Field(ge=0, le=100)] | None = None
     gold_score: Annotated[int | None, Field(ge=1, le=7)] = None
     instrument: Annotated[str, Field(max_length=64)] = "HFS-II"
     assessed_at: datetime
@@ -547,6 +559,16 @@ class PsychosocialAssessmentRequest(BaseModel):
         if value.tzinfo is None:
             raise ValueError("assessed_at 必须带时区")
         return value
+
+    @model_validator(mode="after")
+    def require_a_score(self) -> "PsychosocialAssessmentRequest":
+        """逐题答案与两个百分比至少要有一份，否则这次提交没有意义。"""
+
+        if self.answers is None and (
+            self.fear_behavior_percent is None or self.fear_worry_percent is None
+        ):
+            raise ValueError("要么带逐题答案，要么带两个百分比")
+        return self
 
 
 class InstrumentOptionResponse(BaseModel):

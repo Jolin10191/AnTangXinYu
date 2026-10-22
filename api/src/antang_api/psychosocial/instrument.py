@@ -9,6 +9,7 @@
 `api/src/antang_api/psychosocial/store.py` 的接口一致。
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
@@ -105,3 +106,41 @@ def current_instrument() -> Instrument:
     """
 
     return SELF_REPORT_INSTRUMENT
+
+
+def score_answers(answers: Mapping[str, int]) -> tuple[int, int]:
+    """把逐题答案折成（行为百分比, 担忧百分比）。
+
+    百分比在服务端算，App 只上传「哪道题选了哪个值」。这样换量表、加反向计分、
+    拆分量表都只改这一处，装过的包不用动。缺题、越界或不属于当前题库一律报错：
+    心理状态的分档会影响联系频率，宁可这一轮失败，也不要存一个算错的分。
+    """
+
+    instrument = current_instrument()
+    questions = {question.id: question for question in instrument.questions}
+    allowed = {option.value for option in instrument.options}
+    max_value = max(allowed)
+
+    unknown = [question_id for question_id in answers if question_id not in questions]
+    if unknown:
+        raise ValueError(f"没有这道题：{unknown[0]}")
+    missing = [question_id for question_id in questions if question_id not in answers]
+    if missing:
+        raise ValueError(f"还有题没答：{missing[0]}")
+    for question_id, value in answers.items():
+        if value not in allowed:
+            raise ValueError(f"「{questions[question_id].text}」的选择不在选项里")
+
+    def percent_of(kind: QuestionKind) -> int:
+        values = [
+            answers[question_id]
+            for question_id, question in questions.items()
+            if question.kind == kind
+        ]
+        denominator = len(values) * max_value
+        if denominator <= 0:
+            return 0
+        # 四舍五入到整数，与 App 本地算的口径一致（Python 的 round 是银行家舍入）。
+        return (sum(values) * 100 * 2 + denominator) // (denominator * 2)
+
+    return percent_of("behavior"), percent_of("worry")

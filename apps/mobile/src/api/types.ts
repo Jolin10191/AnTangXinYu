@@ -1685,6 +1685,8 @@ export type PsychosocialAssessmentInput = {
   goldScore: number | null;
   instrument: string;
   assessedAt: string;
+  // 逐题选择：百分比也照传（兼容还没升级的后端），但真正算分的是服务端。
+  answers: { id: string; value: number }[];
 };
 
 export type InstrumentOption = { value: number; label: string };

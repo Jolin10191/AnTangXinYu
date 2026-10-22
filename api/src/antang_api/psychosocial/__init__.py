@@ -1,4 +1,8 @@
-from antang_api.psychosocial.instrument import Instrument, current_instrument
+from antang_api.psychosocial.instrument import (
+    Instrument,
+    current_instrument,
+    score_answers,
+)
 from antang_api.psychosocial.store import (
     read_latest_assessment,
     read_latest_assessment_row,
@@ -21,4 +25,5 @@ __all__ = [
     "read_latest_assessment_row",
     "record_assessment",
     "render_guidance",
+    "score_answers",
 ]

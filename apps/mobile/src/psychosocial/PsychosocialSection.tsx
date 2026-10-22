@@ -125,6 +125,11 @@ export function PsychosocialSection({ api }: PsychosocialSectionProps) {
         goldScore,
         instrument: instrument.id,
         assessedAt: new Date().toISOString(),
+        // 逐题选择一起交上去：服务端按当前题库算分，换量表不用重打包。
+        answers: questions.map((question) => ({
+          id: question.id,
+          value: answers[question.id],
+        })),
       });
       if (!mountedRef.current) return;
       setProfile(saved);
