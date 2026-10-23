@@ -151,14 +151,18 @@ export function FearBehaviorSection({ api }: FearBehaviorSectionProps) {
             {mentionSentence(summary)}这些是聊天里顺口提到的，不是量表，也不打分。
           </Text>
 
-          {BEHAVIOR_ORDER.filter(
-            (kind) => (summary.behaviorCounts[kind] ?? 0) > 0,
-          ).map((kind) => (
-            <View key={kind} style={styles.row}>
-              <View style={styles.rowDot} />
-              <Text style={styles.rowLabel}>{behaviorLabel(kind)}</Text>
-            </View>
-          ))}
+          {/* 行为改成可换行的小标签：原来是「标签 ─ 次数」两列，次数撤掉后
+              右侧会空出一大块，看着像排版坏了。 */}
+          <View style={styles.chips}>
+            {BEHAVIOR_ORDER.filter(
+              (kind) => (summary.behaviorCounts[kind] ?? 0) > 0,
+            ).map((kind) => (
+              <View key={kind} style={styles.chip}>
+                <View style={styles.rowDot} />
+                <Text style={styles.rowLabel}>{behaviorLabel(kind)}</Text>
+              </View>
+            ))}
+          </View>
 
           {summary.beliefs.length > 0 ? (
             <View style={styles.beliefBlock}>
@@ -442,14 +446,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
-  row: {
+  chips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    marginTop: spacing.xxs,
+  },
+  chip: {
     alignItems: 'center',
-    backgroundColor: colors.paperMuted,
+    backgroundColor: colors.primarySoft,
     borderRadius: radii.sm,
     flexDirection: 'row',
-    gap: spacing.xs,
-    justifyContent: 'space-between',
-    marginTop: spacing.xxs,
+    gap: 6,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
   },

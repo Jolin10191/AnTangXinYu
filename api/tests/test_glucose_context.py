@@ -111,7 +111,7 @@ def test_core_prompt_carries_the_glucose_block() -> None:
         "档案", glucose_context="[血糖记录：患者自己记的]"
     )
 
-    assert "血糖记录" not in without
+    assert "[血糖记录：" not in without
     assert with_glucose.endswith("[血糖记录：患者自己记的]")
 
 

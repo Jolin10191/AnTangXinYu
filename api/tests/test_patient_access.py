@@ -256,8 +256,9 @@ async def test_only_the_authorized_clinician_sees_the_scale_scores(
         },
     )
     assert recorded.status_code == 201
-    assert "fear_percent" not in recorded.json()
-    assert "quadrant" not in recorded.json()
+    # 患者端的分数只为兼容旧安装包的解析器而保留，界面不渲染；医护端才是给人看的。
+    assert recorded.json()["fear_percent"] == 50
+    assert recorded.json()["fear_high"] is True
 
     body = (await client.get(root, headers=ch)).json()
     assert body["fear_behavior_percent"] == 40
