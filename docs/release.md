@@ -35,7 +35,11 @@ properties 包含 `storePassword`、`keyAlias`、`keyPassword`。构建脚本将
 
 ## 更新检查与分发
 
-患者侧边栏的「检查更新」读取所选后端地址的 `/download/latest.json`，比较 versionCode，确认后可在应用内下载并交给 Android 系统安装器；权限不足或安装器启动失败会明确报错。清单不可用会明确报错。
+「检查更新」在**设置页**（`apps/mobile/src/settings/settings-screen.tsx`）：显示当前版本号、手动检查、自动检查开关。侧边栏不再单独挂这一行——它属于设置里的一件事，不是每天要点的主功能。
+
+打开 App 或从后台回到前台会自动查一次，**同一天最多一次**（节流记在安全存储里）；查到新版本时弹 `apps/mobile/src/update/update-prompt.tsx`，显示版本号、更新说明和大小，点「下载并安装」走 `downloadAndInstall()`：下载到缓存 → 核对字节数 → `content://` 交给系统安装器。说「今天先不更新」按 versionCode 记住，同一个版本不再弹，出了更新版本会重新提示。
+
+检查读取所选后端地址的 `/download/latest.json`，比较 versionCode；清单不可用、字段缺失都明确报错，不拿「已是最新」糊过去。
 
 **患者看到的是版本号，不是提交号。** 界面上只有「当前版本 1.0.0」这一行；`built_from_commit` 与 `features` 只在清单里，供维护者排查「某台手机装的是哪份代码、这版开了哪些开关」。
 

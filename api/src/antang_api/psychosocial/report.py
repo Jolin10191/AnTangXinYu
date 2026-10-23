@@ -40,7 +40,12 @@ def clinician_assessment_response(
 def patient_assessment_response(
     row: PsychosocialAssessment,
 ) -> PsychosocialProfileResponse:
-    """患者端只回行为结果，不回分数。"""
+    """患者端的响应。
+
+    保留分数是兼容旧安装包：`26102301` 的解析器要求 `fear_percent` 等字段，
+    缺一个就整块卡片报错。App 界面上没有任何地方渲染这些分，所以「患者看不到
+    分数」这条仍然成立；真正的收窄等宽容解析的包换上去之后再删这几行。
+    """
 
     profile = PsychosocialProfile(
         fear_behavior_percent=row.fear_behavior_percent,
@@ -50,5 +55,10 @@ def patient_assessment_response(
     return PsychosocialProfileResponse(
         assessed_at=row.assessed_at,
         instrument=row.instrument,
+        fear_percent=profile.fear_percent,
+        fear_high=profile.fear_high,
+        gold_score=profile.gold_score,
+        awareness=profile.awareness,
+        quadrant=profile.quadrant,
         weekly_contact_limit=profile.weekly_contact_limit,
     )

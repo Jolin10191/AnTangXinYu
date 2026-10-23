@@ -601,15 +601,21 @@ class PsychosocialInstrumentResponse(BaseModel):
 
 
 class PsychosocialProfileResponse(BaseModel):
-    """服务器给 App 看的档位；不返回量表原始题目、逐题答案，也不返回分数。
+    """服务器给 App 看的档位；不返回量表原始题目与逐题答案。
 
-    刻意不返回任何分数：回避分量表是我们自己写的六道题，把「你的回避倾向
-    78 分」摆在患者面前，等于每天替医生下一个诊断，而这个分数撑不起那个
-    分量。分数、意识水平与象限只走医护端（ClinicianPsychosocialResponse）。
+    这些分数**不再展示**在 App 上，医护端另有 `ClinicianPsychosocialResponse`。
+    但 `26102301` 及更早的安装包在解析时要求它们存在（缺一个就报「必须是非负
+    整数」，整个沟通方式与行为记录卡片都打不开），所以在旧包淘汰之前仍然返回，
+    只是没有界面渲染。等宽容解析的包换掉旧包之后，删掉这几行即可。
     """
 
     assessed_at: datetime
     instrument: str
+    fear_percent: int
+    fear_high: bool
+    gold_score: int | None
+    awareness: str
+    quadrant: str
     weekly_contact_limit: int
 
 
