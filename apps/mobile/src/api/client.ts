@@ -69,6 +69,13 @@ import {
   type MedicationLog,
   type GlucoseSummary,
   parseGlucoseSummary,
+  type CgmImportPreview,
+  type CgmImportResult,
+  type CgmSeries,
+  type CgmSourceSystem,
+  parseCgmImportPreview,
+  parseCgmImportResult,
+  parseCgmSeries,
 } from "./types";
 
 export type FetchFunction = (
@@ -146,6 +153,26 @@ async function responseJson(response: FetchResponse): Promise<unknown> {
       `服务器返回 HTTP ${response.status}，响应内容不是有效 JSON`,
     );
   }
+}
+
+// 上传本地文件（录音、导出的 CSV）。expo 的 fetch 认这个 { bytes, name, type } 形状，
+// 手写成 Blob 反而在 RN 上拿不到内容。
+function uploadForm(file: {
+  mimeType: string;
+  name: string;
+  uri: string;
+}): FormData {
+  const form = new FormData();
+  const body = new File(file.uri);
+  form.append(
+    "file",
+    {
+      bytes: () => body.bytes(),
+      name: file.name,
+      type: file.mimeType,
+    } as unknown as Blob,
+  );
+  return form;
 }
 
 export class ApiClient {
@@ -990,6 +1017,19 @@ export class ApiClient {
     if (!response.ok) throw await this.apiError(response);
   }
 
+  /**
+   * 导出患者自己的全部记录。返回原文 + 服务器给的 content-disposition，
+   * 文件名解析、落盘与分享交给调用方，这样 API 层不依赖 expo-file-system。
+   */
+  async exportMyData(): Promise<{ contentDisposition: string | null; body: string }> {
+    const response = await this.authorizedFetch("/api/v1/health-profile/export");
+    if (!response.ok) throw await this.apiError(response);
+    return {
+      contentDisposition: response.headers.get("content-disposition"),
+      body: await response.text(),
+    };
+  }
+
   async createMedicationLog(input: {
     takenAt: string;
     name: string;
@@ -1112,6 +1152,41 @@ export class ApiClient {
       { method: 'DELETE' },
     );
     if (!response.ok) throw await this.apiError(response);
+  }
+
+  /**
+   * 传感器导出文件先解析、不落库：给患者看清楚多少行能用、哪些行有问题，再决定导不导。
+   */
+  async previewGlucoseImport(
+    file: { mimeType: string; name: string; uri: string },
+    sourceSystem: CgmSourceSystem = "generic",
+  ): Promise<CgmImportPreview> {
+    const response = await this.authorizedFetch(
+      `/api/v1/health-profile/glucose-imports/preview?source_system=${sourceSystem}`,
+      { body: uploadForm(file), method: "POST" },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseCgmImportPreview(await responseJson(response));
+  }
+
+  async importGlucoseCsv(
+    file: { mimeType: string; name: string; uri: string },
+    sourceSystem: CgmSourceSystem = "generic",
+  ): Promise<CgmImportResult> {
+    const response = await this.authorizedFetch(
+      `/api/v1/health-profile/glucose-imports?source_system=${sourceSystem}`,
+      { body: uploadForm(file), method: "POST" },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseCgmImportResult(await responseJson(response));
+  }
+
+  async getCgmSamples(days = 7): Promise<CgmSeries> {
+    const response = await this.authorizedFetch(
+      `/api/v1/health-profile/cgm-samples?days=${days}`,
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseCgmSeries(await responseJson(response));
   }
 
   async transcribeVoice(recording: {

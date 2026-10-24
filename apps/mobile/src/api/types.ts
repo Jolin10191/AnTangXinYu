@@ -4,6 +4,8 @@ export type User = {
   role: "patient" | "clinician" | "researcher";
   fullName?: string | null;
   applicationStatus?: ApplicationStatus | null;
+  /** 注册时刻（ISO 8601）。旧后端没有这个字段，「我的」页就不显示注册天数。 */
+  createdAt?: string | null;
 };
 
 export type ApplicationStatus = "pending" | "approved" | "rejected";
@@ -689,6 +691,10 @@ export function parseUser(value: unknown): User {
               ? null
               : parseApplicationStatus(data.application_status),
         }),
+    // 旧后端不返回 created_at，缺字段就不显示注册天数，而不是把整次登录判成格式错误。
+    ...(typeof data.created_at === "string"
+      ? { createdAt: data.created_at }
+      : {}),
   };
 }
 
@@ -2274,4 +2280,144 @@ export function parseMedicationLog(value: unknown): MedicationLog {
 export function parseMedicationLogs(value: unknown): MedicationLog[] {
   if (!Array.isArray(value)) throw new Error("用药记录格式不正确");
   return value.map(parseMedicationLog);
+}
+
+export type CgmSourceSystem =
+  | "sibionics"
+  | "nightscout"
+  | "libre"
+  | "dexcom"
+  | "generic";
+
+export const CGM_SOURCE_LABELS: Record<CgmSourceSystem, string> = {
+  sibionics: "硅基",
+  nightscout: "Nightscout",
+  libre: "雅培",
+  dexcom: "德康",
+  generic: "其他",
+};
+
+export type CgmSample = {
+  recordedAt: string;
+  valueMgDl: number;
+  trend: string | null;
+  sourceSystem?: string;
+};
+
+export type CgmImportPreview = {
+  sourceSystem: string;
+  fileName: string;
+  unit: string;
+  totalRows: number;
+  usableRows: number;
+  problems: string[];
+  firstAt: string | null;
+  lastAt: string | null;
+  samples: CgmSample[];
+};
+
+export type CgmImportResult = {
+  id: string;
+  sourceSystem: string;
+  fileName: string;
+  parsedCount: number;
+  insertedCount: number;
+  skippedCount: number;
+  createdAt: string;
+};
+
+export type CgmSeries = {
+  days: number;
+  count: number;
+  samples: CgmSample[];
+};
+
+function cgmObject(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("传感器数据格式不正确");
+  }
+  return value as Record<string, unknown>;
+}
+
+function cgmString(data: Record<string, unknown>, key: string): string {
+  const value = data[key];
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`传感器数据缺少 ${key}`);
+  }
+  return value;
+}
+
+function cgmNumber(data: Record<string, unknown>, key: string): number {
+  const value = data[key];
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`传感器数据缺少 ${key}`);
+  }
+  return value;
+}
+
+function cgmTimeOrNull(data: Record<string, unknown>, key: string): string | null {
+  const value = data[key];
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string" || Number.isNaN(Date.parse(value))) {
+    throw new Error(`传感器数据里的 ${key} 不是时间`);
+  }
+  return value;
+}
+
+function cgmStringList(data: Record<string, unknown>, key: string): string[] {
+  const value = data[key];
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new Error(`传感器数据的 ${key} 不是列表`);
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+export function parseCgmSamples(value: unknown): CgmSample[] {
+  if (!Array.isArray(value)) throw new Error("传感器数据列表格式不正确");
+  return value.map((item) => {
+    const data = cgmObject(item);
+    return {
+      recordedAt: cgmString(data, "recorded_at"),
+      valueMgDl: cgmNumber(data, "value_mg_dl"),
+      trend: typeof data.trend === "string" ? data.trend : null,
+      sourceSystem:
+        typeof data.source_system === "string" ? data.source_system : undefined,
+    };
+  });
+}
+
+export function parseCgmImportPreview(value: unknown): CgmImportPreview {
+  const data = cgmObject(value);
+  return {
+    sourceSystem: cgmString(data, "source_system"),
+    fileName: cgmString(data, "file_name"),
+    unit: cgmString(data, "unit"),
+    totalRows: cgmNumber(data, "total_rows"),
+    usableRows: cgmNumber(data, "usable_rows"),
+    problems: cgmStringList(data, "problems"),
+    firstAt: cgmTimeOrNull(data, "first_at"),
+    lastAt: cgmTimeOrNull(data, "last_at"),
+    samples: parseCgmSamples(data.samples ?? []),
+  };
+}
+
+export function parseCgmImportResult(value: unknown): CgmImportResult {
+  const data = cgmObject(value);
+  return {
+    id: cgmString(data, "id"),
+    sourceSystem: cgmString(data, "source_system"),
+    fileName: cgmString(data, "file_name"),
+    parsedCount: cgmNumber(data, "parsed_count"),
+    insertedCount: cgmNumber(data, "inserted_count"),
+    skippedCount: cgmNumber(data, "skipped_count"),
+    createdAt: cgmString(data, "created_at"),
+  };
+}
+
+export function parseCgmSeries(value: unknown): CgmSeries {
+  const data = cgmObject(value);
+  return {
+    days: cgmNumber(data, "days"),
+    count: cgmNumber(data, "count"),
+    samples: parseCgmSamples(data.samples ?? []),
+  };
 }

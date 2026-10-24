@@ -11,6 +11,7 @@ import {
 
 import type { ApiClient } from "../api/client";
 import type {
+  CgmSample,
   GlucoseReading,
   GlucoseSummary,
   MealLog,
@@ -18,6 +19,12 @@ import type {
   WearableDashboard,
 } from "../api/types";
 import { colors, radii, spacing, typefaces } from "../ui/theme";
+import { DeviceChannels } from "./device-channels";
+import type {
+  GadgetbridgeController,
+  HealthConnectController,
+} from "./device-channels";
+import { EventTimeField } from "../ui/event-time-field";
 
 export type RecordTabKey = "glucose" | "meals" | "medication" | "activity" | "sleep";
 
@@ -37,6 +44,23 @@ const GLUCOSE_CONTEXT_LABELS: Record<string, string> = {
   night: "夜间",
   other: "随时",
 };
+
+// 数值从哪来：指尖血、传感器、化验单……患者自己知道，界面上要能看见。
+const SOURCE_LABELS: Record<string, string> = {
+  fingerstick: "指尖血",
+  cgm: "传感器",
+  lab: "化验单",
+  manual: "手动",
+  report: "报告解读",
+};
+
+function recordedNote(reading: GlucoseReading): string | null {
+  const measured = new Date(reading.measuredAt).getTime();
+  const created = new Date(reading.createdAt).getTime();
+  if (Number.isNaN(measured) || Number.isNaN(created)) return null;
+  if (Math.abs(created - measured) < 5 * 60_000) return null;
+  return `测量在 ${formatMeasuredAt(reading.measuredAt)}，记录在 ${formatMeasuredAt(reading.createdAt)}`;
+}
 
 const MEAL_LABELS: Record<string, string> = {
   breakfast: "早餐",
@@ -58,14 +82,7 @@ const PORTIONS: { label: string; grams: number }[] = [
   { label: "两碗", grams: 80 },
 ];
 
-// 记的是真实发生的时间：下午才想起早上十点吃的药，就选「3 小时前」而不是现在。
-const EVENT_OFFSETS: { label: string; minutes: number }[] = [
-  { label: "刚才", minutes: 0 },
-  { label: "30 分钟前", minutes: 30 },
-  { label: "1 小时前", minutes: 60 },
-  { label: "2 小时前", minutes: 120 },
-  { label: "3 小时前", minutes: 180 },
-];
+// 记的是真实发生的时间：患者可以自己选到具体某天的某个时刻，见 EventTimeField。
 
 export function formatGlucose(reading: GlucoseReading): string {
   return `${(reading.valueMgDl / 18).toFixed(1)} mmol/L`;
@@ -104,10 +121,16 @@ type Props = {
     | "getMedicationLogs"
     | "createMedicationLog"
     | "deleteMedicationLog"
+    | "getCgmSamples"
     | "getWearableDashboard"
   >;
   onImport: () => void;
   onRecordGlucose: () => void;
+  /** 手环两条通道挂在 App 外壳上，这里展示它们的状态与失败原因。 */
+  healthConnect: HealthConnectController;
+  gadgetbridge: GadgetbridgeController;
+  /** tab 切到「记录」时刷新一次：对话里刚记下的饭/药要能立刻出现在列表里。 */
+  visible?: boolean;
 };
 
 /**
@@ -116,7 +139,14 @@ type Props = {
  *
  * 这是导航重构的提案实现：还没有接进 App.tsx，见 README-nav-v2.md。
  */
-export function RecordScreen({ api, onImport, onRecordGlucose }: Props) {
+export function RecordScreen({
+  api,
+  onImport,
+  onRecordGlucose,
+  healthConnect,
+  gadgetbridge,
+  visible = true,
+}: Props) {
   const [tab, setTab] = useState<RecordTabKey>("glucose");
   const [source, setSource] = useState<"manual" | "sensor">("manual");
 
@@ -125,6 +155,7 @@ export function RecordScreen({ api, onImport, onRecordGlucose }: Props) {
   const [meals, setMeals] = useState<MealLog[]>([]);
   const [medications, setMedications] = useState<MedicationLog[]>([]);
   const [dashboard, setDashboard] = useState<WearableDashboard | null>(null);
+  const [cgmSamples, setCgmSamples] = useState<CgmSample[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -133,15 +164,18 @@ export function RecordScreen({ api, onImport, onRecordGlucose }: Props) {
   const [mealType, setMealType] = useState<"breakfast" | "lunch" | "dinner" | "snack">(
     "lunch",
   );
-  const [mealMinutesAgo, setMealMinutesAgo] = useState(0);
+  const [mealAt, setMealAt] = useState<Date>(() => new Date());
   const [mealDescription, setMealDescription] = useState("");
   const [mealCarbs, setMealCarbs] = useState<string>("");
-  const [medMinutesAgo, setMedMinutesAgo] = useState(0);
+  const [medAt, setMedAt] = useState<Date>(() => new Date());
   const [medName, setMedName] = useState("");
   const [medDose, setMedDose] = useState("");
   const [medKind, setMedKind] = useState<"insulin" | "oral" | "other">("insulin");
 
   useEffect(() => {
+    if (!visible) {
+      return;
+    }
     let active = true;
     Promise.all([
       api.getGlucoseReadings(),
@@ -149,8 +183,9 @@ export function RecordScreen({ api, onImport, onRecordGlucose }: Props) {
       api.getMealLogs(),
       api.getMedicationLogs(),
       api.getWearableDashboard(),
+      api.getCgmSamples().catch(() => ({ days: 7, count: 0, samples: [] })),
     ])
-      .then(([rows, nextSummary, nextMeals, nextMedications, nextDashboard]) => {
+      .then(([rows, nextSummary, nextMeals, nextMedications, nextDashboard, series]) => {
         if (!active) {
           return;
         }
@@ -159,6 +194,7 @@ export function RecordScreen({ api, onImport, onRecordGlucose }: Props) {
         setMeals(nextMeals);
         setMedications(nextMedications);
         setDashboard(nextDashboard);
+        setCgmSamples(series.samples);
         setError(null);
       })
       .catch((cause: unknown) => {
@@ -174,9 +210,23 @@ export function RecordScreen({ api, onImport, onRecordGlucose }: Props) {
     return () => {
       active = false;
     };
-  }, [api]);
+  }, [api, visible]);
 
-  const manualReadings = readings.filter((reading) => reading.source !== "report");
+  // 「传感器」那一栏只看导入进来的 CGM；指尖血/化验单留在「手动」。
+  const manualReadings = readings.filter(
+    (reading) => reading.source !== "report" && reading.source !== "cgm",
+  );
+  const cgmSampleStats =
+    cgmSamples.length === 0
+      ? null
+      : {
+          average: (
+            cgmSamples.reduce((sum, sample) => sum + sample.valueMgDl, 0) /
+            cgmSamples.length /
+            18
+          ).toFixed(1),
+          low: cgmSamples.filter((sample) => sample.valueMgDl < 70).length,
+        };
 
   const totalSteps =
     dashboard?.sources.reduce(
@@ -198,7 +248,7 @@ export function RecordScreen({ api, onImport, onRecordGlucose }: Props) {
     setSaving(true);
     try {
       const created = await api.createMealLog({
-        eatenAt: eventIso(mealMinutesAgo),
+        eatenAt: mealAt.toISOString(),
         mealType,
         description: mealDescription.trim(),
         carbsGrams: mealCarbs.trim() === "" ? null : Number(mealCarbs),
@@ -206,6 +256,7 @@ export function RecordScreen({ api, onImport, onRecordGlucose }: Props) {
       setMeals((current) => [created, ...current]);
       setMealDescription("");
       setMealCarbs("");
+      setMealAt(new Date());
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "这餐没记上");
     } finally {
@@ -217,7 +268,7 @@ export function RecordScreen({ api, onImport, onRecordGlucose }: Props) {
     setSaving(true);
     try {
       const created = await api.createMedicationLog({
-        takenAt: eventIso(medMinutesAgo),
+        takenAt: medAt.toISOString(),
         name: medName.trim(),
         doseText: medDose.trim(),
         kind: medKind,
@@ -225,6 +276,7 @@ export function RecordScreen({ api, onImport, onRecordGlucose }: Props) {
       setMedications((current) => [created, ...current]);
       setMedName("");
       setMedDose("");
+      setMedAt(new Date());
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "这条用药没记上");
     } finally {
@@ -265,6 +317,8 @@ export function RecordScreen({ api, onImport, onRecordGlucose }: Props) {
       </ScrollView>
 
       <ScrollView contentContainerStyle={styles.body}>
+        <DeviceChannels gadgetbridge={gadgetbridge} healthConnect={healthConnect} />
+
         {loading ? <ActivityIndicator color={colors.primary} /> : null}
         {error !== null ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -322,9 +376,13 @@ export function RecordScreen({ api, onImport, onRecordGlucose }: Props) {
                     <Text style={styles.cardTitle}>{formatGlucose(reading)}</Text>
                     <Text style={styles.cardBody}>
                       {formatMeasuredAt(reading.measuredAt)} ·{" "}
+                      {SOURCE_LABELS[reading.source] ?? "手动"} ·{" "}
                       {GLUCOSE_CONTEXT_LABELS[reading.context] ?? reading.context}
                       {reading.note === null ? "" : ` ·「${reading.note}」`}
                     </Text>
+                    {recordedNote(reading) === null ? null : (
+                      <Text style={styles.cardHint}>{recordedNote(reading)}</Text>
+                    )}
                   </View>
                 ))}
                 <Pressable
@@ -339,11 +397,45 @@ export function RecordScreen({ api, onImport, onRecordGlucose }: Props) {
             ) : (
               <>
                 <View style={styles.card}>
-                  <Text style={styles.cardTitle}>还没有导入传感器数据</Text>
+                  <Text style={styles.cardTitle}>
+                    {cgmSamples.length === 0
+                      ? "还没有导入传感器数据"
+                      : `已导入 ${cgmSamples.length} 条`}
+                  </Text>
                   <Text style={styles.cardBody}>
                     从厂家 App 导出 CSV，先预览能用的行与可疑行，确认后才入库。
                   </Text>
                 </View>
+                {cgmSampleStats === null ? null : (
+                  <View style={styles.metricRow}>
+                    <View style={[styles.metricSmall, styles.metricSmallPrimary]}>
+                      <Text style={styles.metricSmallLabel}>平均值</Text>
+                      <Text style={styles.metricSmallValue}>
+                        {cgmSampleStats.average} mmol/L
+                      </Text>
+                    </View>
+                    <View style={[styles.metricSmall, styles.metricSmallSleep]}>
+                      <Text style={styles.metricSmallLabel}>低于 3.9</Text>
+                      <Text style={styles.metricSmallValue}>
+                        {cgmSampleStats.low} 次
+                      </Text>
+                    </View>
+                  </View>
+                )}
+                {cgmSamples
+                  .slice(-3)
+                  .reverse()
+                  .map((sample) => (
+                    <View key={`${sample.recordedAt}-${sample.valueMgDl}`} style={styles.card}>
+                      <Text style={styles.cardTitle}>
+                        {(sample.valueMgDl / 18).toFixed(1)}
+                        <Text style={styles.cardBody}> mmol/L</Text>
+                      </Text>
+                      <Text style={styles.cardBody}>
+                        {formatMeasuredAt(sample.recordedAt)} · 传感器
+                      </Text>
+                    </View>
+                  ))}
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="导入传感器数据"
@@ -454,35 +546,12 @@ export function RecordScreen({ api, onImport, onRecordGlucose }: Props) {
                   maxLength={3}
                 />
               </View>
-              <Text style={styles.fieldLabel}>这一餐是什么时候吃的</Text>
-              <View style={styles.chipRow}>
-                {EVENT_OFFSETS.map((option) => (
-                  <Pressable
-                    key={option.label}
-                    accessibilityRole="button"
-                    accessibilityLabel={`这一餐${option.label}`}
-                    onPress={() => setMealMinutesAgo(option.minutes)}
-                    style={[
-                      styles.chip,
-                      mealMinutesAgo === option.minutes ? styles.chipActive : null,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.chipText,
-                        mealMinutesAgo === option.minutes
-                          ? styles.chipTextActive
-                          : null,
-                      ]}
-                    >
-                      {option.label}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-              <Text style={styles.cardHint}>
-                记到 {formatMeasuredAt(eventIso(mealMinutesAgo))}，不是现在。
-              </Text>
+              <EventTimeField
+                accessibilityLabel="这一餐是什么时候吃的"
+                label="这一餐是什么时候吃的"
+                onChange={setMealAt}
+                value={mealAt}
+              />
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="保存这餐"
@@ -574,35 +643,12 @@ export function RecordScreen({ api, onImport, onRecordGlucose }: Props) {
                 style={styles.input}
                 maxLength={64}
               />
-              <Text style={styles.fieldLabel}>这次用药是什么时候</Text>
-              <View style={styles.chipRow}>
-                {EVENT_OFFSETS.map((option) => (
-                  <Pressable
-                    key={option.label}
-                    accessibilityRole="button"
-                    accessibilityLabel={`这次用药${option.label}`}
-                    onPress={() => setMedMinutesAgo(option.minutes)}
-                    style={[
-                      styles.chip,
-                      medMinutesAgo === option.minutes ? styles.chipActive : null,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.chipText,
-                        medMinutesAgo === option.minutes
-                          ? styles.chipTextActive
-                          : null,
-                      ]}
-                    >
-                      {option.label}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-              <Text style={styles.cardHint}>
-                记到 {formatMeasuredAt(eventIso(medMinutesAgo))}，不是现在。
-              </Text>
+              <EventTimeField
+                accessibilityLabel="这次用药是什么时候"
+                label="这次用药是什么时候"
+                onChange={setMedAt}
+                value={medAt}
+              />
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="保存这次用药"
@@ -621,15 +667,29 @@ export function RecordScreen({ api, onImport, onRecordGlucose }: Props) {
 
         {tab === "activity" ? (
           <>
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>手环里的运动</Text>
-              <Text style={styles.cardBody}>
-                近 7 天步数 {totalSteps.toLocaleString()} 步
-                {sleepSessions > 0 ? ` · 睡眠 ${sleepSessions} 段` : ""}
+            <View style={styles.metricCard}>
+              <Text style={styles.metricLabel}>近 7 天步数</Text>
+              <Text style={styles.metricValue}>
+                {totalSteps.toLocaleString()}
+                <Text style={styles.metricUnit}> 步</Text>
               </Text>
               <Text style={styles.cardHint}>
                 数据来自手环导入（华为运动健康 / Health Connect），不需要再手填。
               </Text>
+            </View>
+            <View style={styles.metricRow}>
+              <View style={[styles.metricSmall, styles.metricSmallPrimary]}>
+                <Text style={styles.metricSmallLabel}>活动</Text>
+                <Text style={styles.metricSmallValue}>
+                  {totalSteps > 0 ? "有记录" : "暂无"}
+                </Text>
+              </View>
+              <View style={[styles.metricSmall, styles.metricSmallSleep]}>
+                <Text style={styles.metricSmallLabel}>睡眠</Text>
+                <Text style={styles.metricSmallValue}>
+                  {sleepMinutes > 0 ? `${Math.round(sleepMinutes / 60)} 小时` : "暂无"}
+                </Text>
+              </View>
             </View>
             <View style={styles.card}>
               <Text style={styles.cardTitle}>对话里提到的回避</Text>
@@ -641,17 +701,32 @@ export function RecordScreen({ api, onImport, onRecordGlucose }: Props) {
         ) : null}
 
         {tab === "sleep" ? (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>手环里的睡眠</Text>
-            <Text style={styles.cardBody}>
-              {sleepMinutes > 0
-                ? `共 ${sleepSessions} 段，合计约 ${Math.round(sleepMinutes / 60)} 小时`
-                : "还没有导入睡眠数据"}
-            </Text>
-            <Text style={styles.cardHint}>
-              夜里的低血糖与夜间复测会标在同一段时间轴上；睡眠数据来自手环，不单独手填。
-            </Text>
-          </View>
+          <>
+            <View style={styles.metricCard}>
+              <Text style={styles.metricLabel}>近 7 天睡眠</Text>
+              <Text style={styles.metricValue}>
+                {sleepMinutes > 0 ? `约 ${Math.round(sleepMinutes / 60)} 小时` : "—"}
+              </Text>
+              <Text style={styles.cardBody}>
+                {sleepSessions > 0 ? `共 ${sleepSessions} 段` : "还没有导入睡眠数据"}
+              </Text>
+              <Text style={styles.cardHint}>来自手环导入，不用手动填。</Text>
+            </View>
+            <View style={styles.metricRow}>
+              <View style={[styles.metricSmall, styles.metricSmallSleep]}>
+                <Text style={styles.metricSmallLabel}>平均每段</Text>
+                <Text style={styles.metricSmallValue}>
+                  {sleepSessions > 0
+                    ? `约 ${Math.max(1, Math.round(sleepMinutes / sleepSessions / 60))} 小时`
+                    : "暂无"}
+                </Text>
+              </View>
+              <View style={[styles.metricSmall, styles.metricSmallPrimary]}>
+                <Text style={styles.metricSmallLabel}>数据段</Text>
+                <Text style={styles.metricSmallValue}>{sleepSessions} 段</Text>
+              </View>
+            </View>
+          </>
         ) : null}
       </ScrollView>
     </View>
@@ -762,6 +837,59 @@ const styles = StyleSheet.create({
     fontFamily: typefaces.sans,
     fontSize: 11.5,
     lineHeight: 17,
+  },
+  // 手环指标沿用健康看板的样子：一个数字 + 单位 + 一句说明，不是一段文字。
+  metricCard: {
+    backgroundColor: colors.paper,
+    borderRadius: radii.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.line,
+    padding: spacing.md,
+    gap: 2,
+  },
+  metricLabel: {
+    color: colors.muted,
+    fontFamily: typefaces.sans,
+    fontSize: 12,
+  },
+  metricValue: {
+    color: colors.ink,
+    fontFamily: typefaces.sansMedium,
+    fontSize: 34,
+    fontWeight: "600",
+  },
+  metricUnit: {
+    color: colors.muted,
+    fontFamily: typefaces.sans,
+    fontSize: 14,
+    fontWeight: "400",
+  },
+  metricRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  metricSmall: {
+    flex: 1,
+    borderRadius: radii.lg,
+    padding: spacing.sm,
+    gap: 2,
+  },
+  metricSmallPrimary: {
+    backgroundColor: colors.primarySoft,
+  },
+  metricSmallSleep: {
+    backgroundColor: "#EDEFFA",
+  },
+  metricSmallLabel: {
+    color: colors.muted,
+    fontFamily: typefaces.sans,
+    fontSize: 11.5,
+  },
+  metricSmallValue: {
+    color: colors.ink,
+    fontFamily: typefaces.sansMedium,
+    fontSize: 18,
+    fontWeight: "600",
   },
   fieldLabel: {
     color: colors.muted,

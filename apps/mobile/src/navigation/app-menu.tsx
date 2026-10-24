@@ -1,4 +1,4 @@
-import { Message01Icon } from '@hugeicons/core-free-icons';
+import { HeartCheckIcon, Message01Icon } from '@hugeicons/core-free-icons';
 import { useMemo } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -19,6 +19,8 @@ type Props = {
   activeConversationId?: string | null;
   onNewChat?: () => void;
   onClose: () => void;
+  onOpenCare?: () => void;
+  onOpenProfile?: () => void;
   onSelectConversation: (conversationId: string) => void;
   username: string;
   visible: boolean;
@@ -49,6 +51,8 @@ export function AppMenu({
   activeConversationId = null,
   onNewChat,
   onClose,
+  onOpenCare,
+  onOpenProfile,
   onSelectConversation,
   username,
   visible,
@@ -72,11 +76,19 @@ export function AppMenu({
         />
         <SafeAreaView edges={['top', 'bottom', 'left']} style={styles.panel}>
           <View style={styles.accountRow}>
-            <View style={styles.avatar}>
+            <Pressable
+              accessibilityLabel="打开我的资料"
+              accessibilityRole="button"
+              onPress={() => {
+                onClose();
+                onOpenProfile?.();
+              }}
+              style={styles.avatar}
+            >
               <Text style={styles.avatarText}>
                 {username.slice(0, 1).toUpperCase()}
               </Text>
-            </View>
+            </Pressable>
             <View style={styles.accountCopy}>
               <Text numberOfLines={1} style={styles.username}>
                 {username}
@@ -136,6 +148,23 @@ export function AppMenu({
               );
             })}
           </ScrollView>
+
+          {/* 主动关怀不属于任何一段对话，所以放在列表之外。 */}
+          <Pressable
+            accessibilityLabel="主动关怀"
+            accessibilityRole="button"
+            onPress={() => {
+              onClose();
+              onOpenCare?.();
+            }}
+            style={({ pressed }) => [styles.careRow, pressed && styles.pressed]}
+          >
+            <AppIcon color={colors.primaryPressed} icon={HeartCheckIcon} size={18} />
+            <View style={styles.careCopy}>
+              <Text style={styles.careTitle}>主动关怀</Text>
+              <Text style={styles.careHint}>糖糖主动发来的关心，可改频率</Text>
+            </View>
+          </Pressable>
         </SafeAreaView>
       </View>
     </Modal>
@@ -253,13 +282,37 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   conversationTime: {
-    width: 44,
+    width: 66,
     textAlign: 'right',
     color: colors.faint,
     fontFamily: typefaces.sans,
-    fontSize: 11,
+    fontSize: 10.5,
   },
   pressed: {
     opacity: 0.72,
+  },
+  careRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.md,
+    backgroundColor: colors.primarySoft,
+  },
+  careCopy: {
+    flex: 1,
+  },
+  careTitle: {
+    color: colors.primaryPressed,
+    fontFamily: typefaces.sansMedium,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  careHint: {
+    color: colors.muted,
+    fontFamily: typefaces.sans,
+    fontSize: 11,
   },
 });

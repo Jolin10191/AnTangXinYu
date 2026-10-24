@@ -9,7 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field
 GlucoseContext = Literal[
     "fasting", "pre_meal", "post_meal", "bedtime", "night", "other"
 ]
-GlucoseSource = Literal["manual", "report"]
+GlucoseSource = Literal["manual", "fingerstick", "cgm", "lab", "report"]
+# 「report」只由报告解读写入，患者手填/导入能选的来源是下面四个。
+GlucoseInputSource = Literal["fingerstick", "cgm", "lab", "manual"]
 
 
 class GlucoseReadingCreate(BaseModel):
@@ -24,6 +26,13 @@ class GlucoseReadingCreate(BaseModel):
         ),
     ]
     measured_at: Annotated[datetime, Field(description="测量时间，需带时区。")]
+    source: Annotated[
+        GlucoseInputSource,
+        Field(
+            default="fingerstick",
+            description="这条数值从哪里来：指尖血、传感器、化验单，或不确定时选手动。",
+        ),
+    ] = "fingerstick"
     context: Annotated[
         GlucoseContext,
         Field(default="other", description="测量场景：空腹、餐前、餐后、睡前、夜间或其他。"),

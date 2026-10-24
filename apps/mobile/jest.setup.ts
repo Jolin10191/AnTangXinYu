@@ -35,6 +35,11 @@ jest.mock('expo-intent-launcher', () => ({
   startActivityAsync: jest.fn(async () => undefined),
 }));
 
+jest.mock('expo-sharing', () => ({
+  isAvailableAsync: jest.fn(async () => true),
+  shareAsync: jest.fn(async () => undefined),
+}));
+
 // 安全存储没有原生实现，用一份内存实现替身；测试可以用 __resetSecureStore()
 // 在两个用例之间把键值清干净。
 jest.mock('expo-secure-store', () => {

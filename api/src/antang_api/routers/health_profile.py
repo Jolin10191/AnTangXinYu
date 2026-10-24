@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from antang_api.export import build_patient_export
 from antang_api.behavioral import (
     BEHAVIOR_KIND_LABELS,
     delete_behavior_log,
@@ -621,6 +622,7 @@ async def create_glucose_reading(
         user_id=user.id,
         value_mg_dl=payload.value_mg_dl,
         measured_at=payload.measured_at,
+        source=payload.source,
         context=payload.context,
         note=payload.note,
     )
@@ -978,3 +980,26 @@ async def delete_medication_log(
         raise HTTPException(status_code=404, detail="没有这条记录")
     await session.delete(log)
     await session.commit()
+
+
+@router.get("/export")
+async def export_patient_data(
+    user: Annotated[User, Depends(get_patient_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> JSONResponse:
+    """把患者自己的数据打包成一份 JSON 下载。
+
+    为什么不返回 pydantic 模型：这份东西的字段会随版本演进，用 `dict` + 版本号
+    比一层层 `model_validate` 更适合「导出后长期可读」。filename 带上日期，方便
+    患者自己存放多份。
+    """
+
+    payload = await build_patient_export(session, user)
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M")
+    return JSONResponse(
+        content=payload,
+        headers={
+            "Content-Disposition": f'attachment; filename="antang-export-{stamp}.json"',
+            "Cache-Control": "no-store",
+        },
+    )

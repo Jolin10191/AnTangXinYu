@@ -53,8 +53,6 @@ describe('CareSettingsModal', () => {
           onClose={jest.fn()}
           onEnableBackgroundHealth={enableBackgroundHealth}
           onDisableBackgroundHealth={jest.fn()}
-          onLogout={jest.fn()}
-          onAccountDeleted={jest.fn()}
           onRequestNotificationPermission={requestNotificationPermission}
           visible
         />,
@@ -85,9 +83,6 @@ describe('CareSettingsModal', () => {
       tree!.root.findByProps({ accessibilityLabel: '日常关怀频率：关闭' })
         .props.accessibilityState,
     ).toEqual({ selected: true });
-    expect(
-      tree!.root.findByProps({ accessibilityLabel: '退出当前账号' }),
-    ).toBeTruthy();
     act(() => tree!.unmount());
   });
 
@@ -112,8 +107,6 @@ describe('CareSettingsModal', () => {
           onClose={jest.fn()}
           onDisableBackgroundHealth={jest.fn()}
           onEnableBackgroundHealth={jest.fn()}
-          onLogout={jest.fn()}
-          onAccountDeleted={jest.fn()}
           onRequestNotificationPermission={jest.fn()}
           visible
         />,
@@ -157,8 +150,6 @@ describe('CareSettingsModal', () => {
           onClose={jest.fn()}
           onEnableBackgroundHealth={enableBackgroundHealth}
           onDisableBackgroundHealth={jest.fn()}
-          onLogout={jest.fn()}
-          onAccountDeleted={jest.fn()}
           onRequestNotificationPermission={requestNotificationPermission}
           visible
         />,
@@ -237,8 +228,6 @@ describe('CareSettingsModal', () => {
           onClose={jest.fn()}
           onDisableBackgroundHealth={disableBackgroundHealth}
           onEnableBackgroundHealth={jest.fn()}
-          onLogout={jest.fn()}
-          onAccountDeleted={jest.fn()}
           onRequestNotificationPermission={jest.fn()}
           visible
         />,
@@ -277,8 +266,6 @@ describe('CareSettingsModal', () => {
           onClose={jest.fn()}
           onDisableBackgroundHealth={disableBackgroundHealth}
           onEnableBackgroundHealth={jest.fn()}
-          onLogout={jest.fn()}
-          onAccountDeleted={jest.fn()}
           onRequestNotificationPermission={jest.fn()}
           visible
         />,
@@ -316,8 +303,6 @@ describe('CareSettingsModal', () => {
           onClose={jest.fn()}
           onDisableBackgroundHealth={jest.fn().mockResolvedValue(undefined)}
           onEnableBackgroundHealth={jest.fn()}
-          onLogout={jest.fn()}
-          onAccountDeleted={jest.fn()}
           onRequestNotificationPermission={jest.fn()}
           visible
         />,
@@ -357,8 +342,6 @@ describe('CareSettingsModal', () => {
           onClose={jest.fn()}
           onDisableBackgroundHealth={jest.fn().mockResolvedValue(undefined)}
           onEnableBackgroundHealth={jest.fn()}
-          onLogout={jest.fn()}
-          onAccountDeleted={jest.fn()}
           onRequestNotificationPermission={jest.fn()}
           visible
         />,
@@ -368,63 +351,6 @@ describe('CareSettingsModal', () => {
     expect(
       tree!.root.findByProps({ accessibilityLabel: '关闭后台周期检查' }),
     ).toBeTruthy();
-    act(() => tree!.unmount());
-  });
-  test('deletes the account only after the password is confirmed', async () => {
-    const deleteAccount = jest.fn().mockResolvedValue(undefined);
-    const onAccountDeleted = jest.fn();
-    const api = {
-      getProactiveCareSettings: jest.fn().mockResolvedValue(settings),
-      putProactiveCareSettings: jest.fn(),
-      deleteAccount,
-    } as unknown as ApiClient;
-    let tree: ReturnType<typeof create>;
-
-    await act(async () => {
-      tree = create(
-        <CareSettingsModal
-          api={api}
-          backgroundHealthEnabling={false}
-          backgroundHealthDisabling={false}
-          backgroundHealthError={null}
-          backgroundHealthStatus="disabled"
-          notificationPermission="undetermined"
-          notificationRegistrationFailed={false}
-          notificationRequesting={false}
-          onClose={jest.fn()}
-          onEnableBackgroundHealth={jest.fn()}
-          onDisableBackgroundHealth={jest.fn()}
-          onLogout={jest.fn()}
-          onAccountDeleted={onAccountDeleted}
-          onRequestNotificationPermission={jest.fn()}
-          visible
-        />,
-      );
-    });
-
-    act(() => {
-      tree!.root.findByProps({ accessibilityLabel: '注销账号' }).props.onPress();
-    });
-    expect(deleteAccount).not.toHaveBeenCalled();
-    expect(
-      tree!.root.findByProps({ accessibilityLabel: '确认注销并删除全部数据' })
-        .props.disabled,
-    ).toBe(true);
-
-    act(() => {
-      tree!.root
-        .findByProps({ accessibilityLabel: '注销账号时输入登录密码' })
-        .props.onChangeText('correct-password');
-    });
-
-    await act(async () => {
-      tree!.root
-        .findByProps({ accessibilityLabel: '确认注销并删除全部数据' })
-        .props.onPress();
-    });
-
-    expect(deleteAccount).toHaveBeenCalledWith('correct-password');
-    expect(onAccountDeleted).toHaveBeenCalledTimes(1);
     act(() => tree!.unmount());
   });
 });

@@ -2,6 +2,7 @@ import { act, create, type ReactTestRenderer } from "react-test-renderer";
 
 import type { GlucoseReading, GlucoseSummary, MealLog, MedicationLog } from "../api/types";
 import { RecordScreen, formatGlucose, formatMeasuredAt } from "./record-screen";
+import { fakeGadgetbridge, fakeHealthConnect } from "./device-controllers.fake";
 
 const READING: GlucoseReading = {
   id: "00000000-0000-0000-0000-000000000001",
@@ -85,6 +86,7 @@ function fakeApi(overrides: Record<string, unknown> = {}) {
     createMedicationLog: jest.fn(async () => MEDICATION),
     deleteMedicationLog: jest.fn(async () => undefined),
     getWearableDashboard: jest.fn(async () => DASHBOARD),
+    getCgmSamples: jest.fn(async () => ({ days: 7, count: 0, samples: [] })),
     ...overrides,
   };
 }
@@ -98,6 +100,8 @@ async function mount(
     renderer = create(
       <RecordScreen
         api={api as never}
+        gadgetbridge={fakeGadgetbridge()}
+        healthConnect={fakeHealthConnect()}
         onImport={handlers.onImport ?? (() => undefined)}
         onRecordGlucose={handlers.onRecordGlucose ?? (() => undefined)}
       />,

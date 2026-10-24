@@ -26,6 +26,24 @@ const CONTEXT_LABELS: Record<string, string> = Object.fromEntries(
 
 const DAYS = 14;
 
+// 数值从哪来。患者自己分的清指尖血和传感器，界面上就该写出来。
+const SOURCE_LABELS: Record<string, string> = {
+  fingerstick: '指尖血',
+  cgm: '传感器',
+  lab: '化验单',
+  manual: '手动',
+  report: '报告解读',
+};
+
+/** 补记时要写明「测量」和「记录」不是同一时刻，否则看不出这条是事后补的。 */
+function recordedLate(item: GlucoseReading): string | null {
+  const measured = new Date(item.measuredAt).getTime();
+  const recorded = new Date(item.createdAt).getTime();
+  if (Number.isNaN(measured) || Number.isNaN(recorded)) return null;
+  if (Math.abs(recorded - measured) < 5 * 60_000) return null;
+  return `测量在 ${formatDay(item.measuredAt)} ${formatTime(item.measuredAt)}，记录在 ${formatDay(item.createdAt)} ${formatTime(item.createdAt)}`;
+}
+
 type Props = {
   api: Pick<
     ApiClient,
@@ -245,6 +263,7 @@ export function GlucoseScreen({ api }: Props) {
             <Text style={styles.dayLabel}>{day}</Text>
             {items.map(item => {
               const revoked = item.revokedAt !== null;
+              const late = recordedLate(item);
               return (
                 <View key={item.id} style={styles.row}>
                   <View style={styles.rowMain}>
@@ -254,9 +273,13 @@ export function GlucoseScreen({ api }: Props) {
                     </Text>
                     <Text style={styles.rowMeta}>
                       {formatTime(item.measuredAt)} ·{' '}
+                      {SOURCE_LABELS[item.source] ?? '手动'} ·{' '}
                       {CONTEXT_LABELS[item.context] ?? '其他'}
                       {item.note === null ? '' : ` · ${item.note}`}
                     </Text>
+                    {late === null ? null : (
+                      <Text style={styles.rowHint}>{late}</Text>
+                    )}
                   </View>
                   {revoked ? (
                     <Text style={styles.revokedTag}>已撤回</Text>
@@ -363,6 +386,7 @@ const styles = StyleSheet.create({
   rowValue: { fontSize: 18, fontWeight: '700', color: '#12211D' },
   rowUnit: { fontSize: 12, fontWeight: '400', color: '#7A8B86' },
   rowMeta: { marginTop: 4, fontSize: 12, color: '#7A8B86' },
+  rowHint: { marginTop: 2, fontSize: 11, color: '#9AA9A4' },
   revokedText: { color: '#B0BCB8' },
   revokedTag: { fontSize: 12, color: '#B0BCB8' },
   revokeButton: { paddingHorizontal: 10, paddingVertical: 6 },

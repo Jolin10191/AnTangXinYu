@@ -702,7 +702,10 @@ export function HealthOverviewScreen({
 
             <PsychosocialSection api={api} />
 
-            <FearBehaviorSection api={api} />
+            {/* 念头与记录分成两块：念头是理解自己，记录是管理权（能不能删掉那条）。 */}
+            <FearBehaviorSection api={api} mode="beliefs" />
+
+            <FearBehaviorSection api={api} mode="records" />
 
             <SectionHeader
               description="心率展示最近 6 小时趋势，其他项目为服务器保存的最近观测。"

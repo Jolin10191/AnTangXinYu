@@ -56,12 +56,15 @@ import { VOICE_INPUT_ENABLED } from '../config';
 import { MessageSources } from './MessageSources';
 import { HealthProfileCards } from '../health-profile/health-profile-cards';
 import { useHealthProfileCards } from '../health-profile/use-health-profile-cards';
-import { useHealthConnect } from '../health-connect/use-health-connect';
-import { useGadgetbridge } from '../health-connect/useGadgetbridge';
+import type {
+  GadgetbridgeController,
+  HealthConnectController,
+} from '../navigation/device-channels';
 import { HealthOverviewScreen } from '../health-overview';
 import { HealthDashboardScreen } from '../health/HealthDashboardScreen';
 import { PatientAccessScreen } from '../patient-access/patient-access-screen';
 import { GlucoseScreen } from '../glucose/GlucoseScreen';
+import { GlucoseImportScreen } from '../glucose/GlucoseImportScreen';
 import {
   LiveHeartRateProvider,
   useLiveHeartRateController,
@@ -71,7 +74,6 @@ import { AppMenu, type ConversationAnchor } from '../navigation/app-menu';
 import { useNotifications } from '../notifications/use-notifications';
 import { CareSettingsModal } from '../proactive-care/care-settings-modal';
 import { SettingsScreen } from '../settings/settings-screen';
-import { DeleteAccountScreen } from '../settings/delete-account-screen';
 import { UpdatePrompt } from '../update/update-prompt';
 import { useUpdateCheck } from '../update/use-update-check';
 import { BrandMark } from '../ui/brand-mark';
@@ -81,15 +83,25 @@ import { colors, radii, spacing, typefaces } from '../ui/theme';
 type Props = {
   api: ApiClient;
   user: User;
-  onSignedOut: () => void;
+  /** 手环两条通道挂在 App 外壳上，这里只用来展示关怀设置与看板。 */
+  healthConnect: HealthConnectController;
+  gadgetbridge: GadgetbridgeController;
   /**
    * 从底部 tab 的「我的 / 记录」请求打开某一页。
    * 用一个自增的 id 传递，避免「同一页连点两次」时状态相同而不触发。
    */
   pageRequest?: { page: ChatPage; id: number } | null;
+  /** 侧边栏头像 → 底部「我的」tab。 */
+  onOpenProfile?: () => void;
 };
 
-export type ChatPage = 'health' | 'dashboard' | 'glucose' | 'patientAccess' | 'settings';
+export type ChatPage =
+  | 'health'
+  | 'dashboard'
+  | 'glucose'
+  | 'importSensor'
+  | 'patientAccess'
+  | 'settings';
 
 const dayFormatter = new Intl.DateTimeFormat('zh-CN', {
   month: 'long',
@@ -110,12 +122,21 @@ function localDay(value: string): string {
 
 function conversationGroup(value: string): string {
   const date = new Date(value);
-  const today = new Date();
-  const yesterday = new Date();
-  yesterday.setDate(today.getDate() - 1);
-  if (localDay(value) === localDay(today.toISOString())) return '今天';
-  if (localDay(value) === localDay(yesterday.toISOString())) return '昨天';
-  return `${date.getMonth() + 1}月${date.getDate()}日`;
+  const now = new Date();
+  if (localDay(value) === localDay(now.toISOString())) return '今天';
+  const ageDays = (now.getTime() - date.getTime()) / 86_400_000;
+  if (ageDays < 7) return '7 天内';
+  if (ageDays < 30) return '30 天内';
+  return '更早';
+}
+
+/** 每条都带具体日期与时刻——只给「3 天前」这类相对说法，过一周就分不清了。 */
+function conversationStamp(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${month}-${day} ${timeFormatter.format(date)}`;
 }
 
 /**
@@ -137,13 +158,22 @@ export function currentLiveHeartRate(
   };
 }
 
-export function ChatScreen({ api, user, onSignedOut, pageRequest = null }: Props) {
+export function ChatScreen({
+  api,
+  user,
+  pageRequest = null,
+  onOpenProfile,
+  healthConnect,
+  gadgetbridge,
+}: Props) {
   // 实时心率会话挂在聊天页根组件上，切换健康看板、对话和健康档案都不会断开。
   return (
     <LiveHeartRateProvider active>
       <ChatScreenContent
         api={api}
-        onSignedOut={onSignedOut}
+        gadgetbridge={gadgetbridge}
+        healthConnect={healthConnect}
+        onOpenProfile={onOpenProfile}
         pageRequest={pageRequest}
         user={user}
       />
@@ -154,7 +184,9 @@ export function ChatScreen({ api, user, onSignedOut, pageRequest = null }: Props
 function ChatScreenContent({
   api,
   user,
-  onSignedOut,
+  onOpenProfile,
+  healthConnect,
+  gadgetbridge,
   pageRequest = null,
 }: Props) {
   const liveHeartRate = useLiveHeartRateController();
@@ -165,11 +197,12 @@ function ChatScreenContent({
   const [showNewMessage, setShowNewMessage] = useState(false);
   const [showCareSettings, setShowCareSettings] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [showDeleteAccount, setShowDeleteAccount] = useState(false);
   const [showHealthOverview, setShowHealthOverview] = useState(false);
   // ===== 新增：健康看板 =====
   const [showDashboard, setShowDashboard] = useState(false);
   const [showGlucose, setShowGlucose] = useState(false);
+  const [showImportSensor, setShowImportSensor] = useState(false);
+  const [importNotice, setImportNotice] = useState<string | null>(null);
   const [showCamera, setShowCamera] = useState(false);
   const [showReportPicker, setShowReportPicker] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -186,9 +219,7 @@ function ChatScreenContent({
     [state.messages],
   );
   const healthProfileCards = useHealthProfileCards(api);
-  const healthConnect = useHealthConnect(user.id, api);
   const updateCheck = useUpdateCheck();
-  const gadgetbridge = useGadgetbridge(api);
   const refreshHealthProfileCards = healthProfileCards.refresh;
   const getAttachmentImageSource = useCallback(
     (attachmentId: string) => api.getChatAttachmentImageSource(attachmentId),
@@ -204,8 +235,8 @@ function ChatScreenContent({
         ),
         id: conversation.id,
         title: conversation.title,
-        time: timeFormatter.format(
-          new Date(conversation.lastMessageAt ?? conversation.createdAt),
+        time: conversationStamp(
+          conversation.lastMessageAt ?? conversation.createdAt,
         ),
       })),
     [conversations],
@@ -219,6 +250,7 @@ function ChatScreenContent({
       if (pageRequest.page === 'health') setShowHealthOverview(true);
       if (pageRequest.page === 'dashboard') setShowDashboard(true);
       if (pageRequest.page === 'glucose') setShowGlucose(true);
+      if (pageRequest.page === 'importSensor') setShowImportSensor(true);
       if (pageRequest.page === 'patientAccess') setShowPatientAccess(true);
       if (pageRequest.page === 'settings') setShowSettings(true);
     }, 0);
@@ -510,25 +542,6 @@ function ChatScreenContent({
     );
   }
 
-  async function logout() {
-    setShowMenu(false);
-    streamController.current?.abort();
-    healthConnect.stop();
-    try {
-      await api.logout();
-      onSignedOut();
-    } catch (error) {
-      dispatch({ type: 'history-failed', message: errorMessage(error) });
-    }
-  }
-
-  function accountDeleted() {
-    setShowMenu(false);
-    streamController.current?.abort();
-    healthConnect.stop();
-    onSignedOut();
-  }
-
   function cancelCurrentResponse() {
     streamController.current?.abort();
   }
@@ -728,82 +741,18 @@ function ChatScreenContent({
         </View>
       </SafeAreaView>
 
-      {/* ===== Health Connect 横幅（保留原有） ===== */}
-      {!healthConnect.connected || healthConnect.error !== null ? (
+      {/* ===== 传感器导入结果 ===== */}
+      {importNotice === null ? null : (
         <Pressable
-          accessibilityLabel={
-            healthConnect.syncing ? '正在连接 Health Connect' : '去连接 Health Connect'
-          }
           accessibilityRole="button"
-          disabled={healthConnect.syncing || healthConnect.checking}
-          onPress={() => {
-            if (healthConnect.connected) setShowCareSettings(true);
-            else void healthConnect.connect().catch(() => {
-              // The connection banner renders the failure stored by useHealthConnect.
-            });
-          }}
-          style={styles.healthNotice}
+          accessibilityLabel="关闭提示"
+          onPress={() => setImportNotice(null)}
+          style={styles.importNotice}
         >
-          <Text style={styles.healthNoticeText}>
-            {healthConnect.error ??
-              healthConnect.progress ??
-              (healthConnect.checking
-                ? '正在检查手环连接…'
-                : '连接 Health Connect 后，可以在对话中查看真实手环记录。')}
-          </Text>
-          <Text style={styles.healthNoticeAction}>
-            {healthConnect.syncing
-              ? '连接中…'
-              : healthConnect.connected
-                ? '查看'
-                : '去连接'}
-          </Text>
+          <Text style={styles.importNoticeText}>{importNotice}</Text>
+          <Text style={styles.healthNoticeAction}>知道了</Text>
         </Pressable>
-      ) : null}
-
-      {/* ===== Gadgetbridge 独立横幅 ===== */}
-      <Pressable
-        accessibilityRole="button"
-        disabled={gadgetbridge.checking || gadgetbridge.syncing}
-        onPress={() => {
-          if (gadgetbridge.connected) {
-            void gadgetbridge.sync();
-          } else {
-            void gadgetbridge.connect();
-          }
-        }}
-        style={({ pressed }) => [
-          styles.gadgetbridgeNotice,
-          (gadgetbridge.checking || gadgetbridge.syncing) &&
-          styles.gadgetbridgeNoticeDisabled,
-          pressed &&
-          !gadgetbridge.checking &&
-          !gadgetbridge.syncing &&
-          styles.gadgetbridgeNoticePressed,
-        ]}
-      >
-        <View style={styles.gadgetbridgeNoticeContent}>
-          <Text style={styles.gadgetbridgeNoticeTitle}>📡 华为手环导入</Text>
-          <Text style={styles.gadgetbridgeNoticeText} numberOfLines={1}>
-            {gadgetbridge.checking
-              ? '正在检查手环数据...'
-              : gadgetbridge.syncing
-                ? '⏳ 正在同步...'
-                : gadgetbridge.error
-                  ? `⚠️ ${gadgetbridge.error}`
-                  : gadgetbridge.connected
-                    ? `已连接，${gadgetbridge.heartRateCount || 0} 条心率记录`
-                    : '选择华为手环的 Gadgetbridge 导出文件'}
-          </Text>
-        </View>
-        <Text style={styles.gadgetbridgeNoticeAction}>
-          {gadgetbridge.checking || gadgetbridge.syncing
-            ? '...'
-            : gadgetbridge.connected
-              ? '同步'
-              : '连接'}
-        </Text>
-      </Pressable>
+      )}
 
       {state.error === null ? null : (
         <Pressable
@@ -1132,33 +1081,11 @@ function ChatScreenContent({
       >
         <SettingsScreen
           onClose={() => setShowSettings(false)}
-          onLogout={() => {
-            setShowSettings(false);
-            void logout();
-          }}
-          onDeleteAccount={() => {
-            setShowSettings(false);
-            setShowDeleteAccount(true);
-          }}
           onOpenCare={() => {
             setShowSettings(false);
             setShowCareSettings(true);
           }}
           update={updateCheck}
-          username={user.username}
-        />
-      </Modal>
-
-      <Modal
-        animationType="slide"
-        onRequestClose={() => setShowDeleteAccount(false)}
-        presentationStyle="fullScreen"
-        visible={showDeleteAccount}
-      >
-        <DeleteAccountScreen
-          api={api}
-          onCancel={() => setShowDeleteAccount(false)}
-          onDeleted={accountDeleted}
         />
       </Modal>
 
@@ -1182,8 +1109,6 @@ function ChatScreenContent({
           onClose={() => setShowCareSettings(false)}
           onDisableBackgroundHealth={healthConnect.disableBackground}
           onEnableBackgroundHealth={healthConnect.enableBackground}
-          onLogout={() => void logout()}
-          onAccountDeleted={accountDeleted}
           onRequestNotificationPermission={notifications.requestPermission}
           visible
         />
@@ -1231,6 +1156,28 @@ function ChatScreenContent({
         </View>
       </Modal>
 
+      <Modal
+        animationType="slide"
+        onRequestClose={() => setShowImportSensor(false)}
+        presentationStyle="fullScreen"
+        visible={showImportSensor}
+      >
+        <View style={{ flex: 1, backgroundColor: '#F4F6F5' }}>
+          <GlucoseImportScreen
+            api={api}
+            onBack={() => setShowImportSensor(false)}
+            onImported={(inserted) => {
+              setShowImportSensor(false);
+              setImportNotice(
+                inserted > 0
+                  ? `已导入 ${inserted} 条传感器数据`
+                  : '这份文件里没有新增数据',
+              );
+            }}
+          />
+        </View>
+      </Modal>
+
       {/* ===== 新增：健康看板 Modal ===== */}
       <HealthDashboardScreen
         api={api}
@@ -1249,6 +1196,11 @@ function ChatScreenContent({
         activeConversationId={conversationId}
         onNewChat={() => void startNewConversation()}
         onClose={() => setShowMenu(false)}
+        onOpenCare={() => setShowCareSettings(true)}
+        onOpenProfile={() => {
+          setShowMenu(false);
+          onOpenProfile?.();
+        }}
         onSelectConversation={(id) => {
           void openConversation(id);
         }}
@@ -1300,7 +1252,7 @@ const styles = StyleSheet.create({
     fontSize: 20,
   },
   headerPlaceholder: { width: 44, height: 44 },
-  healthNotice: {
+  importNotice: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
@@ -1308,47 +1260,17 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     backgroundColor: colors.primarySoft,
   },
-  healthNoticeText: {
+  importNoticeText: {
     flex: 1,
     color: colors.text,
     fontFamily: typefaces.sans,
-    fontSize: 11,
+    fontSize: 11.5,
     lineHeight: 16,
   },
   healthNoticeAction: {
     color: colors.primaryPressed,
     fontFamily: typefaces.sansMedium,
     fontSize: 11,
-  },
-  gadgetbridgeNotice: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 9,
-    backgroundColor: '#F0F8FC',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#B8D9E8',
-  },
-  gadgetbridgeNoticeDisabled: { opacity: 0.5 },
-  gadgetbridgeNoticePressed: { opacity: 0.7 },
-  gadgetbridgeNoticeContent: { flex: 1, gap: 1 },
-  gadgetbridgeNoticeTitle: {
-    color: colors.ink,
-    fontFamily: typefaces.sansMedium,
-    fontSize: 12,
-  },
-  gadgetbridgeNoticeText: {
-    color: colors.muted,
-    fontFamily: typefaces.sans,
-    fontSize: 11,
-    lineHeight: 16,
-  },
-  gadgetbridgeNoticeAction: {
-    color: '#0A7C6B',
-    fontFamily: typefaces.sansMedium,
-    fontSize: 12,
   },
   errorBanner: {
     flexDirection: 'row',

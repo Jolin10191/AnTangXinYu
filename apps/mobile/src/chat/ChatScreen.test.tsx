@@ -3,6 +3,7 @@ import { FlatList, TextInput } from 'react-native';
 
 import type { ApiClient } from '../api/client';
 import { ChatScreen, currentLiveHeartRate } from './ChatScreen';
+import { fakeGadgetbridge, fakeHealthConnect } from '../navigation/device-controllers.fake';
 import type { LiveHeartRateController } from '../live-heart-rate/use-live-heart-rate';
 
 const mockAppMenu = jest.fn((_props: unknown) => null);
@@ -119,8 +120,9 @@ describe('ChatScreen', () => {
     await act(async () => {
       tree = create(
         <ChatScreen
+          gadgetbridge={fakeGadgetbridge()}
+          healthConnect={fakeHealthConnect()}
           api={api}
-          onSignedOut={jest.fn()}
           user={{ id: 'user-1', username: 'demo', role: 'patient' }}
         />,
       );
@@ -188,8 +190,9 @@ describe('ChatScreen', () => {
     await act(async () => {
       tree = create(
         <ChatScreen
+          gadgetbridge={fakeGadgetbridge()}
+          healthConnect={fakeHealthConnect()}
           api={api}
-          onSignedOut={jest.fn()}
           user={{ id: 'user-1', username: 'demo', role: 'patient' }}
         />,
       );
