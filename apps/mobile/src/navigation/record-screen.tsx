@@ -58,6 +58,15 @@ const PORTIONS: { label: string; grams: number }[] = [
   { label: "两碗", grams: 80 },
 ];
 
+// 记的是真实发生的时间：下午才想起早上十点吃的药，就选「3 小时前」而不是现在。
+const EVENT_OFFSETS: { label: string; minutes: number }[] = [
+  { label: "刚才", minutes: 0 },
+  { label: "30 分钟前", minutes: 30 },
+  { label: "1 小时前", minutes: 60 },
+  { label: "2 小时前", minutes: 120 },
+  { label: "3 小时前", minutes: 180 },
+];
+
 export function formatGlucose(reading: GlucoseReading): string {
   return `${(reading.valueMgDl / 18).toFixed(1)} mmol/L`;
 }
@@ -71,13 +80,17 @@ export function formatMeasuredAt(iso: string): string {
   return `${month}-${day} ${hour}:${minute}`;
 }
 
-export function nowIso(): string {
-  const now = new Date();
+export function eventIso(minutesAgo: number): string {
+  const now = new Date(Date.now() - minutesAgo * 60_000);
   const offset = -now.getTimezoneOffset();
   const sign = offset >= 0 ? "+" : "-";
   const hours = `${Math.floor(Math.abs(offset) / 60)}`.padStart(2, "0");
   const minutes = `${Math.abs(offset) % 60}`.padStart(2, "0");
   return `${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, "0")}-${`${now.getDate()}`.padStart(2, "0")}T${`${now.getHours()}`.padStart(2, "0")}:${`${now.getMinutes()}`.padStart(2, "0")}:00${sign}${hours}:${minutes}`;
+}
+
+export function nowIso(): string {
+  return eventIso(0);
 }
 
 type Props = {
@@ -120,8 +133,10 @@ export function RecordScreen({ api, onImport, onRecordGlucose }: Props) {
   const [mealType, setMealType] = useState<"breakfast" | "lunch" | "dinner" | "snack">(
     "lunch",
   );
+  const [mealMinutesAgo, setMealMinutesAgo] = useState(0);
   const [mealDescription, setMealDescription] = useState("");
   const [mealCarbs, setMealCarbs] = useState<string>("");
+  const [medMinutesAgo, setMedMinutesAgo] = useState(0);
   const [medName, setMedName] = useState("");
   const [medDose, setMedDose] = useState("");
   const [medKind, setMedKind] = useState<"insulin" | "oral" | "other">("insulin");
@@ -183,7 +198,7 @@ export function RecordScreen({ api, onImport, onRecordGlucose }: Props) {
     setSaving(true);
     try {
       const created = await api.createMealLog({
-        eatenAt: nowIso(),
+        eatenAt: eventIso(mealMinutesAgo),
         mealType,
         description: mealDescription.trim(),
         carbsGrams: mealCarbs.trim() === "" ? null : Number(mealCarbs),
@@ -202,7 +217,7 @@ export function RecordScreen({ api, onImport, onRecordGlucose }: Props) {
     setSaving(true);
     try {
       const created = await api.createMedicationLog({
-        takenAt: nowIso(),
+        takenAt: eventIso(medMinutesAgo),
         name: medName.trim(),
         doseText: medDose.trim(),
         kind: medKind,
@@ -439,6 +454,35 @@ export function RecordScreen({ api, onImport, onRecordGlucose }: Props) {
                   maxLength={3}
                 />
               </View>
+              <Text style={styles.fieldLabel}>这一餐是什么时候吃的</Text>
+              <View style={styles.chipRow}>
+                {EVENT_OFFSETS.map((option) => (
+                  <Pressable
+                    key={option.label}
+                    accessibilityRole="button"
+                    accessibilityLabel={`这一餐${option.label}`}
+                    onPress={() => setMealMinutesAgo(option.minutes)}
+                    style={[
+                      styles.chip,
+                      mealMinutesAgo === option.minutes ? styles.chipActive : null,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.chipText,
+                        mealMinutesAgo === option.minutes
+                          ? styles.chipTextActive
+                          : null,
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={styles.cardHint}>
+                记到 {formatMeasuredAt(eventIso(mealMinutesAgo))}，不是现在。
+              </Text>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="保存这餐"
@@ -530,6 +574,35 @@ export function RecordScreen({ api, onImport, onRecordGlucose }: Props) {
                 style={styles.input}
                 maxLength={64}
               />
+              <Text style={styles.fieldLabel}>这次用药是什么时候</Text>
+              <View style={styles.chipRow}>
+                {EVENT_OFFSETS.map((option) => (
+                  <Pressable
+                    key={option.label}
+                    accessibilityRole="button"
+                    accessibilityLabel={`这次用药${option.label}`}
+                    onPress={() => setMedMinutesAgo(option.minutes)}
+                    style={[
+                      styles.chip,
+                      medMinutesAgo === option.minutes ? styles.chipActive : null,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.chipText,
+                        medMinutesAgo === option.minutes
+                          ? styles.chipTextActive
+                          : null,
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={styles.cardHint}>
+                记到 {formatMeasuredAt(eventIso(medMinutesAgo))}，不是现在。
+              </Text>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="保存这次用药"
@@ -689,6 +762,13 @@ const styles = StyleSheet.create({
     fontFamily: typefaces.sans,
     fontSize: 11.5,
     lineHeight: 17,
+  },
+  fieldLabel: {
+    color: colors.muted,
+    fontFamily: typefaces.sansMedium,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 4,
   },
   error: {
     color: colors.danger,

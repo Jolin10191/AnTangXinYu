@@ -35,6 +35,7 @@ from antang_api.tools import (
     build_glucose_read_tool,
     build_knowledge_search_tool,
     build_profile_tool,
+    build_record_tools,
     build_wearable_read_tool,
     build_web_tools,
 )
@@ -97,6 +98,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 )
                 care_plan_tool = build_care_plan_tool(session_factory)
                 behavior_tools = build_behavior_tools(session_factory)
+                record_tools = build_record_tools(session_factory)
                 glucose_tool = build_glucose_read_tool(session_factory)
                 knowledge_tool = build_knowledge_search_tool(session_factory)
                 web_tools = build_web_tools(
@@ -112,6 +114,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     care_plan_tool,
                     glucose_tool,
                     *behavior_tools,
+                    *record_tools,
                 )
                 tool_middleware = ToolPersistenceMiddleware(
                     session_factory,

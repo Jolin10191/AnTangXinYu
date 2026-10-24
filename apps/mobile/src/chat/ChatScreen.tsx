@@ -37,6 +37,7 @@ import type {
   ChatAttachment,
   ChatMessage,
   ChatStreamEvent,
+  Conversation,
   MessageHistory,
   User,
 } from '../api/types';
@@ -176,22 +177,21 @@ function ChatScreenContent({ api, user, onSignedOut }: Props) {
     (attachmentId: string) => api.getChatAttachmentImageSource(attachmentId),
     [api],
   );
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const conversationAnchors = useMemo<ConversationAnchor[]>(
     () =>
-      state.messages
-        .filter(
-          (message) =>
-            message.role === 'user' && message.content.trim().length > 0,
-        )
-        .slice(-16)
-        .reverse()
-        .map((message) => ({
-          group: conversationGroup(message.createdAt),
-          id: message.id,
-          preview: message.content.replace(/\s+/g, ' ').trim(),
-          time: timeFormatter.format(new Date(message.createdAt)),
-        })),
-    [state.messages],
+      conversations.map((conversation) => ({
+        group: conversationGroup(
+          conversation.lastMessageAt ?? conversation.createdAt,
+        ),
+        id: conversation.id,
+        title: conversation.title,
+        time: timeFormatter.format(
+          new Date(conversation.lastMessageAt ?? conversation.createdAt),
+        ),
+      })),
+    [conversations],
   );
 
   useEffect(() => {
@@ -233,11 +233,11 @@ function ChatScreenContent({ api, user, onSignedOut }: Props) {
 
   const fetchLatest = useCallback(async () => {
     const [page] = await Promise.all([
-      api.getMessages(),
+      api.getMessages(null, conversationId),
       refreshHealthProfileCards(),
     ]);
     return page;
-  }, [api, refreshHealthProfileCards]);
+  }, [api, conversationId, refreshHealthProfileCards]);
 
   const applyLatest = useCallback((page: MessageHistory) => {
     dispatch({
@@ -264,21 +264,59 @@ function ChatScreenContent({ api, user, onSignedOut }: Props) {
 
   useEffect(() => {
     let active = true;
-    void fetchLatest().then(
-      (page) => {
-        if (active) applyLatest(page);
-      },
-      (error) => {
+    void (async () => {
+      try {
+        const existing = await api.getConversations();
+        const conversation =
+          existing[0] ?? (await api.startConversation());
+        if (!active) return;
+        setConversations(existing.length === 0 ? [conversation] : existing);
+        setConversationId(conversation.id);
+        applyLatest(await api.getMessages(null, conversation.id));
+      } catch (error) {
         if (active) {
           dispatch({ type: 'history-failed', message: errorMessage(error) });
         }
-      },
-    );
+      }
+    })();
     return () => {
       active = false;
       streamController.current?.abort();
     };
-  }, [applyLatest, fetchLatest]);
+  }, [api, applyLatest]);
+
+  const openConversation = useCallback(
+    async (id: string) => {
+      if (streamController.current !== null) return;
+      setShowMenu(false);
+      setConversationId(id);
+      dispatch({ type: 'history-loading' });
+      try {
+        applyLatest(await api.getMessages(null, id));
+      } catch (error) {
+        dispatch({ type: 'history-failed', message: errorMessage(error) });
+      }
+    },
+    [api, applyLatest],
+  );
+
+  const startNewConversation = useCallback(async () => {
+    if (streamController.current !== null) return;
+    try {
+      const conversation = await api.startConversation();
+      setConversations((current) => [conversation, ...current]);
+      setConversationId(conversation.id);
+      setShowMenu(false);
+      dispatch({
+        type: 'history-replaced',
+        messages: [],
+        nextBefore: null,
+      });
+      setHistoryReady(true);
+    } catch (error) {
+      dispatch({ type: 'history-failed', message: errorMessage(error) });
+    }
+  }, [api]);
 
   const notifications = useNotifications({
     api,
@@ -334,7 +372,7 @@ function ChatScreenContent({ api, user, onSignedOut }: Props) {
     if (state.nextBefore === null || state.historyLoading) return;
     dispatch({ type: 'history-loading' });
     try {
-      const page = await api.getMessages(state.nextBefore);
+      const page = await api.getMessages(state.nextBefore, conversationId);
       dispatch({
         type: 'history-prepended',
         messages: page.messages,
@@ -436,6 +474,7 @@ function ChatScreenContent({ api, user, onSignedOut }: Props) {
           onEvent,
           signal,
           currentLiveHeartRate(liveHeartRate),
+          conversationId,
         ),
     );
   }
@@ -501,6 +540,8 @@ function ChatScreenContent({ api, user, onSignedOut }: Props) {
             userMessage.attachments[0]?.id ?? null,
             onEvent,
             signal,
+            undefined,
+            conversationId,
           ),
       );
       return;
@@ -1175,6 +1216,8 @@ function ChatScreenContent({ api, user, onSignedOut }: Props) {
       <AppMenu
         onOpenPatientAccess={() => { setShowMenu(false); setShowPatientAccess(true); }}
         conversations={conversationAnchors}
+        activeConversationId={conversationId}
+        onNewChat={() => void startNewConversation()}
         onClose={() => setShowMenu(false)}
         onOpenHealth={() => {
           setShowMenu(false);
@@ -1194,9 +1237,8 @@ function ChatScreenContent({ api, user, onSignedOut }: Props) {
           setShowMenu(false);
           setShowGlucose(true);
         }}
-        onSelectConversation={(messageId) => {
-          setTargetMessageId(messageId);
-          setShowMenu(false);
+        onSelectConversation={(id) => {
+          void openConversation(id);
         }}
         username={user.username}
         visible={showMenu}

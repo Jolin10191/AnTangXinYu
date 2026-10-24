@@ -26,6 +26,7 @@ from antang_api.models.chat import (
 )
 from antang_api.models.companion_memory import CompanionMemoryCursor
 from antang_api.models.context import ConversationSummary
+from antang_api.models.conversation import CONVERSATION_KINDS, Conversation
 from antang_api.models.health_profile import (
     FactAssertion,
     FactTemporalStatus,
@@ -112,6 +113,8 @@ __all__ = [
     "PatientAccessGrant",
     "PatientAccessAudit",
     "ConversationSummary",
+    "CONVERSATION_KINDS",
+    "Conversation",
     "CompanionMemoryCursor",
     "CarePlan",
     "CarePlanStatus",

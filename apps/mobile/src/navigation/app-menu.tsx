@@ -23,19 +23,21 @@ import { colors, radii, spacing, typefaces } from '../ui/theme';
 export type ConversationAnchor = {
   group: string;
   id: string;
-  preview: string;
+  title: string;
   time: string;
 };
 
 type Props = {
   conversations: ConversationAnchor[];
+  activeConversationId?: string | null;
+  onNewChat?: () => void;
   onClose: () => void;
   onOpenHealth: () => void;
   onOpenSettings: () => void;
   onOpenDashboard?: () => void;
   onOpenPatientAccess?: () => void;
   onOpenGlucose?: () => void;
-  onSelectConversation: (messageId: string) => void;
+  onSelectConversation: (conversationId: string) => void;
   username: string;
   visible: boolean;
   // ===== 新增：Gadgetbridge 相关 props =====
@@ -59,6 +61,8 @@ function formatLastSync(value: string): string {
 
 export function AppMenu({
   conversations,
+  activeConversationId = null,
+  onNewChat,
   onClose,
   onOpenHealth,
   onOpenSettings,
@@ -245,7 +249,18 @@ export function AppMenu({
 
           <View style={styles.sectionHeading}>
             <AppIcon color={colors.muted} icon={Message01Icon} size={19} />
-            <Text style={styles.sectionTitle}>对话记录</Text>
+            <Text style={styles.sectionTitle}>对话</Text>
+            <Pressable
+              accessibilityLabel="开始新的对话"
+              accessibilityRole="button"
+              onPress={onNewChat}
+              style={({ pressed }) => [
+                styles.newChatButton,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={styles.newChatText}>新的对话</Text>
+            </Pressable>
           </View>
 
           <ScrollView
@@ -253,7 +268,9 @@ export function AppMenu({
             showsVerticalScrollIndicator={false}
           >
             {conversations.length === 0 ? (
-              <Text style={styles.emptyHistory}>开始聊天后，对话位置会显示在这里。</Text>
+              <Text style={styles.emptyHistory}>
+                开始聊天后，这段对话会出现在这里。
+              </Text>
             ) : (
               conversations.map((conversation) => {
                 const showGroup = conversation.group !== previousGroup;
@@ -264,19 +281,21 @@ export function AppMenu({
                       <Text style={styles.groupTitle}>{conversation.group}</Text>
                     ) : null}
                     <Pressable
-                      accessibilityLabel={`${conversation.time} ${conversation.preview}`}
+                      accessibilityLabel={`${conversation.title} ${conversation.time}`}
                       accessibilityRole="menuitem"
                       onPress={() => onSelectConversation(conversation.id)}
                       style={({ pressed }) => [
                         styles.conversation,
+                        conversation.id === activeConversationId &&
+                          styles.conversationActive,
                         pressed && styles.conversationPressed,
                       ]}
                     >
+                      <Text numberOfLines={1} style={styles.conversationTitle}>
+                        {conversation.title}
+                      </Text>
                       <Text style={styles.conversationTime}>
                         {conversation.time}
-                      </Text>
-                      <Text numberOfLines={2} style={styles.conversationPreview}>
-                        {conversation.preview}
                       </Text>
                     </Pressable>
                   </View>
@@ -484,30 +503,42 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
   },
   conversation: {
-    alignItems: 'flex-start',
+    alignItems: 'center',
     backgroundColor: colors.paper,
     borderRadius: radii.sm,
     flexDirection: 'row',
     gap: spacing.sm,
     marginBottom: 6,
-    minHeight: 58,
+    minHeight: 52,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
   },
+  conversationActive: { backgroundColor: colors.primarySoft },
   conversationPressed: { backgroundColor: colors.paperMuted },
+  conversationTitle: {
+    color: colors.text,
+    flex: 1,
+    fontFamily: typefaces.sans,
+    fontSize: 14,
+    lineHeight: 20,
+  },
   conversationTime: {
     color: colors.faint,
     fontFamily: typefaces.sans,
     fontSize: 11,
     fontVariant: ['tabular-nums'],
     lineHeight: 20,
-    width: 40,
   },
-  conversationPreview: {
-    color: colors.text,
-    flex: 1,
-    fontFamily: typefaces.sans,
-    fontSize: 14,
-    lineHeight: 20,
+  newChatButton: {
+    marginLeft: 'auto',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: radii.pill,
+    backgroundColor: colors.primarySoft,
+  },
+  newChatText: {
+    color: colors.primaryPressed,
+    fontFamily: typefaces.sansMedium,
+    fontSize: 12,
   },
 });

@@ -55,6 +55,9 @@ import {
   type BeliefEventRecord,
   parseBeliefEvents,
   parseTranscription,
+  type Conversation,
+  parseConversation,
+  parseConversations,
   type GlucoseReading,
   parseGlucoseReading,
   parseGlucoseReadings,
@@ -521,13 +524,29 @@ export class ApiClient {
     await this.mutateTokens(logoutVersion, () => this.tokenStore.clear());
   }
 
-  async getMessages(before: string | null = null): Promise<MessageHistory> {
-    const query =
-      before === null
-        ? "?limit=50"
-        : `?before=${encodeURIComponent(before)}&limit=50`;
+  async getConversations(): Promise<Conversation[]> {
+    const response = await this.authorizedFetch('/api/v1/chat/conversations');
+    if (!response.ok) throw await this.apiError(response);
+    return parseConversations(await responseJson(response));
+  }
+
+  async startConversation(): Promise<Conversation> {
+    const response = await this.authorizedFetch('/api/v1/chat/conversations', {
+      method: 'POST',
+    });
+    if (!response.ok) throw await this.apiError(response);
+    return parseConversation(await responseJson(response));
+  }
+
+  async getMessages(
+    before: string | null = null,
+    conversationId: string | null = null,
+  ): Promise<MessageHistory> {
+    const params = new URLSearchParams({ limit: '50' });
+    if (before !== null) params.set('before', before);
+    if (conversationId !== null) params.set('conversation_id', conversationId);
     const response = await this.authorizedFetch(
-      `/api/v1/chat/messages${query}`,
+      `/api/v1/chat/messages?${params.toString()}`,
     );
     if (!response.ok) throw await this.apiError(response);
     return parseMessageHistory(await responseJson(response));
@@ -860,6 +879,7 @@ export class ApiClient {
     onEvent: (event: ChatStreamEvent) => void,
     signal?: AbortSignal,
     liveHeartRate?: LiveHeartRateReading | null,
+    conversationId: string | null = null,
   ): Promise<void> {
     const response = await this.authorizedFetch('/api/v1/chat/messages', {
       method: 'POST',
@@ -867,6 +887,7 @@ export class ApiClient {
         client_message_id: clientMessageId,
         content,
         attachment_id: attachmentId,
+        conversation_id: conversationId,
         live_heart_rate: liveHeartRate === undefined || liveHeartRate === null
           ? null
           : {

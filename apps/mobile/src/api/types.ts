@@ -858,6 +858,34 @@ export function parseMessageHistory(value: unknown): MessageHistory {
   };
 }
 
+export type Conversation = {
+  id: string;
+  title: string;
+  createdAt: string;
+  lastMessageAt: string | null;
+};
+
+export function parseConversation(value: unknown): Conversation {
+  const data = objectValue(value, "conversation");
+  return {
+    id: uuidValue(data.id, "conversation.id"),
+    title: stringValue(data.title, "conversation.title"),
+    createdAt: zonedDateTimeValue(data.created_at, "conversation.created_at"),
+    lastMessageAt:
+      data.last_message_at === null
+        ? null
+        : zonedDateTimeValue(data.last_message_at, "conversation.last_message_at"),
+  };
+}
+
+export function parseConversations(value: unknown): Conversation[] {
+  const data = objectValue(value, "conversations");
+  if (!Array.isArray(data.conversations)) {
+    throw new Error("conversations.conversations 必须是数组");
+  }
+  return data.conversations.map(parseConversation);
+}
+
 export function parseProactiveCareNotificationData(
   value: unknown,
 ): ProactiveCareNotificationData {

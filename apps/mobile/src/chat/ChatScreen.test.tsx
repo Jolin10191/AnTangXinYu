@@ -74,6 +74,20 @@ describe('ChatScreen', () => {
       headers: { Authorization: 'Bearer test-token' },
     };
     const api = {
+      getConversations: jest.fn().mockResolvedValue([
+        {
+          id: '019b3333-3333-7333-8333-333333333333',
+          title: '早上的对话',
+          createdAt: '2026-08-16T04:00:00.000Z',
+          lastMessageAt: null,
+        },
+      ]),
+      startConversation: jest.fn().mockResolvedValue({
+        id: '019b4444-4444-7444-8444-444444444444',
+        title: '新对话',
+        createdAt: '2026-08-16T05:00:00.000Z',
+        lastMessageAt: null,
+      }),
       getMessages: jest.fn().mockResolvedValue({
         messages: [
           {
@@ -140,6 +154,20 @@ describe('ChatScreen', () => {
       finishStream = resolve;
     });
     const api = {
+      getConversations: jest.fn().mockResolvedValue([
+        {
+          id: '019b3333-3333-7333-8333-333333333333',
+          title: '早上的对话',
+          createdAt: '2026-08-16T04:00:00.000Z',
+          lastMessageAt: null,
+        },
+      ]),
+      startConversation: jest.fn().mockResolvedValue({
+        id: '019b4444-4444-7444-8444-444444444444',
+        title: '新对话',
+        createdAt: '2026-08-16T05:00:00.000Z',
+        lastMessageAt: null,
+      }),
       getMessages: jest.fn().mockResolvedValue({
         messages: [],
         nextBefore: null,

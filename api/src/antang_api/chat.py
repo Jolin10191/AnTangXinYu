@@ -36,6 +36,13 @@ from antang_api.citations import (
 from antang_api.companion_memory import CompanionMemory
 from antang_api.context import prepare_chat_context
 from antang_api.context.health_profile import render_core_profile
+from antang_api.conversations import (
+    NEW_CONVERSATION_TITLE,
+    conversation_title,
+    ensure_chat_conversation,
+    owned_conversation,
+    touch_conversation,
+)
 from antang_api.health_profile.glucose import (
     GLUCOSE_CONTEXT_DAYS,
     list_glucose_readings,
@@ -51,6 +58,7 @@ from antang_api.models import (
     AgentToolCallStatus,
     CarePlan,
     CarePlanStatus,
+    Conversation,
     GlucoseReading,
     Message,
     MessageAttachment,
@@ -95,6 +103,10 @@ class ChatAttachmentError(Exception):
     """附件不存在、已发送，或者不属于当前用户。"""
 
 
+class ChatConversationRequired(Exception):
+    """指定的会话不存在，或者不属于当前用户。"""
+
+
 class ChatRetryError(Exception):
     """指定的失败回答不存在，或者当前已经不能重试。"""
 
@@ -117,6 +129,8 @@ TOOL_ACTIVITY_PHASES: dict[str, ActivityPhase] = {
     "manage_care_plan": "organizing",
     "log_fear_behavior": "organizing",
     "record_hypoglycemia_belief": "organizing",
+    "record_meal": "organizing",
+    "record_medication": "organizing",
 }
 
 
@@ -127,6 +141,7 @@ class PreparedChatRun:
     user_message_id: UUID
     assistant_message_id: UUID
     run_id: UUID
+    conversation_id: UUID
 
 
 async def prepare_chat_run(
@@ -135,6 +150,7 @@ async def prepare_chat_run(
     client_message_id: UUID,
     content: str,
     attachment_id: UUID | None = None,
+    conversation_id: UUID | None = None,
 ) -> PreparedChatRun:
     """原子创建用户消息、待生成消息和 Core Agent 运行记录，提交到数据库"""
 
@@ -147,6 +163,15 @@ async def prepare_chat_run(
     )
     try:
         await lock_user_conversation(session, user_id)
+        if conversation_id is not None:
+            conversation = await owned_conversation(
+                session, user_id=user_id, conversation_id=conversation_id
+            )
+            if conversation is None:
+                raise ChatConversationRequired("没有这段对话，先新建一段再发")
+        else:
+            # 老客户端不带 conversation_id：接到最近一段对话上。
+            conversation = await ensure_chat_conversation(session, user_id)
         attachment = None
         if attachment_id is not None:
             attachment = await session.scalar(
@@ -167,6 +192,10 @@ async def prepare_chat_run(
                 )
         session.add(user_message)
         await session.flush()
+        user_message.conversation_id = conversation.id
+        if conversation.title == NEW_CONVERSATION_TITLE and user_message.content.strip():
+            conversation.title = conversation_title(user_message.content)
+        await touch_conversation(session, conversation)
         if attachment is not None:
             attachment.message_id = user_message.id
         await record_user_activity(
@@ -181,6 +210,7 @@ async def prepare_chat_run(
             role=MessageRole.ASSISTANT,
             status=MessageStatus.GENERATING,
             content="",
+            conversation_id=conversation.id,
         )
         session.add(assistant_message)
         await session.flush()
@@ -202,6 +232,7 @@ async def prepare_chat_run(
             user_message_id=user_message.id,
             assistant_message_id=assistant_message.id,
             run_id=agent_run.id,
+            conversation_id=conversation.id,
         )
     except IntegrityError as error:
         await session.rollback()
@@ -280,6 +311,7 @@ async def prepare_chat_retry(
         role=MessageRole.ASSISTANT,
         status=MessageStatus.GENERATING,
         content="",
+        conversation_id=failed_message.conversation_id,
     )
     session.add(assistant_message)
 
@@ -306,10 +338,14 @@ async def prepare_chat_retry(
             raise ActiveAgentRunError() from error
         raise
 
+    if failed_message.conversation_id is None:
+        raise ChatRetryError("retry_message_not_found", "这条回答所属的对话已经不存在")
+
     return PreparedChatRun(
         user_message_id=original_run.trigger_message_id,
         assistant_message_id=assistant_message.id,
         run_id=agent_run.id,
+        conversation_id=failed_message.conversation_id,
     )
 
 
@@ -578,6 +614,10 @@ async def _complete_chat_run(
         # 声音状态同样只在回答落库时才算用掉：失败或取消的轮次用户没读到回复，
         # 这条 cue 留给下一次真正发出去的那一轮。
         await mark_speech_cue_consumed(session, cue_id=speech_cue_id, now=now)
+
+    conversation = await session.get(Conversation, prepared_run.conversation_id)
+    if conversation is not None:
+        await touch_conversation(session, conversation, at=now)
 
     await session.commit()
 
@@ -862,6 +902,7 @@ async def stream_chat_run(
             ),
             recent_tool_results_to_keep=(settings.context_recent_tool_results_to_keep),
             tools=tools,
+            conversation_id=prepared_run.conversation_id,
         )
         run_log.bind(
             context_tokens=prepared_context.input_tokens,

@@ -253,19 +253,27 @@ async def _load_completed_tool_messages(
 
 
 async def build_chat_context(
-    session: AsyncSession, user_id: UUID, through_message_id: UUID
+    session: AsyncSession,
+    user_id: UUID,
+    through_message_id: UUID,
+    conversation_id: UUID | None = None,
 ) -> ChatContext:
-    """读取最新摘要，以及摘要之后、当前消息之前的完整对话。"""
+    """读取最新摘要，以及摘要之后、当前消息之前的完整对话。
+
+    传了 conversation_id 就只看这一段对话；不传保持旧行为（整条流）。
+    """
 
     # 取出最新的摘要
-    summary = await session.scalar(
-        select(ConversationSummary)
-        .where(
-            ConversationSummary.user_id == user_id,
-            ConversationSummary.through_message_id <= through_message_id,
+    summary_query = select(ConversationSummary).where(
+        ConversationSummary.user_id == user_id,
+        ConversationSummary.through_message_id <= through_message_id,
+    )
+    if conversation_id is not None:
+        summary_query = summary_query.where(
+            ConversationSummary.conversation_id == conversation_id
         )
-        .order_by(ConversationSummary.id.desc())
-        .limit(1)
+    summary = await session.scalar(
+        summary_query.order_by(ConversationSummary.id.desc()).limit(1)
     )
 
     # 该用户所有「已完成、且不晚于当前消息的消息」 的查询语句
@@ -274,6 +282,10 @@ async def build_chat_context(
         Message.status == MessageStatus.COMPLETED,
         Message.id <= through_message_id,
     )
+    if conversation_id is not None:
+        message_query = message_query.where(
+            Message.conversation_id == conversation_id
+        )
 
     # 只要摘要覆盖之后的消息
     if summary is not None:

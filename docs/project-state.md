@@ -60,6 +60,10 @@
 - **患者视图的三处减负（2026-10-23）**：`apps/mobile/src/fear/FearBehaviorSection.tsx` 不再显示「额外查血糖 5 次」这类大号计数（改为只说「提到过额外查血糖、回避运动」，次数只留在原始记录与后端），删掉了问卷回避分与行为记录的对照说明（`discrepancyNote` 仍由后端返回，只给医护视图，患者页不渲染），「反复出现的念头」默认收起、点「展开」才看原话；标题「可以删掉的记录」改为「记录」。`apps/mobile/src/navigation/app-menu.tsx` 的血糖记录图标改为血滴 + 暖橙底（原与健康看板同为折线图）。`apps/mobile/src/api/client.ts` 新增 `friendlyNativeError`，把华为健康/HMS 的原生英文异常（`Binding to service failed`、`MISSING_INSTANCEID_SERVICE`）翻成一句可操作的中文。**要随下一次打包才上线**。
 - **构建脚本按地址选 profile（2026-10-22，PR #19）**：`scripts/build-android-local` 原来从不设置 `EAS_BUILD_PROFILE`，用它本机构建得到的是 development 包，而 `apps/mobile/src/config.ts` 在非 production 环境连生产地址时会在模块加载期抛错——第一次交给用户测试的包一开就闪退就是这个原因。现在脚本从 `EXPO_PUBLIC_API_URL` 推断：连 `82.157.48.200` 强制 `EAS_BUILD_PROFILE=production`，其它地址走 development，显式 production + 非生产地址直接报错退出。
 
+- **会话层（2026-10-24，分支 `aya/nav-v2-proposal`）**：新表 `conversations`（迁移 `w2b3c4d5e6f7`，回填时把每个用户已有的消息归进一个「对话」，标题取首条用户消息前 24 字），`messages.conversation_id` 与 `conversation_summaries.conversation_id` 一起加上；`GET/POST /api/v1/chat/conversations` 列会话与开新对话，`GET /api/v1/chat/messages?conversation_id=` 只读该会话。每轮准备上下文时只带当前会话的消息与摘要（`context/builder.py`、`context/preparation.py`、`context/compaction.py` 都按 `conversation_id` 过滤），主动关怀写进独立的 `care` 会话，病人主动关怀消息不会串进普通对话。侧边栏改成会话列表（日期分组 + 「新的对话」），点一条就切过去。测试：`tests/test_conversations.py`、`tests/test_conversation_routes.py`、`tests/test_chat_service.py` 的会话断言。
+- **对话里直接记录饮食/用药（2026-10-24）**：`api/src/antang_api/tools/records.py` 提供 `record_meal` 与 `record_medication` 两个工具（事件时间可补记、未来 2 分钟以内算「现在」、补记上限 30 天、胰岛素只记录不给剂量建议），`SYSTEM_PROMPT` 写明「不要替患者算剂量」「缺用量先追问」「只记患者说的，不推断」。App 端饮食/用药表单加了「刚才 / 30 分钟前 / 1 小时前 / 2 小时前 / 3 小时前」的时间 chips（`apps/mobile/src/navigation/record-screen.tsx` 的 `eventIso(minutesAgo)`），记的是真实发生时间而不是点击时间。测试：`tests/test_record_tools.py`。
+- **需部署才生效**：上面两项都要 `alembic upgrade head` 到 `w2b3c4d5e6f7` 并重建 api 容器（`deploy_pinned.sh`）；App 侧要重新打包。
+
 ## 三、未做（按优先级，含卡点）
 
 1. ~~**移动端「行为与信念」展示**~~：已实现（`apps/mobile/src/fear/FearBehaviorSection.tsx`，挂在健康档案「沟通方式」下方；默认 28 天窗口，只展示次数与原话，不显示分数）。代码已合入分支，**等量表授权到位后与其它改动一起重打 APK**。
