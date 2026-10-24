@@ -43,7 +43,7 @@
       "favicon": "./assets/favicon.png"
     },
     "extra": {
-      "buildCommit": "wiring",
+      "buildCommit": "4d75837",
       "eas": {
         "projectId": "d04128ba-7ddd-4df4-a952-d52a8a9bea68"
       }
