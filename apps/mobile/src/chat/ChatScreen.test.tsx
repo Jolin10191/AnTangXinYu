@@ -129,9 +129,8 @@ describe('ChatScreen', () => {
     });
 
     const menuProps = mockAppMenu.mock.calls.at(-1)![0] as Record<string, unknown>;
-    expect(menuProps.onOpenPatientAccess).toEqual(expect.any(Function));
-    expect(menuProps.onOpenGlucose).toEqual(expect.any(Function));
-    expect(menuProps.onOpenHealth).toEqual(expect.any(Function));
+    expect(menuProps.onSelectConversation).toEqual(expect.any(Function));
+    expect(menuProps.conversations).toBeDefined();
     expect(api.getChatAttachmentImageSource).toHaveBeenCalledWith(
       '019b2222-2222-7222-8222-222222222222',
     );

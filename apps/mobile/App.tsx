@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -15,7 +15,10 @@ import { AuthScreen } from "./src/auth/AuthScreen";
 import { AdministrationScreen } from "./src/administration/AdministrationScreen";
 import { ClinicianApplicationScreen } from "./src/administration/ClinicianApplicationScreen";
 import { secureTokenStore } from "./src/auth/token-store";
-import { ChatScreen } from "./src/chat/ChatScreen";
+import { ChatScreen, type ChatPage } from "./src/chat/ChatScreen";
+import { AppTabBar, type AppTabKey } from "./src/navigation/tab-bar";
+import { ProfileScreen } from "./src/navigation/profile-screen";
+import { RecordScreen } from "./src/navigation/record-screen";
 import { ClinicianScreen } from "./src/patient-access/patient-access-screen";
 import { BrandMark } from "./src/ui/brand-mark";
 import { colors, radii, spacing, typefaces } from "./src/ui/theme";
@@ -169,15 +172,98 @@ function AppRoot() {
   }
 
   return (
-    <ChatScreen
+    <PatientShell
       api={api}
-      user={state.user}
       onSignedOut={() => setState({ kind: "signed-out" })}
+      user={state.user}
     />
   );
 }
 
+/**
+ * 患者端外壳：底部三个 tab（对话 / 记录 / 我的），抽屉只放会话列表。
+ * 三个页面都保持挂载，切 tab 只是隐藏，这样正在进行的对话和实时心率不会被打断。
+ */
+function PatientShell({
+  api,
+  user,
+  onSignedOut,
+}: {
+  api: typeof appClient;
+  user: User;
+  onSignedOut: () => void;
+}) {
+  const [tab, setTab] = useState<AppTabKey>("chat");
+  const [pageRequest, setPageRequest] = useState<{
+    page: ChatPage;
+    id: number;
+  } | null>(null);
+  const nextPageId = useRef(0);
+
+  const openPage = useCallback((page: ChatPage) => {
+    nextPageId.current += 1;
+    setPageRequest({ page, id: nextPageId.current });
+    setTab("chat");
+  }, []);
+
+  return (
+    <View style={styles.shell}>
+      <View style={styles.shellBody}>
+        <View
+          pointerEvents={tab === "chat" ? "auto" : "none"}
+          style={[styles.tabPage, tab === "chat" ? null : styles.tabPageHidden]}
+        >
+          <ChatScreen
+            api={api}
+            onSignedOut={onSignedOut}
+            pageRequest={pageRequest}
+            user={user}
+          />
+        </View>
+        <View
+          pointerEvents={tab === "records" ? "auto" : "none"}
+          style={[styles.tabPage, tab === "records" ? null : styles.tabPageHidden]}
+        >
+          <RecordScreen
+            api={api}
+            onImport={() => openPage("glucose")}
+            onRecordGlucose={() => openPage("glucose")}
+          />
+        </View>
+        <View
+          pointerEvents={tab === "profile" ? "auto" : "none"}
+          style={[styles.tabPage, tab === "profile" ? null : styles.tabPageHidden]}
+        >
+          <ProfileScreen
+            name={user.username}
+            onOpenFearRecords={() => openPage("health")}
+            onOpenHealthDashboard={() => openPage("dashboard")}
+            onOpenHealthProfile={() => openPage("health")}
+            onOpenPatientAccess={() => openPage("patientAccess")}
+            onOpenPsychosocial={() => openPage("health")}
+            onOpenSettings={() => openPage("settings")}
+          />
+        </View>
+      </View>
+      <AppTabBar active={tab} onChange={setTab} />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  shell: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  shellBody: {
+    flex: 1,
+  },
+  tabPage: {
+    ...StyleSheet.absoluteFill,
+  },
+  tabPageHidden: {
+    opacity: 0,
+  },
   centered: {
     flex: 1,
     alignItems: "center",

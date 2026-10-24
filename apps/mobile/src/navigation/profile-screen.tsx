@@ -17,9 +17,6 @@ type Props = {
   onOpenPsychosocial: () => void;
   onOpenPatientAccess: () => void;
   onOpenFearRecords: () => void;
-  onOpenHistory: () => void;
-  onOpenDevices: () => void;
-  onOpenPrivacy: () => void;
   onOpenSettings: () => void;
 };
 
@@ -68,15 +65,7 @@ export function ProfileScreen(props: Props) {
       <Group
         rows={[
           { label: "我的记录与撤回", onPress: props.onOpenFearRecords },
-          { label: "历史对话", onPress: props.onOpenHistory },
-          { label: "设备与数据源", hint: "手环 · Health Connect ›", onPress: props.onOpenDevices },
-        ]}
-      />
-
-      <Group
-        rows={[
-          { label: "隐私与数据", onPress: props.onOpenPrivacy },
-          { label: "设置与更新", hint: "1.0.0 ›", onPress: props.onOpenSettings },
+          { label: "设置与更新", hint: "版本 · 检查更新 ›", onPress: props.onOpenSettings },
         ]}
       />
 

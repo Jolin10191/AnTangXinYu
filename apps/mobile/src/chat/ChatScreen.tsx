@@ -82,7 +82,14 @@ type Props = {
   api: ApiClient;
   user: User;
   onSignedOut: () => void;
+  /**
+   * 从底部 tab 的「我的 / 记录」请求打开某一页。
+   * 用一个自增的 id 传递，避免「同一页连点两次」时状态相同而不触发。
+   */
+  pageRequest?: { page: ChatPage; id: number } | null;
 };
+
+export type ChatPage = 'health' | 'dashboard' | 'glucose' | 'patientAccess' | 'settings';
 
 const dayFormatter = new Intl.DateTimeFormat('zh-CN', {
   month: 'long',
@@ -130,16 +137,26 @@ export function currentLiveHeartRate(
   };
 }
 
-export function ChatScreen({ api, user, onSignedOut }: Props) {
+export function ChatScreen({ api, user, onSignedOut, pageRequest = null }: Props) {
   // 实时心率会话挂在聊天页根组件上，切换健康看板、对话和健康档案都不会断开。
   return (
     <LiveHeartRateProvider active>
-      <ChatScreenContent api={api} onSignedOut={onSignedOut} user={user} />
+      <ChatScreenContent
+        api={api}
+        onSignedOut={onSignedOut}
+        pageRequest={pageRequest}
+        user={user}
+      />
     </LiveHeartRateProvider>
   );
 }
 
-function ChatScreenContent({ api, user, onSignedOut }: Props) {
+function ChatScreenContent({
+  api,
+  user,
+  onSignedOut,
+  pageRequest = null,
+}: Props) {
   const liveHeartRate = useLiveHeartRateController();
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
   const [draft, setDraft] = useState('');
@@ -193,6 +210,20 @@ function ChatScreenContent({ api, user, onSignedOut }: Props) {
       })),
     [conversations],
   );
+
+  useEffect(() => {
+    if (pageRequest === null) return;
+    // 放到下一个 tick：effect 里同步 setState 会触发级联渲染（expo lint 会拦）。
+    const timer = setTimeout(() => {
+      setShowMenu(false);
+      if (pageRequest.page === 'health') setShowHealthOverview(true);
+      if (pageRequest.page === 'dashboard') setShowDashboard(true);
+      if (pageRequest.page === 'glucose') setShowGlucose(true);
+      if (pageRequest.page === 'patientAccess') setShowPatientAccess(true);
+      if (pageRequest.page === 'settings') setShowSettings(true);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [pageRequest]);
 
   useEffect(() => {
     const showSubscription = Keyboard.addListener('keyboardDidShow', () =>
@@ -1214,42 +1245,15 @@ function ChatScreenContent({ api, user, onSignedOut }: Props) {
       </Modal> : null}
 
       <AppMenu
-        onOpenPatientAccess={() => { setShowMenu(false); setShowPatientAccess(true); }}
         conversations={conversationAnchors}
         activeConversationId={conversationId}
         onNewChat={() => void startNewConversation()}
         onClose={() => setShowMenu(false)}
-        onOpenHealth={() => {
-          setShowMenu(false);
-          setShowHealthOverview(true);
-        }}
-        onOpenSettings={() => {
-          setShowMenu(false);
-          setShowSettings(true);
-        }}
-        // ===== 新增：健康看板入口 =====
-        onOpenDashboard={() => {
-          setShowMenu(false);
-          setShowDashboard(true);
-        }}
-        // ===== 新增：血糖记录入口 =====
-        onOpenGlucose={() => {
-          setShowMenu(false);
-          setShowGlucose(true);
-        }}
         onSelectConversation={(id) => {
           void openConversation(id);
         }}
         username={user.username}
         visible={showMenu}
-        gadgetbridgeChecking={gadgetbridge.checking}
-        gadgetbridgeConnected={gadgetbridge.connected}
-        gadgetbridgeSyncing={gadgetbridge.syncing}
-        gadgetbridgeError={gadgetbridge.error}
-        gadgetbridgeProgress={gadgetbridge.progress}
-        gadgetbridgeLastSyncedAt={gadgetbridge.lastSyncedAt}
-        onGadgetbridgeConnect={gadgetbridge.connect}
-        onGadgetbridgeSync={gadgetbridge.sync}
       />
 
       <ExpoStatusBar style="dark" />

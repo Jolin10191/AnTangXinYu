@@ -15,9 +15,6 @@ describe("ProfileScreen", () => {
           onOpenPsychosocial={() => opened.push("psychosocial")}
           onOpenPatientAccess={() => opened.push("access")}
           onOpenFearRecords={() => opened.push("fear")}
-          onOpenHistory={() => opened.push("history")}
-          onOpenDevices={() => opened.push("devices")}
-          onOpenPrivacy={() => opened.push("privacy")}
           onOpenSettings={() => opened.push("settings")}
         />,
       );
