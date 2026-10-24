@@ -58,6 +58,12 @@ import {
   type GlucoseReading,
   parseGlucoseReading,
   parseGlucoseReadings,
+  parseMealLog,
+  parseMealLogs,
+  parseMedicationLog,
+  parseMedicationLogs,
+  type MealLog,
+  type MedicationLog,
   type GlucoseSummary,
   parseGlucoseSummary,
 } from "./types";
@@ -924,6 +930,85 @@ export class ApiClient {
     this.assertSessionVersion(version);
     if (!response.ok) throw await this.apiError(response);
     await this.mutateTokens(version, () => this.tokenStore.clear());
+  }
+
+  async createMealLog(input: {
+    eatenAt: string;
+    mealType: "breakfast" | "lunch" | "dinner" | "snack";
+    description?: string;
+    carbsGrams?: number | null;
+  }): Promise<MealLog> {
+    const response = await this.authorizedFetch("/api/v1/health-profile/meal-logs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        eaten_at: input.eatenAt,
+        meal_type: input.mealType,
+        description: input.description ?? "",
+        carbs_grams: input.carbsGrams ?? null,
+      }),
+    });
+    if (!response.ok) throw await this.apiError(response);
+    return parseMealLog(await responseJson(response));
+  }
+
+  async getMealLogs(days = 7, signal?: AbortSignal): Promise<MealLog[]> {
+    const response = await this.authorizedFetch(
+      `/api/v1/health-profile/meal-logs?days=${days}`,
+      { signal },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseMealLogs(await responseJson(response));
+  }
+
+  async deleteMealLog(id: string): Promise<void> {
+    const response = await this.authorizedFetch(
+      `/api/v1/health-profile/meal-logs/${id}`,
+      { method: "DELETE" },
+    );
+    if (!response.ok) throw await this.apiError(response);
+  }
+
+  async createMedicationLog(input: {
+    takenAt: string;
+    name: string;
+    doseText?: string;
+    kind?: "insulin" | "oral" | "other";
+    note?: string | null;
+  }): Promise<MedicationLog> {
+    const response = await this.authorizedFetch(
+      "/api/v1/health-profile/medication-logs",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          taken_at: input.takenAt,
+          name: input.name,
+          dose_text: input.doseText ?? "",
+          kind: input.kind ?? "other",
+          note: input.note ?? null,
+        }),
+      },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseMedicationLog(await responseJson(response));
+  }
+
+  async getMedicationLogs(days = 30, signal?: AbortSignal): Promise<MedicationLog[]> {
+    const response = await this.authorizedFetch(
+      `/api/v1/health-profile/medication-logs?days=${days}`,
+      { signal },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseMedicationLogs(await responseJson(response));
+  }
+
+  async deleteMedicationLog(id: string): Promise<void> {
+    const response = await this.authorizedFetch(
+      `/api/v1/health-profile/medication-logs/${id}`,
+      { method: "DELETE" },
+    );
+    if (!response.ok) throw await this.apiError(response);
   }
 
   async getPsychosocialInstrument(): Promise<PsychosocialInstrument> {

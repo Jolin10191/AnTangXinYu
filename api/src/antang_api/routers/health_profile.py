@@ -45,6 +45,12 @@ from antang_api.schemas.glucose import (
     GlucoseReadingResponse,
     GlucoseSummaryResponse,
 )
+from antang_api.schemas.nutrition import (
+    MealLogRequest,
+    MealLogResponse,
+    MedicationLogRequest,
+    MedicationLogResponse,
+)
 from antang_api.health_profile.errors import (
     HealthProfileChangedError,
     HealthProfileInvariantError,
@@ -81,6 +87,8 @@ from antang_api.psychosocial.report import patient_assessment_response
 from antang_api.models import (
     HYPOGLYCEMIA_BELIEFS,
     HealthProfileChange,
+    MealLog,
+    MedicationLog,
     ProfileChangeMode,
     ProfileChangeStatus,
     PsychosocialAssessment,
@@ -852,3 +860,121 @@ async def get_cgm_samples(
         count=len(samples),
         samples=[CgmSampleResponse.model_validate(item) for item in samples],
     )
+
+@router.post(
+    "/meal-logs",
+    response_model=MealLogResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_meal_log(
+    payload: MealLogRequest,
+    user: Annotated[User, Depends(get_patient_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> MealLogResponse:
+    """记一顿饭。碳水是估计值，允许为空，也允许患者自己改。"""
+
+    meal = MealLog(
+        user_id=user.id,
+        eaten_at=payload.eaten_at,
+        meal_type=payload.meal_type,
+        description=payload.description.strip(),
+        carbs_grams=payload.carbs_grams,
+    )
+    session.add(meal)
+    await session.commit()
+    await session.refresh(meal)
+    return MealLogResponse.model_validate(meal)
+
+
+@router.get("/meal-logs", response_model=list[MealLogResponse])
+async def list_meal_logs(
+    user: Annotated[User, Depends(get_patient_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    days: Annotated[int, Query(ge=1, le=90)] = 7,
+) -> list[MealLogResponse]:
+    """按时间倒序返回最近的饮食记录，供记录页展示。"""
+
+    since = datetime.now(UTC) - timedelta(days=days)
+    rows = (
+        await session.scalars(
+            select(MealLog)
+            .where(MealLog.user_id == user.id, MealLog.eaten_at >= since)
+            .order_by(MealLog.eaten_at.desc())
+        )
+    ).all()
+    return [MealLogResponse.model_validate(row) for row in rows]
+
+
+@router.delete("/meal-logs/{meal_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_meal_log(
+    meal_id: UUID,
+    user: Annotated[User, Depends(get_patient_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    """患者自己删掉一条饮食记录（硬删除，无法恢复）。"""
+
+    meal = await session.get(MealLog, meal_id)
+    if meal is None or meal.user_id != user.id:
+        raise HTTPException(status_code=404, detail="没有这条记录")
+    await session.delete(meal)
+    await session.commit()
+
+
+@router.post(
+    "/medication-logs",
+    response_model=MedicationLogResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_medication_log(
+    payload: MedicationLogRequest,
+    user: Annotated[User, Depends(get_patient_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> MedicationLogResponse:
+    """记一次用药。只记录患者填的内容，不计算剂量、不给建议。"""
+
+    log = MedicationLog(
+        user_id=user.id,
+        taken_at=payload.taken_at,
+        name=payload.name.strip(),
+        dose_text=payload.dose_text.strip(),
+        kind=payload.kind,
+        note=(payload.note or "").strip() or None,
+    )
+    session.add(log)
+    await session.commit()
+    await session.refresh(log)
+    return MedicationLogResponse.model_validate(log)
+
+
+@router.get("/medication-logs", response_model=list[MedicationLogResponse])
+async def list_medication_logs(
+    user: Annotated[User, Depends(get_patient_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    days: Annotated[int, Query(ge=1, le=180)] = 30,
+) -> list[MedicationLogResponse]:
+    """按时间倒序返回最近的用药记录。"""
+
+    since = datetime.now(UTC) - timedelta(days=days)
+    rows = (
+        await session.scalars(
+            select(MedicationLog)
+            .where(MedicationLog.user_id == user.id, MedicationLog.taken_at >= since)
+            .order_by(MedicationLog.taken_at.desc())
+        )
+    ).all()
+    return [MedicationLogResponse.model_validate(row) for row in rows]
+
+
+@router.delete("/medication-logs/{log_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_medication_log(
+    log_id: UUID,
+    user: Annotated[User, Depends(get_patient_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    """患者自己删掉一条用药记录（硬删除，无法恢复）。"""
+
+    log = await session.get(MedicationLog, log_id)
+    if log is None or log.user_id != user.id:
+        raise HTTPException(status_code=404, detail="没有这条记录")
+    await session.delete(log)
+    await session.commit()

@@ -2147,3 +2147,103 @@ export function parseGlucoseSummary(value: unknown): GlucoseSummary {
     below70Count: glucoseNumber(data, "below_70_count"),
   };
 }
+
+export type MealType = "breakfast" | "lunch" | "dinner" | "snack";
+
+export type MedicationKind = "insulin" | "oral" | "other";
+
+export type MealLog = {
+  id: string;
+  eatenAt: string;
+  mealType: MealType;
+  description: string;
+  carbsGrams: number | null;
+  createdAt: string;
+};
+
+export type MedicationLog = {
+  id: string;
+  takenAt: string;
+  name: string;
+  doseText: string;
+  kind: MedicationKind;
+  note: string | null;
+  createdAt: string;
+};
+
+const MEAL_TYPES: MealType[] = ["breakfast", "lunch", "dinner", "snack"];
+const MEDICATION_KINDS: MedicationKind[] = ["insulin", "oral", "other"];
+
+function nutritionObject(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("记录格式不正确");
+  }
+  return value as Record<string, unknown>;
+}
+
+function nutritionString(data: Record<string, unknown>, key: string): string {
+  const value = data[key];
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`记录缺少 ${key}`);
+  }
+  return value;
+}
+
+function nutritionTime(data: Record<string, unknown>, key: string): string {
+  const value = data[key];
+  if (typeof value !== "string") throw new Error(`记录缺少 ${key}`);
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) throw new Error(`记录里的 ${key} 不是时间`);
+  return value;
+}
+
+function nutritionCars(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error("碳水估计值不是数字");
+  }
+  return value;
+}
+
+export function parseMealLog(value: unknown): MealLog {
+  const data = nutritionObject(value);
+  const mealType = data.meal_type;
+  if (typeof mealType !== "string" || !MEAL_TYPES.includes(mealType as MealType)) {
+    throw new Error("这顿算哪一餐不认识");
+  }
+  return {
+    id: nutritionString(data, "id"),
+    eatenAt: nutritionTime(data, "eaten_at"),
+    mealType: mealType as MealType,
+    description: typeof data.description === "string" ? data.description : "",
+    carbsGrams: nutritionCars(data.carbs_grams),
+    createdAt: nutritionTime(data, "created_at"),
+  };
+}
+
+export function parseMealLogs(value: unknown): MealLog[] {
+  if (!Array.isArray(value)) throw new Error("饮食记录格式不正确");
+  return value.map(parseMealLog);
+}
+
+export function parseMedicationLog(value: unknown): MedicationLog {
+  const data = nutritionObject(value);
+  const kind = data.kind;
+  if (typeof kind !== "string" || !MEDICATION_KINDS.includes(kind as MedicationKind)) {
+    throw new Error("这种用药方式不认识");
+  }
+  return {
+    id: nutritionString(data, "id"),
+    takenAt: nutritionTime(data, "taken_at"),
+    name: nutritionString(data, "name"),
+    doseText: typeof data.dose_text === "string" ? data.dose_text : "",
+    kind: kind as MedicationKind,
+    note: typeof data.note === "string" ? data.note : null,
+    createdAt: nutritionTime(data, "created_at"),
+  };
+}
+
+export function parseMedicationLogs(value: unknown): MedicationLog[] {
+  if (!Array.isArray(value)) throw new Error("用药记录格式不正确");
+  return value.map(parseMedicationLog);
+}

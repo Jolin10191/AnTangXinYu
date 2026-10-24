@@ -41,6 +41,12 @@ from antang_api.models.health_profile import (
     ProfileTargetType,
 )
 from antang_api.models.knowledge import KnowledgeChunk, KnowledgeDocument
+from antang_api.models.nutrition import (
+    MEAL_TYPES,
+    MEDICATION_KINDS,
+    MealLog,
+    MedicationLog,
+)
 from antang_api.models.psychosocial import PsychosocialAssessment
 from antang_api.models.proactive_care import (
     CarePlan,
@@ -117,6 +123,10 @@ __all__ = [
     "HealthProfileChange",
     "KnowledgeChunk",
     "KnowledgeDocument",
+    "MealLog",
+    "MedicationLog",
+    "MEAL_TYPES",
+    "MEDICATION_KINDS",
     "PersonalProfile",
     "PersonalProfileField",
     "ProfileChangeMode",
