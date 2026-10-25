@@ -1,5 +1,6 @@
 import { fetch as expoFetch, type FetchRequestInit } from "expo/fetch";
 import { File } from "expo-file-system";
+import * as LegacyFileSystem from "expo-file-system/legacy";
 
 import type { TokenStore } from "../auth/token-store";
 import { consumeChatStream } from "./ndjson";
@@ -157,6 +158,30 @@ async function responseJson(response: FetchResponse): Promise<unknown> {
 
 // 上传本地文件（录音、导出的 CSV）。expo 的 fetch 认这个 { bytes, name, type } 形状，
 // 手写成 Blob 反而在 RN 上拿不到内容。
+const BASE64_ALPHABET =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/** 把二进制转成 base64：写缓存文件要用，RN 没有 Buffer。 */
+function bytesToBase64(bytes: Uint8Array): string {
+  let out = "";
+  for (let index = 0; index < bytes.length; index += 3) {
+    const a = bytes[index]!;
+    const b = bytes[index + 1];
+    const c = bytes[index + 2];
+    out += BASE64_ALPHABET[a >> 2];
+    out += BASE64_ALPHABET[((a & 3) << 4) | ((b ?? 0) >> 4)];
+    out += b === undefined ? "=" : BASE64_ALPHABET[((b & 15) << 2) | ((c ?? 0) >> 6)];
+    out += c === undefined ? "=" : BASE64_ALPHABET[c & 63];
+  }
+  return out;
+}
+
+function extensionForMimeType(mimeType: string): string {
+  if (mimeType === "image/png") return "png";
+  if (mimeType === "application/pdf") return "pdf";
+  return "jpg";
+}
+
 function uploadForm(file: {
   mimeType: string;
   name: string;
@@ -587,20 +612,36 @@ export class ApiClient {
     return parseMessageHistory(await responseJson(response));
   }
 
+  /**
+   * 把已经发出去的图片/报告下到缓存，返回本地 file:// 地址。
+   *
+   * 不能只把带 Authorization 的 URL 交给 <Image>：RN 0.86 的 Image 在网络请求上
+   * 不带 headers（实测打到后端是 401），所以这里自己带 token 取字节、写成文件。
+   */
   async getChatAttachmentImageSource(attachmentId: string): Promise<{
     uri: string;
-    headers: { Authorization: string };
   }> {
     const version = this.sessionVersion;
     const tokens = await this.tokenStore.load();
     this.assertSessionVersion(version);
     if (tokens === null) return this.expireSession(version);
-    return {
-      uri: this.url(
-        `/api/v1/chat/attachments/${encodeURIComponent(attachmentId)}/content`,
-      ),
+
+    const path = `/api/v1/chat/attachments/${encodeURIComponent(attachmentId)}/content`;
+    const response = await expoFetch(this.url(path), {
       headers: { Authorization: `Bearer ${tokens.accessToken}` },
-    };
+    });
+    this.assertSessionVersion(version);
+    if (!response.ok) {
+      throw new Error(`附件下载失败：HTTP ${response.status}`);
+    }
+
+    const mimeType = response.headers.get("content-type") ?? "image/jpeg";
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const target = `${LegacyFileSystem.cacheDirectory ?? ""}chat-attachment-${attachmentId}.${extensionForMimeType(mimeType)}`;
+    await LegacyFileSystem.writeAsStringAsync(target, bytesToBase64(bytes), {
+      encoding: LegacyFileSystem.EncodingType.Base64,
+    });
+    return { uri: target };
   }
 
   async syncPushInstallation(
@@ -1216,6 +1257,7 @@ export class ApiClient {
     valueMgDl: number;
     measuredAt: string;
     context: string;
+    source?: string;
     note?: string | null;
   }): Promise<GlucoseReading> {
     const response = await this.authorizedFetch(
@@ -1227,6 +1269,7 @@ export class ApiClient {
           value_mg_dl: input.valueMgDl,
           measured_at: input.measuredAt,
           context: input.context,
+          source: input.source ?? "fingerstick",
           note: input.note ?? null,
         }),
       },

@@ -35,6 +35,13 @@ const SOURCE_LABELS: Record<string, string> = {
   report: '报告解读',
 };
 
+// 手填时能选的来源。传感器那条走导入，不在这里点。
+const INPUT_SOURCES: { value: 'fingerstick' | 'lab' | 'manual'; label: string }[] = [
+  { value: 'fingerstick', label: '指尖血' },
+  { value: 'lab', label: '静脉血' },
+  { value: 'manual', label: '其他' },
+];
+
 /** 补记时要写明「测量」和「记录」不是同一时刻，否则看不出这条是事后补的。 */
 function recordedLate(item: GlucoseReading): string | null {
   const measured = new Date(item.measuredAt).getTime();
@@ -85,6 +92,7 @@ export function GlucoseScreen({ api }: Props) {
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [value, setValue] = useState('');
   const [context, setContext] = useState('fasting');
+  const [source, setSource] = useState<'fingerstick' | 'lab' | 'manual'>('fingerstick');
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -130,6 +138,7 @@ export function GlucoseScreen({ api }: Props) {
         valueMgDl: parsed,
         measuredAt: new Date().toISOString(),
         context,
+        source,
         note: note.trim() === '' ? null : note.trim(),
       });
       setValue('');
@@ -140,7 +149,7 @@ export function GlucoseScreen({ api }: Props) {
     } finally {
       setSaving(false);
     }
-  }, [api, context, load, note, value]);
+  }, [api, context, source, load, note, value]);
 
   const revoke = useCallback(
     async (reading: GlucoseReading) => {
@@ -184,6 +193,27 @@ export function GlucoseScreen({ api }: Props) {
               <Pressable
                 key={item.value}
                 onPress={() => setContext(item.value)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                style={[styles.chip, active && styles.chipActive]}
+              >
+                <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                  {item.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {/* 来源要分清楚：指尖血是即时自测，静脉血是医院化验，两者数值口径不同。 */}
+        <Text style={styles.sourceLabel}>数值来自</Text>
+        <View style={styles.chipRow}>
+          {INPUT_SOURCES.map(item => {
+            const active = item.value === source;
+            return (
+              <Pressable
+                key={item.value}
+                onPress={() => setSource(item.value)}
                 accessibilityRole="button"
                 accessibilityState={{ selected: active }}
                 style={[styles.chip, active && styles.chipActive]}
@@ -325,6 +355,7 @@ const styles = StyleSheet.create({
   },
   unit: { marginBottom: 8, marginLeft: 8, fontSize: 14, color: '#7A8B86' },
   chipRow: { marginTop: 12, flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  sourceLabel: { marginTop: 14, fontSize: 12, color: '#7A8B86' },
   chip: {
     paddingHorizontal: 14,
     paddingVertical: 8,

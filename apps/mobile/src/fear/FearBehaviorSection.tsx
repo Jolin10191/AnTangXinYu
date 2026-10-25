@@ -38,6 +38,7 @@ export const BEHAVIOR_LABELS: Record<string, string> = {
   comfort_meal: '因为担心而加餐',
   exercise_avoidance: '回避运动',
   insulin_hold: '自行减少胰岛素',
+  insulin_change: '自行调整胰岛素剂量',
 };
 
 const BEHAVIOR_ORDER = [
@@ -46,6 +47,7 @@ const BEHAVIOR_ORDER = [
   'comfort_meal',
   'exercise_avoidance',
   'insulin_hold',
+  'insulin_change',
 ];
 
 export type FearBehaviorSectionProps = {

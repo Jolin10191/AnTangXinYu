@@ -71,3 +71,9 @@ def test_a_meal_may_omit_the_carbs_the_patient_did_not_mention() -> None:
 def test_meal_carbs_outside_a_plausible_range_are_refused() -> None:
     with pytest.raises(ValidationError):
         MealRequest(meal_type="lunch", eaten_at=NOW, description="火锅", carbs_grams=500)
+
+def test_an_empty_dose_is_refused_so_the_model_has_to_ask() -> None:
+    """照片里只看得见药名、看不见剂量时：工具收不下这条，模型只能回去问。"""
+
+    with pytest.raises(ValidationError):
+        MedicationRequest(name="门冬胰岛素", dose_text="", taken_at=NOW)

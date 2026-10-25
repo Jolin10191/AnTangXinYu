@@ -327,6 +327,7 @@ _BEHAVIOR_KIND_LABELS = {
     "comfort_meal": "因为担心而加餐",
     "exercise_avoidance": "运动回避",
     "insulin_hold": "自行减少胰岛素",
+    "insulin_change": "自行调整胰岛素剂量",
 }
 
 # 对外暴露同一份词表，App 的「我的记录」与汇总卡片因此不会出现两套叫法。

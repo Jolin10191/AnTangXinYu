@@ -21,6 +21,7 @@ import { ChatScreen, type ChatPage } from "./src/chat/ChatScreen";
 import { useGadgetbridge } from "./src/health-connect/useGadgetbridge";
 import { useHealthConnect } from "./src/health-connect/use-health-connect";
 import { AppTabBar, type AppTabKey } from "./src/navigation/tab-bar";
+import { MindScreen } from "./src/navigation/mind-screen";
 import { ProfileScreen } from "./src/navigation/profile-screen";
 import { RecordScreen } from "./src/navigation/record-screen";
 import { ClinicianScreen } from "./src/patient-access/patient-access-screen";
@@ -188,8 +189,8 @@ function AppRoot() {
 }
 
 /**
- * 患者端外壳：底部三个 tab（对话 / 记录 / 我的），抽屉只放会话列表。
- * 三个页面都保持挂载，切 tab 只是隐藏，这样正在进行的对话和实时心率不会被打断。
+ * 患者端外壳：底部四个 tab（对话 / 记录 / 心理 / 我的），抽屉只放会话列表。
+ * 四个页面都保持挂载，切 tab 只是隐藏，这样正在进行的对话和实时心率不会被打断。
  */
 function PatientShell({
   api,
@@ -275,6 +276,16 @@ function PatientShell({
             onImport={() => openPage("importSensor")}
             onRecordGlucose={() => openPage("glucose")}
             visible={tab === "records"}
+          />
+        </View>
+        <View
+          pointerEvents={tab === "mind" ? "auto" : "none"}
+          style={[styles.tabPage, tab === "mind" ? null : styles.tabPageHidden]}
+        >
+          <MindScreen
+            api={api}
+            onOpenCareSettings={() => openPage("care")}
+            visible={tab === "mind"}
           />
         </View>
         <View

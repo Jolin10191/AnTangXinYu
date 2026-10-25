@@ -35,6 +35,15 @@ jest.mock('expo-intent-launcher', () => ({
   startActivityAsync: jest.fn(async () => undefined),
 }));
 
+// 图片附件下载会把字节写到缓存文件；测试里只记录调用。
+jest.mock('expo-file-system/legacy', () => ({
+  cacheDirectory: 'file:///cache/',
+  EncodingType: { UTF8: 'utf8', Base64: 'base64' },
+  readAsStringAsync: jest.fn(async () => ''),
+  writeAsStringAsync: jest.fn(async () => undefined),
+  deleteAsync: jest.fn(async () => undefined),
+}));
+
 jest.mock('expo-sharing', () => ({
   isAvailableAsync: jest.fn(async () => true),
   shareAsync: jest.fn(async () => undefined),

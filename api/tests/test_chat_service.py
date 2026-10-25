@@ -23,6 +23,7 @@ from antang_api import chat
 from antang_api.agents.core import CoreAgentGraph
 from antang_api.agents.relative_day import subjective_day
 from antang_api.agents.runtime import AgentContext
+from antang_api.behavioral import record_behavior
 from antang_api.chat import (
     ActiveAgentRunError,
     ChatRetryError,
@@ -1771,3 +1772,43 @@ async def test_token_usage_is_not_inflated_by_repeated_chunk_snapshots(
     assert run is not None
     assert run.input_tokens == 6_200
     assert run.output_tokens == 9
+
+
+async def test_insulin_change_gets_a_non_blaming_reminder(
+    db_session: AsyncSession,
+) -> None:
+    """自己加减胰岛素：提醒由服务端补，患者看到的措辞不随模型发挥。"""
+
+    user = await create_user(db_session, "insulin_notice")
+    prepared_run = await prepare_chat_run(
+        db_session, user.id, uuid4(), "我把睡前长效减了 2 个单位"
+    )
+    record_behavior(
+        db_session,
+        user_id=user.id,
+        kind="insulin_change",
+        note="我把睡前长效减了 2 个单位",
+        source_message_id=prepared_run.user_message_id,
+    )
+    await db_session.commit()
+
+    assert await chat._insulin_notice(db_session, prepared_run) == chat.INSULIN_NOTICE
+
+
+async def test_insulin_notice_stays_quiet_for_other_behaviors(
+    db_session: AsyncSession,
+) -> None:
+    """多测一次血糖不该触发用药提醒：提醒只针对改剂量。"""
+
+    user = await create_user(db_session, "insulin_quiet")
+    prepared_run = await prepare_chat_run(db_session, user.id, uuid4(), "刚才又测了一次")
+    record_behavior(
+        db_session,
+        user_id=user.id,
+        kind="extra_check",
+        note="刚才又测了一次",
+        source_message_id=prepared_run.user_message_id,
+    )
+    await db_session.commit()
+
+    assert await chat._insulin_notice(db_session, prepared_run) is None

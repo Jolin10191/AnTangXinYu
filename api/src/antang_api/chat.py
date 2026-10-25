@@ -59,6 +59,7 @@ from antang_api.models import (
     CarePlan,
     CarePlanStatus,
     Conversation,
+    FearBehaviorLog,
     GlucoseReading,
     Message,
     MessageAttachment,
@@ -142,6 +143,31 @@ class PreparedChatRun:
     assistant_message_id: UUID
     run_id: UUID
     conversation_id: UUID
+
+
+INSULIN_NOTICE = (
+    "顺便说一句：剂量的事按医生给的方案来，别自己加减。"
+    "刚才这件事我记下来了，你说的原话也在里面，方便下次复诊时核对。"
+)
+
+
+async def _insulin_notice(session: AsyncSession, prepared_run: PreparedChatRun) -> str | None:
+    """这一轮如果记下了「自行加减胰岛素」，回复末尾补一句不指责的提醒。
+
+    写在服务端而不是只靠提示词：提示词偶尔不照做，而「改了剂量要提醒本人」这件事
+    不允许偶尔失效。措辞只说「按医生给的方案」，不评判、不追问。
+    """
+
+    stmt = (
+        select(FearBehaviorLog.kind)
+        .where(
+            FearBehaviorLog.source_message_id == prepared_run.user_message_id,
+            FearBehaviorLog.kind.in_(("insulin_change", "insulin_hold")),
+        )
+        .limit(1)
+    )
+    kinds = await session.scalar(stmt)
+    return INSULIN_NOTICE if kinds is not None else None
 
 
 async def prepare_chat_run(
@@ -1054,6 +1080,12 @@ async def stream_chat_run(
             visible_turns=visible_turns,
         )
 
+        # 自行加减胰岛素的提醒补在回复末尾：先让模型把话说完整，再由服务端补这一句，
+        # 患者看到的语气就不受模型临场发挥影响。
+        insulin_notice = await _insulin_notice(session, prepared_run)
+        if insulin_notice is not None:
+            content = f"{content}\n\n{insulin_notice}"
+            yield TextDeltaEvent(delta=f"\n\n{insulin_notice}")
         await _complete_chat_run(
             session=session,
             prepared_run=prepared_run,

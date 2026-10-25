@@ -101,6 +101,7 @@ export type ChatPage =
   | 'glucose'
   | 'importSensor'
   | 'patientAccess'
+  | 'care'
   | 'settings';
 
 const dayFormatter = new Intl.DateTimeFormat('zh-CN', {
@@ -118,6 +119,29 @@ const timeFormatter = new Intl.DateTimeFormat('zh-CN', {
 function localDay(value: string): string {
   const date = new Date(value);
   return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+// 医疗口径提醒只在这条回复真的谈到诊断、用药、剂量、检验读数时出现。
+// 每条都挂等于免责声明噪音，读者会当它不存在。
+const MEDICAL_TOPICS =
+  /(诊断|处方|用药|剂量|药物|胰岛素|口服药|化验|检验|报告|指标|读数|血压|血脂|糖化|并发症|治疗|手术)/;
+const EMERGENCY_SIGNS =
+  /(昏迷|意识不清|抽搐|酮症|酸中毒|呼吸困难|胸痛|剧烈|急诊|叫救护车)/;
+
+/**
+ * 回复底下那行灰字。
+ *
+ * 只做「知识参考 + 听医生的」这一件事：不重复回复内容、不吓人、不写成长段免责声明。
+ * 提到危险信号时多加一句立刻就医，措辞按患者能听懂的说法（不写「请即刻就医」这种公文腔）。
+ */
+export function medicalFootnote(text: string): string | null {
+  if (!MEDICAL_TOPICS.test(text)) return null;
+  const base =
+    '以上是健康知识参考，不能替代医生的诊断和处方。具体用药请按医生给你的方案。';
+  if (EMERGENCY_SIGNS.test(text)) {
+    return `${base}如果出现意识不清、抽搐、呼吸困难或很难受，请立刻联系急救，别等回复。`;
+  }
+  return base;
 }
 
 function conversationGroup(value: string): string {
@@ -252,6 +276,7 @@ function ChatScreenContent({
       if (pageRequest.page === 'glucose') setShowGlucose(true);
       if (pageRequest.page === 'importSensor') setShowImportSensor(true);
       if (pageRequest.page === 'patientAccess') setShowPatientAccess(true);
+      if (pageRequest.page === 'care') setShowCareSettings(true);
       if (pageRequest.page === 'settings') setShowSettings(true);
     }, 0);
     return () => clearTimeout(timer);
@@ -617,10 +642,18 @@ function ChatScreenContent({
       previousMessage === undefined ||
       localDay(previousMessage.createdAt) !== localDay(message.createdAt);
 
+    const waitingFirstToken =
+      assistant && message.status === 'generating' && message.content.length === 0;
     const showBubble =
-      message.content.length > 0 || message.status !== 'generating';
+      message.content.length > 0 ||
+      message.status !== 'generating' ||
+      assistant;
     const activity =
       assistant && message.status === 'generating' ? state.activity : null;
+    const footnote =
+      assistant && message.status === 'completed'
+        ? medicalFootnote(message.content)
+        : null;
 
     return (
       <>
@@ -660,18 +693,32 @@ function ChatScreenContent({
                   assistant ? styles.assistantBubble : styles.userBubble,
                 ]}
               >
-                <MessageSources
-                  content={message.content || '无内容'}
-                  onOpenError={(error) =>
-                    dispatch({ type: 'history-failed', message: error })
-                  }
-                  sources={
-                    assistant && message.status === 'completed'
-                      ? message.sources
-                      : []
-                  }
-                  tone={assistant ? 'assistant' : 'user'}
-                />
+                {waitingFirstToken ? (
+                  <View style={styles.thinkingRow} accessibilityLiveRegion="polite">
+                    <Text style={styles.thinkingText}>糖糖正在想</Text>
+                    <View style={styles.thinkingDots}>
+                      <View style={styles.thinkingDot} />
+                      <View style={styles.thinkingDot} />
+                      <View style={styles.thinkingDot} />
+                    </View>
+                  </View>
+                ) : (
+                  <MessageSources
+                    content={message.content || '无内容'}
+                    onOpenError={(error) =>
+                      dispatch({ type: 'history-failed', message: error })
+                    }
+                    sources={
+                      assistant && message.status === 'completed'
+                        ? message.sources
+                        : []
+                    }
+                    tone={assistant ? 'assistant' : 'user'}
+                  />
+                )}
+                {footnote === null ? null : (
+                  <Text style={styles.medicalFootnote}>{footnote}</Text>
+                )}
                 {!assistant || message.status !== 'completed' ? (
                   <View style={styles.messageMeta}>
                     <Text
@@ -1427,6 +1474,31 @@ const styles = StyleSheet.create({
     borderRadius: 0,
     backgroundColor: 'transparent',
   },
+  // 第一句话还没出来时先占一个位置，别让患者对着空白以为没发出去。
+  thinkingRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    minHeight: 30,
+  },
+  thinkingText: {
+    color: colors.muted,
+    fontFamily: typefaces.sans,
+    fontSize: 15,
+  },
+  thinkingDots: {
+    flexDirection: 'row',
+    gap: 3,
+    paddingTop: 4,
+  },
+  thinkingDot: {
+    backgroundColor: colors.faint,
+    borderRadius: radii.pill,
+    height: 4,
+    width: 4,
+  },
   messageMeta: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1440,6 +1512,16 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   assistantMessageTime: { color: colors.faint },
+  medicalFootnote: {
+    marginTop: spacing.xs,
+    paddingTop: spacing.xs,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
+    color: colors.faint,
+    fontFamily: typefaces.sans,
+    fontSize: 11.5,
+    lineHeight: 17,
+  },
   userMessageTime: { color: '#D9FFF4' },
   failedStatus: {
     color: colors.danger,

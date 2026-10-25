@@ -23,6 +23,9 @@ BEHAVIOR_KINDS: tuple[str, ...] = (
     "comfort_meal",
     "exercise_avoidance",
     "insulin_hold",
+    # 自行增减剂量：与「少打」分开记，因为加量与减量的风险不同
+    # （一个怕低血糖、一个怕高血糖），报告给医生时的处置也不同。
+    "insulin_change",
 )
 
 # 认知图谱的节点词表。只在对话里真正出现时才落一条，不预填、不推断。

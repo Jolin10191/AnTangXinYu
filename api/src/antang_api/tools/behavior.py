@@ -28,12 +28,14 @@ class FearBehaviorRequest(BaseModel):
             "comfort_meal",
             "exercise_avoidance",
             "insulin_hold",
+            "insulin_change",
         ],
         Field(
             description=(
                 "extra_check=额外多测了一次血糖；night_check=夜间或睡前反复确认；"
                 "comfort_meal=因为担心而加餐；exercise_avoidance=因担心低血糖而放弃运动或不敢出门；"
-                "insulin_hold=因担心低血糖而少打或推迟胰岛素。"
+                "insulin_hold=因担心低血糖而少打或推迟胰岛素；"
+                "insulin_change=自己调整了胰岛素剂量（加量或减量都算），没跟医生说。"
             )
         ),
     ]

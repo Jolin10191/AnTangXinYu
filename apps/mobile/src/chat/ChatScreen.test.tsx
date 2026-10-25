@@ -71,8 +71,7 @@ jest.mock('../proactive-care/care-settings-modal', () => ({
 describe('ChatScreen', () => {
   test('renders a photo attachment returned by chat history', async () => {
     const imageSource = {
-      uri: 'https://api.test/api/v1/chat/attachments/photo-1/content',
-      headers: { Authorization: 'Bearer test-token' },
+      uri: 'file:///cache/chat-attachment-photo-1.jpg',
     };
     const api = {
       getConversations: jest.fn().mockResolvedValue([

@@ -25,6 +25,43 @@ import type {
   HealthConnectController,
 } from "./device-channels";
 import { EventTimeField } from "../ui/event-time-field";
+import Svg, { Line, Path, Polyline, Rect } from "react-native-svg";
+
+/**
+ * 五个分类各给一个小图标。
+ *
+ * 全部自绘而不是引图标库：这五个形状简单，自绘能保证未选中时线条也清楚，
+ * 也省得为一排 chip 去多认一套图标命名。
+ */
+function RecordTabIcon({ tab, active }: { tab: RecordTabKey; active: boolean }) {
+  const stroke = active ? colors.paper : colors.muted;
+  const line = {
+    fill: "none" as const,
+    stroke,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    strokeWidth: 1.6,
+  };
+  return (
+    <Svg height={15} viewBox="0 0 24 24" width={15}>
+      {tab === "glucose" ? (
+        <Path d="M12 3.5c2.9 4.4 5.6 7.5 5.6 10.3a5.6 5.6 0 1 1-11.2 0C6.4 11 9.1 7.9 12 3.5Z" {...line} />
+      ) : null}
+      {tab === "meals" ? (
+        <Path d="M4 12.5h16a8 8 0 0 1-16 0Zm8-8.5v3" {...line} />
+      ) : null}
+      {tab === "medication" ? (
+        <Path d="M8.5 8.5h7a3.75 3.75 0 0 1 0 7.5h-7a3.75 3.75 0 0 1 0-7.5Zm.5 0 6 7.5" {...line} />
+      ) : null}
+      {tab === "activity" ? (
+        <Path d="M4 18h8.5l3.5-2 4 2v1H4Zm2-8 3.5-3 3 2.5-4 3.5" {...line} />
+      ) : null}
+      {tab === "sleep" ? (
+        <Path d="M20 14.5A8 8 0 1 1 9.5 4a6.6 6.6 0 0 0 10.5 10.5Z" {...line} />
+      ) : null}
+    </Svg>
+  );
+}
 
 export type RecordTabKey = "glucose" | "meals" | "medication" | "activity" | "sleep";
 
@@ -110,6 +147,107 @@ export function nowIso(): string {
   return eventIso(0);
 }
 
+// 曲线上只看 2.5–16.7 mmol/L：再往外的极端值拉满一屏会把日常波动压成一条直线。
+const CGM_FLOOR = 2.5;
+const CGM_CEIL = 16.7;
+const CHART_W = 300;
+const CHART_H = 110;
+
+function dayStartOf(value: string): number {
+  const date = new Date(value);
+  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  return start.getTime();
+}
+
+/**
+ * 传感器曲线：一天一条线，绿色带是 3.9–10.0 的目标区间。
+ *
+ * 只画「最新那天」而不是把 7 天叠在一张图上：叠图看起来很热闹，但患者真正要判断
+ * 的是「今天什么时候低过、什么时候冲上去」，多天叠在一起反而读不出来。
+ * 缺口就是缺口——没有采样的时段保持空白，不做插值。
+ */
+function CgmCurve({ samples }: { samples: CgmSample[] }) {
+  if (samples.length === 0) return null;
+  const newest = samples.reduce(
+    (latest, sample) =>
+      new Date(sample.recordedAt).getTime() > new Date(latest.recordedAt).getTime()
+        ? sample
+        : latest,
+    samples[0],
+  );
+  const dayStart = dayStartOf(newest.recordedAt);
+  const dayEnd = dayStart + 24 * 60 * 60 * 1000;
+  const daySamples = samples
+    .filter((sample) => {
+      const time = new Date(sample.recordedAt).getTime();
+      return time >= dayStart && time < dayEnd;
+    })
+    .map((sample) => ({
+      time: new Date(sample.recordedAt).getTime(),
+      value: sample.valueMgDl / 18,
+    }))
+    .sort((left, right) => left.time - right.time);
+
+  if (daySamples.length < 2) return null;
+
+  const x = (time: number) => ((time - dayStart) / (24 * 60 * 60 * 1000)) * CHART_W;
+  const y = (value: number) => {
+    const clamped = Math.min(Math.max(value, CGM_FLOOR), CGM_CEIL);
+    return CHART_H - ((clamped - CGM_FLOOR) / (CGM_CEIL - CGM_FLOOR)) * CHART_H;
+  };
+  const bandTop = y(10);
+  const bandBottom = y(3.9);
+  const points = daySamples.map((sample) => `${x(sample.time)},${y(sample.value)}`).join(" ");
+  const dayLabel = `${new Date(dayStart).getMonth() + 1} 月 ${new Date(dayStart).getDate()} 日`;
+
+  return (
+    <View style={styles.card}>
+      <Text style={styles.cardTitle}>{dayLabel} · 传感器曲线</Text>
+      <Svg height={CHART_H} viewBox={`0 0 ${CHART_W} ${CHART_H}`} width="100%">
+        <Rect
+          fill="#E7F7F2"
+          height={bandBottom - bandTop}
+          width={CHART_W}
+          x={0}
+          y={bandTop}
+        />
+        <Line
+          stroke="#9BC9BB"
+          strokeDasharray="4 4"
+          strokeWidth={1}
+          x1={0}
+          x2={CHART_W}
+          y1={bandTop}
+          y2={bandTop}
+        />
+        <Line
+          stroke="#9BC9BB"
+          strokeDasharray="4 4"
+          strokeWidth={1}
+          x1={0}
+          x2={CHART_W}
+          y1={bandBottom}
+          y2={bandBottom}
+        />
+        <Polyline
+          fill="none"
+          points={points}
+          stroke="#11866F"
+          strokeLinejoin="round"
+          strokeWidth={1.8}
+        />
+      </Svg>
+      <View style={styles.curveLegend}>
+        <Text style={styles.cardHint}>绿色带 3.9–10.0 mmol/L</Text>
+        <Text style={styles.cardHint}>{daySamples.length} 个采样</Text>
+      </View>
+      <Text style={styles.cardHint}>
+        只画这一天的采样；没有采样的时段留空，不插值补点。
+      </Text>
+    </View>
+  );
+}
+
 type Props = {
   api: Pick<
     ApiClient,
@@ -149,6 +287,9 @@ export function RecordScreen({
 }: Props) {
   const [tab, setTab] = useState<RecordTabKey>("glucose");
   const [source, setSource] = useState<"manual" | "sensor">("manual");
+  // 设备通道默认收起：三条通道只在真连不上时才需要展开看原因，
+  // 天天占着半屏会把真正的记录推到下面。
+  const [devicesOpen, setDevicesOpen] = useState(false);
 
   const [readings, setReadings] = useState<GlucoseReading[]>([]);
   const [summary, setSummary] = useState<GlucoseSummary | null>(null);
@@ -244,6 +385,23 @@ export function RecordScreen({
       0,
     ) ?? 0;
 
+  async function saveWater(milliliters: number) {
+    setSaving(true);
+    try {
+      const created = await api.createMealLog({
+        eatenAt: new Date().toISOString(),
+        mealType: "snack",
+        description: `喝水 ${milliliters} ml`,
+        carbsGrams: null,
+      });
+      setMeals((current) => [created, ...current]);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "这杯水没记上");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function saveMeal() {
     setSaving(true);
     try {
@@ -264,8 +422,7 @@ export function RecordScreen({
     }
   }
 
-  async function saveMedication() {
-    setSaving(true);
+  async function saveMedication() {    setSaving(true);
     try {
       const created = await api.createMedicationLog({
         takenAt: medAt.toISOString(),
@@ -308,6 +465,7 @@ export function RecordScreen({
               onPress={() => setTab(item.key)}
               style={[styles.tab, selected ? styles.tabActive : null]}
             >
+              <RecordTabIcon active={selected} tab={item.key} />
               <Text style={[styles.tabText, selected ? styles.tabTextActive : null]}>
                 {item.label}
               </Text>
@@ -317,7 +475,24 @@ export function RecordScreen({
       </ScrollView>
 
       <ScrollView contentContainerStyle={styles.body}>
-        <DeviceChannels gadgetbridge={gadgetbridge} healthConnect={healthConnect} />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={devicesOpen ? "收起设备与手环" : "展开设备与手环"}
+          accessibilityState={{ expanded: devicesOpen }}
+          onPress={() => setDevicesOpen((open) => !open)}
+          style={styles.deviceBar}
+        >
+          <View>
+            <Text style={styles.deviceBarTitle}>设备与手环</Text>
+            <Text style={styles.deviceBarHint}>
+              系统健康数据 · 导出文件 · 实时心率
+            </Text>
+          </View>
+          <Text style={styles.deviceBarAction}>{devicesOpen ? "收起" : "展开"}</Text>
+        </Pressable>
+        {devicesOpen ? (
+          <DeviceChannels gadgetbridge={gadgetbridge} healthConnect={healthConnect} />
+        ) : null}
 
         {loading ? <ActivityIndicator color={colors.primary} /> : null}
         {error !== null ? <Text style={styles.error}>{error}</Text> : null}
@@ -406,6 +581,7 @@ export function RecordScreen({
                     从厂家 App 导出 CSV，先预览能用的行与可疑行，确认后才入库。
                   </Text>
                 </View>
+                {cgmSamples.length === 0 ? null : <CgmCurve samples={cgmSamples} />}
                 {cgmSampleStats === null ? null : (
                   <View style={styles.metricRow}>
                     <View style={[styles.metricSmall, styles.metricSmallPrimary]}>
@@ -561,6 +737,29 @@ export function RecordScreen({
               >
                 <Text style={styles.primaryButtonText}>保存这餐</Text>
               </Pressable>
+            </View>
+
+            {/* 喝水不单开一个分类：它不是营养，也不分餐次，但口渴、喝得多、尿多
+                恰恰是高血糖的信号，所以随手记在这儿，对话里一样看得到。 */}
+            <View style={styles.form}>
+              <Text style={styles.formTitle}>只记喝水</Text>
+              <Text style={styles.formHint}>
+                喝水不记碳水和份量，算 0 碳水；口渴喝得多这件事本身值得留一条。
+              </Text>
+              <View style={styles.chipRow}>
+                {[200, 300, 500].map((milliliters) => (
+                  <Pressable
+                    key={milliliters}
+                    accessibilityRole="button"
+                    accessibilityLabel={`记喝水 ${milliliters} 毫升`}
+                    onPress={() => void saveWater(milliliters)}
+                    disabled={saving}
+                    style={[styles.chip, saving ? styles.buttonDisabled : null]}
+                  >
+                    <Text style={styles.chipText}>{milliliters} ml</Text>
+                  </Pressable>
+                ))}
+              </View>
             </View>
           </>
         ) : null}
@@ -765,6 +964,9 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   tab: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
     paddingHorizontal: spacing.sm,
     paddingVertical: 6,
     borderRadius: radii.pill,
@@ -781,6 +983,33 @@ const styles = StyleSheet.create({
   tabTextActive: {
     color: "#FFFFFF",
     fontFamily: typefaces.sansMedium,
+    fontWeight: "600",
+  },
+  deviceBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.md,
+    backgroundColor: colors.paper,
+  },
+  deviceBarTitle: {
+    color: colors.ink,
+    fontFamily: typefaces.sansMedium,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  deviceBarHint: {
+    marginTop: 2,
+    color: colors.faint,
+    fontFamily: typefaces.sans,
+    fontSize: 11.5,
+  },
+  deviceBarAction: {
+    color: colors.primary,
+    fontFamily: typefaces.sansMedium,
+    fontSize: 12.5,
     fontWeight: "600",
   },
   body: {
@@ -837,6 +1066,11 @@ const styles = StyleSheet.create({
     fontFamily: typefaces.sans,
     fontSize: 11.5,
     lineHeight: 17,
+  },
+  curveLegend: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 6,
   },
   // 手环指标沿用健康看板的样子：一个数字 + 单位 + 一句说明，不是一段文字。
   metricCard: {
@@ -923,6 +1157,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
     marginBottom: 2,
+  },
+  formHint: {
+    color: colors.faint,
+    fontFamily: typefaces.sans,
+    fontSize: 11.5,
+    lineHeight: 17,
   },
   chipRow: {
     flexDirection: "row",
