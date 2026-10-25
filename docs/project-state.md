@@ -160,3 +160,5 @@
 - 模型侧：`read_glucose_readings` 的每条明细多一个 `device` 字段（中文品牌名），用于回答「我这台机器准不准」这类问题，不参与平均值与阈值判断。
 - 迁移 `a5b6c7d8e9f1` 加列，数据库汇合头从 `z3e4f5a6b7c8` 变为 `a5b6c7d8e9f1`；不加 CHECK，品牌增补不需要改表。
 - 验证：后端 524 passed、ruff 通过；移动端 50 套 297 用例通过、`tsc --noEmit` 无输出、`expo lint` 无问题。
+
+出包与部署状态（2026-10-26 凌晨）：后端镜像 `antang-api:deploy-20261025-221744`（含 `source_device`，健康检查通过），`alembic_version = a5b6c7d8e9f1`；测试包 `26102502`（buildCommit `95f1b92`，51,453,850 字节）在 `https://82.157.48.200:8000/download/t-26102502/antang-26102502-test.apk`。`latest.json` 未改，仍指向正式包。
