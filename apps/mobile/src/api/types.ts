@@ -113,7 +113,20 @@ export type ProactiveCareSettings = {
   quietHoursStart: string;
   quietHoursEnd: string;
   healthNotificationPreviewEnabled: boolean;
+  /** 本周已经主动联系过几次（服务端按自然周算）。 */
+  weeklyContactCount: number;
+  /** 量表给的每周上限；没做过量表时为空。 */
+  weeklyContactLimit: number | null;
+  /** 因为连续没回应，系统替用户暂停了日常问候。 */
+  autoPaused: boolean;
+  autoDowngradedAt: string | null;
 };
+
+/** 用户可以改的部分；次数与自动暂停是服务端算出来的，提交时不带。 */
+export type ProactiveCareSettingsInput = Omit<
+  ProactiveCareSettings,
+  "weeklyContactCount" | "weeklyContactLimit" | "autoPaused" | "autoDowngradedAt"
+>;
 
 export type HealthProfileCard = {
   id: string;
@@ -941,6 +954,27 @@ export function parseProactiveCareSettings(
       data.health_notification_preview_enabled,
       "care settings.health_notification_preview_enabled",
     ),
+    // 老后端没有这几个字段：按「没算过、没暂停」处理，不报错。
+    weeklyContactCount:
+      data.weekly_contact_count === undefined
+        ? 0
+        : integerValue(
+            data.weekly_contact_count,
+            "care settings.weekly_contact_count",
+          ),
+    weeklyContactLimit:
+      data.weekly_contact_limit === null ||
+      data.weekly_contact_limit === undefined
+        ? null
+        : integerValue(
+            data.weekly_contact_limit,
+            "care settings.weekly_contact_limit",
+          ),
+    autoPaused: data.auto_paused === true,
+    autoDowngradedAt:
+      typeof data.auto_downgraded_at === "string"
+        ? data.auto_downgraded_at
+        : null,
   };
 }
 

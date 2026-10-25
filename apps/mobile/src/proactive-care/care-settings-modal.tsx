@@ -136,8 +136,14 @@ export function CareSettingsModal({
     setError(null);
     try {
       const saved = await api.putProactiveCareSettings({
-        ...settings,
+        routineCadence: settings.routineCadence,
+        planFollowUpEnabled: settings.planFollowUpEnabled,
+        healthEventsEnabled: settings.healthEventsEnabled,
         timezone: deviceTimeZone(),
+        quietHoursStart: settings.quietHoursStart,
+        quietHoursEnd: settings.quietHoursEnd,
+        healthNotificationPreviewEnabled:
+          settings.healthNotificationPreviewEnabled,
       });
       setSettings(saved);
       onClose();
@@ -265,6 +271,49 @@ export function CareSettingsModal({
                       );
                     })}
                   </View>
+                  <Text selectable style={styles.description}>
+                    本周已主动联系 {settings.weeklyContactCount} 次
+                    {settings.weeklyContactLimit === null
+                      ? '，上限按沟通方式自评来算。'
+                      : ` · 上限 ${settings.weeklyContactLimit} 次。`}
+                  </Text>
+                  {settings.autoPaused ? (
+                    <View style={styles.pausedCard}>
+                      <Text style={styles.pausedText}>
+                        连着几次问候你没回，我先停下来了，不想在你忙的时候反复弹消息。想继续就说一声。
+                      </Text>
+                      <Pressable
+                        accessibilityLabel="继续接收日常问候"
+                        accessibilityRole="button"
+                        disabled={disabled}
+                        onPress={() => {
+                          update({ routineCadence: 'daily' });
+                          void api
+                            .putProactiveCareSettings({
+                              routineCadence: 'daily',
+                              planFollowUpEnabled: settings.planFollowUpEnabled,
+                              healthEventsEnabled: settings.healthEventsEnabled,
+                              timezone: deviceTimeZone(),
+                              quietHoursStart: settings.quietHoursStart,
+                              quietHoursEnd: settings.quietHoursEnd,
+                              healthNotificationPreviewEnabled:
+                                settings.healthNotificationPreviewEnabled,
+                            })
+                            .then(
+                              (saved) => {
+                                setSettings(saved);
+                              },
+                              (reason) => {
+                                setError(errorMessage(reason));
+                              },
+                            );
+                        }}
+                        style={styles.pausedButton}
+                      >
+                        <Text style={styles.pausedButtonText}>继续接收</Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
                 </View>
 
                 <View style={styles.section}>
@@ -608,6 +657,30 @@ const styles = StyleSheet.create({
     backgroundColor: colors.disabled,
   },
   statusDotEnabled: { backgroundColor: colors.primary },
+  pausedCard: {
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+    padding: spacing.sm,
+    borderRadius: radii.md,
+    backgroundColor: colors.paperMuted,
+  },
+  pausedText: {
+    fontSize: 12.5,
+    lineHeight: 19,
+    color: colors.muted,
+  },
+  pausedButton: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.pill,
+    backgroundColor: colors.primarySoft,
+  },
+  pausedButtonText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: colors.primaryPressed,
+  },
   timeRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',

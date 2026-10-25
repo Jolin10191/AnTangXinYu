@@ -31,6 +31,7 @@ import {
   type HealthProfileChangeResult,
   type MessageHistory,
   type ProactiveCareSettings,
+  type ProactiveCareSettingsInput,
   type TokenPair,
   type User,
   type WearableImportResponse,
@@ -690,7 +691,7 @@ export class ApiClient {
   }
 
   async putProactiveCareSettings(
-    settings: ProactiveCareSettings,
+    settings: ProactiveCareSettingsInput,
   ): Promise<ProactiveCareSettings> {
     const response = await this.authorizedFetch(
       "/api/v1/proactive-care/settings",

@@ -27,6 +27,10 @@ const settings: ProactiveCareSettings = {
   quietHoursStart: '22:00',
   quietHoursEnd: '08:00',
   healthNotificationPreviewEnabled: false,
+  weeklyContactCount: 3,
+  weeklyContactLimit: 4,
+  autoPaused: false,
+  autoDowngradedAt: null,
 };
 
 describe('CareSettingsModal', () => {
@@ -83,6 +87,97 @@ describe('CareSettingsModal', () => {
       tree!.root.findByProps({ accessibilityLabel: '日常关怀频率：关闭' })
         .props.accessibilityState,
     ).toEqual({ selected: true });
+    act(() => tree!.unmount());
+  });
+
+  test('shows how often it may contact you and how many were used', async () => {
+    const api = {
+      getProactiveCareSettings: jest.fn().mockResolvedValue(settings),
+      putProactiveCareSettings: jest.fn(),
+    } as unknown as ApiClient;
+    let tree: ReturnType<typeof create>;
+
+    await act(async () => {
+      tree = create(
+        <CareSettingsModal
+          api={api}
+          backgroundHealthEnabling={false}
+          backgroundHealthDisabling={false}
+          backgroundHealthError={null}
+          backgroundHealthStatus="disabled"
+          notificationPermission="undetermined"
+          notificationRegistrationFailed={false}
+          notificationRequesting={false}
+          onClose={jest.fn()}
+          onEnableBackgroundHealth={jest.fn()}
+          onDisableBackgroundHealth={jest.fn()}
+          onRequestNotificationPermission={jest.fn()}
+          visible
+        />,
+      );
+    });
+
+    const text = tree!.root
+      .findAllByType(Text)
+      .map((node) => node.props.children)
+      .flat(Infinity)
+      .join('');
+    expect(text).toContain('本周已主动联系 3 次');
+    expect(text).toContain('上限 4 次');
+    expect(
+      tree!.root.findAllByProps({ accessibilityLabel: '继续接收日常问候' }),
+    ).toHaveLength(0);
+    act(() => tree!.unmount());
+  });
+
+  test('lets a user who stopped answering resume the routine', async () => {
+    const paused = {
+      ...settings,
+      routineCadence: 'disabled' as const,
+      autoPaused: true,
+      autoDowngradedAt: '2026-10-20T01:00:00Z',
+    };
+    const api = {
+      getProactiveCareSettings: jest.fn().mockResolvedValue(paused),
+      putProactiveCareSettings: jest.fn().mockResolvedValue({
+        ...settings,
+        routineCadence: 'daily',
+      }),
+    } as unknown as ApiClient;
+    let tree: ReturnType<typeof create>;
+
+    await act(async () => {
+      tree = create(
+        <CareSettingsModal
+          api={api}
+          backgroundHealthEnabling={false}
+          backgroundHealthDisabling={false}
+          backgroundHealthError={null}
+          backgroundHealthStatus="disabled"
+          notificationPermission="undetermined"
+          notificationRegistrationFailed={false}
+          notificationRequesting={false}
+          onClose={jest.fn()}
+          onEnableBackgroundHealth={jest.fn()}
+          onDisableBackgroundHealth={jest.fn()}
+          onRequestNotificationPermission={jest.fn()}
+          visible
+        />,
+      );
+    });
+    expect(
+      tree!.root.findByProps({ accessibilityLabel: '继续接收日常问候' }),
+    ).toBeTruthy();
+
+    await act(async () => {
+      tree!.root
+        .findByProps({ accessibilityLabel: '继续接收日常问候' })
+        .props.onPress();
+    });
+
+    expect(api.putProactiveCareSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ routineCadence: 'daily' }),
+    );
     act(() => tree!.unmount());
   });
 
