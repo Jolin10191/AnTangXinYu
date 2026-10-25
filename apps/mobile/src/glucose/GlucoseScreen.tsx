@@ -42,6 +42,22 @@ const INPUT_SOURCES: { value: 'fingerstick' | 'lab' | 'manual'; label: string }[
   { value: 'manual', label: '其他' },
 ];
 
+// 指尖血才问机器：同一滴血，不同血糖仪能差 0.5 上下，对不上化验单时
+// 这条信息才有用。静脉血是医院的机器，问了反而多余。
+const INPUT_DEVICES: { value: 'roche' | 'abbott' | 'sannuo' | 'other'; label: string }[] = [
+  { value: 'roche', label: '罗氏' },
+  { value: 'abbott', label: '雅培' },
+  { value: 'sannuo', label: '三诺' },
+  { value: 'other', label: '其它血糖仪' },
+];
+
+const DEVICE_LABELS: Record<string, string> = {
+  roche: '罗氏',
+  abbott: '雅培',
+  sannuo: '三诺',
+  other: '其它血糖仪',
+};
+
 /** 补记时要写明「测量」和「记录」不是同一时刻，否则看不出这条是事后补的。 */
 function recordedLate(item: GlucoseReading): string | null {
   const measured = new Date(item.measuredAt).getTime();
@@ -93,6 +109,7 @@ export function GlucoseScreen({ api }: Props) {
   const [value, setValue] = useState('');
   const [context, setContext] = useState('fasting');
   const [source, setSource] = useState<'fingerstick' | 'lab' | 'manual'>('fingerstick');
+  const [device, setDevice] = useState<'roche' | 'abbott' | 'sannuo' | 'other' | null>(null);
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -139,6 +156,7 @@ export function GlucoseScreen({ api }: Props) {
         measuredAt: new Date().toISOString(),
         context,
         source,
+        sourceDevice: source === 'fingerstick' && device !== null ? device : undefined,
         note: note.trim() === '' ? null : note.trim(),
       });
       setValue('');
@@ -149,7 +167,7 @@ export function GlucoseScreen({ api }: Props) {
     } finally {
       setSaving(false);
     }
-  }, [api, context, source, load, note, value]);
+  }, [api, context, device, source, load, note, value]);
 
   const revoke = useCallback(
     async (reading: GlucoseReading) => {
@@ -216,6 +234,7 @@ export function GlucoseScreen({ api }: Props) {
                 onPress={() => setSource(item.value)}
                 accessibilityRole="button"
                 accessibilityState={{ selected: active }}
+                accessibilityLabel={`血糖来源 ${item.label}`}
                 style={[styles.chip, active && styles.chipActive]}
               >
                 <Text style={[styles.chipText, active && styles.chipTextActive]}>
@@ -225,6 +244,34 @@ export function GlucoseScreen({ api }: Props) {
             );
           })}
         </View>
+
+        {source === 'fingerstick' ? (
+          <>
+            <Text style={styles.sourceLabel}>用的哪台血糖仪</Text>
+            <View style={styles.chipRow}>
+              {INPUT_DEVICES.map(item => {
+                const active = item.value === device;
+                return (
+                  <Pressable
+                    key={item.value}
+                    onPress={() => setDevice(active ? null : item.value)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={`血糖仪 ${item.label}`}
+                    style={[styles.chip, active && styles.chipActive]}
+                  >
+                    <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                      {item.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={styles.deviceHint}>
+              可以不选。选上是给自己留个对照：同一滴血不同机器能差一点，跟化验单对不上时能看出是不是机器的事。
+            </Text>
+          </>
+        ) : null}
 
         <TextInput
           value={note}
@@ -239,6 +286,7 @@ export function GlucoseScreen({ api }: Props) {
           onPress={() => void save()}
           disabled={saving}
           accessibilityRole="button"
+          accessibilityLabel="保存这条血糖记录"
           style={[styles.saveButton, saving && styles.saveButtonDisabled]}
         >
           {saving ? (
@@ -303,7 +351,11 @@ export function GlucoseScreen({ api }: Props) {
                     </Text>
                     <Text style={styles.rowMeta}>
                       {formatTime(item.measuredAt)} ·{' '}
-                      {SOURCE_LABELS[item.source] ?? '手动'} ·{' '}
+                      {SOURCE_LABELS[item.source] ?? '手动'}
+                      {item.sourceDevice
+                        ? `（${DEVICE_LABELS[item.sourceDevice] ?? item.sourceDevice}）`
+                        : ''}{' '}
+                      ·{' '}
                       {CONTEXT_LABELS[item.context] ?? '其他'}
                       {item.note === null ? '' : ` · ${item.note}`}
                     </Text>
@@ -365,6 +417,7 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: '#0F766E' },
   chipText: { fontSize: 13, color: '#41524D' },
   chipTextActive: { color: '#FFFFFF', fontWeight: '600' },
+  deviceHint: { marginTop: 6, fontSize: 11.5, lineHeight: 16, color: '#8B9A96' },
   noteInput: {
     marginTop: 12,
     paddingHorizontal: 12,

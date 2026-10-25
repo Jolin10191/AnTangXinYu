@@ -1259,6 +1259,7 @@ export class ApiClient {
     measuredAt: string;
     context: string;
     source?: string;
+    sourceDevice?: string;
     note?: string | null;
   }): Promise<GlucoseReading> {
     const response = await this.authorizedFetch(
@@ -1271,6 +1272,7 @@ export class ApiClient {
           measured_at: input.measuredAt,
           context: input.context,
           source: input.source ?? "fingerstick",
+          source_device: input.sourceDevice ?? null,
           note: input.note ?? null,
         }),
       },

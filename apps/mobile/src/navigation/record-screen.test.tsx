@@ -10,6 +10,7 @@ const READING: GlucoseReading = {
   measuredAt: "2026-10-24T12:35:00+08:00",
   context: "fasting",
   source: "manual",
+  sourceDevice: "",
   note: "早上好",
   revokedAt: null,
   createdAt: "2026-10-24T12:36:00+08:00",

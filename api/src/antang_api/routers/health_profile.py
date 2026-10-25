@@ -623,6 +623,7 @@ async def create_glucose_reading(
         value_mg_dl=payload.value_mg_dl,
         measured_at=payload.measured_at,
         source=payload.source,
+        source_device=payload.source_device or "",
         context=payload.context,
         note=payload.note,
     )

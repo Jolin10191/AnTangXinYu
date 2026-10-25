@@ -16,6 +16,7 @@ from antang_api.agents.runtime import AgentContext
 from antang_api.database import session_factory as default_session_factory
 from antang_api.health_profile.glucose import (
     GLUCOSE_CONTEXT_LABELS,
+    GLUCOSE_DEVICE_LABELS,
     list_glucose_readings,
     summarize_glucose,
     to_mmol,
@@ -98,6 +99,8 @@ def build_glucose_read_tool(
                         reading.context, reading.context
                     ),
                     "source": reading.source,
+                    "device": GLUCOSE_DEVICE_LABELS.get(reading.source_device)
+                    or None,
                     "note": reading.note,
                 }
                 for reading in readings

@@ -13,6 +13,7 @@ from antang_api.agents.core import render_core_system_prompt
 from antang_api.health_profile.glucose import (
     GlucoseSummary,
     list_glucose_readings,
+    record_glucose_reading,
     render_glucose_context,
     summarize_glucose,
     to_mmol,
@@ -152,3 +153,40 @@ def test_the_read_tool_is_named_for_the_activity_map() -> None:
     tool = build_glucose_read_tool()
 
     assert tool.name == READ_GLUCOSE_TOOL_NAME
+
+
+async def test_a_fingerstick_reading_remembers_which_meter(
+    db_session: AsyncSession,
+) -> None:
+    """指尖血要记下是哪台血糖仪：跟化验单对不上时，这是唯一能查的东西。"""
+
+    user = await create_user(db_session, "glucose_device")
+    reading = await record_glucose_reading(
+        db_session,
+        user_id=user.id,
+        value_mg_dl=96,
+        measured_at=datetime.now(UTC),
+        source="fingerstick",
+        source_device="sannuo",
+    )
+
+    assert reading.source == "fingerstick"
+    assert reading.source_device == "sannuo"
+
+
+async def test_a_lab_reading_never_carries_a_meter(
+    db_session: AsyncSession,
+) -> None:
+    """静脉血是医院的机器测的，存一台血糖仪会变成自相矛盾的记录。"""
+
+    user = await create_user(db_session, "glucose_lab_device")
+    reading = await record_glucose_reading(
+        db_session,
+        user_id=user.id,
+        value_mg_dl=104,
+        measured_at=datetime.now(UTC),
+        source="lab",
+        source_device="roche",
+    )
+
+    assert reading.source_device == ""

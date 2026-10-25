@@ -12,6 +12,9 @@ GlucoseContext = Literal[
 GlucoseSource = Literal["manual", "fingerstick", "cgm", "lab", "report"]
 # 「report」只由报告解读写入，患者手填/导入能选的来源是下面四个。
 GlucoseInputSource = Literal["fingerstick", "cgm", "lab", "manual"]
+# 指尖血的机器品牌。它不是来源（来源是"指尖血"），只是"用哪台测的"，
+# 所以只在 source=fingerstick 时有意义，其余情况存空字符串。
+GlucoseDevice = Literal["roche", "abbott", "sannuo", "other"]
 
 
 class GlucoseReadingCreate(BaseModel):
@@ -37,6 +40,13 @@ class GlucoseReadingCreate(BaseModel):
         GlucoseContext,
         Field(default="other", description="测量场景：空腹、餐前、餐后、睡前、夜间或其他。"),
     ] = "other"
+    source_device: Annotated[
+        GlucoseDevice | None,
+        Field(
+            default=None,
+            description="指尖血用的哪台血糖仪；化验单和传感器不需要填，填了也会被忽略。",
+        ),
+    ] = None
     note: Annotated[
         str | None,
         Field(default=None, max_length=200, description="可选备注，例如当天的特殊情况。"),
@@ -51,6 +61,7 @@ class GlucoseReadingResponse(BaseModel):
     measured_at: datetime
     context: GlucoseContext
     source: GlucoseSource
+    source_device: str
     note: str | None
     created_at: datetime
 

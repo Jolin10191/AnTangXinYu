@@ -24,6 +24,7 @@ async def record_glucose_reading(
     measured_at: datetime,
     context: str = "other",
     source: str = "manual",
+    source_device: str = "",
     note: str | None = None,
 ) -> GlucoseReading:
     reading = GlucoseReading(
@@ -32,6 +33,9 @@ async def record_glucose_reading(
         measured_at=measured_at,
         context=context,
         source=source,
+        # 化验单和传感器没有"哪台血糖仪"，调用方就算传了也不存，免得出现
+        # 「静脉血 · 罗氏」这种自相矛盾的记录。
+        source_device=source_device if source == "fingerstick" else "",
         note=note,
     )
     session.add(reading)
@@ -192,6 +196,15 @@ GLUCOSE_CONTEXT_LABELS: dict[str, str] = {
     "bedtime": "睡前",
     "night": "夜间",
     "other": "随时",
+}
+
+# 指尖血的机器品牌。留着是给「同一台机器和化验单对不上」这类问题用的，
+# 不是给模型算平均值的。
+GLUCOSE_DEVICE_LABELS: dict[str, str] = {
+    "roche": "罗氏",
+    "abbott": "雅培",
+    "sannuo": "三诺",
+    "other": "其它血糖仪",
 }
 
 

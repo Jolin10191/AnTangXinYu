@@ -2142,6 +2142,8 @@ export type GlucoseReading = {
   measuredAt: string;
   context: string;
   source: string;
+  /** 指尖血用的哪台血糖仪（roche/abbott/sannuo/other），没选是空串。 */
+  sourceDevice: string;
   note: string | null;
   revokedAt: string | null;
   createdAt: string;
@@ -2193,6 +2195,8 @@ export function parseGlucoseReading(value: unknown): GlucoseReading {
     measuredAt: glucoseString(data, "measured_at"),
     context: glucoseString(data, "context"),
     source: glucoseString(data, "source"),
+    // 旧后端没有这个字段时给空串，不报错。
+    sourceDevice: typeof data.source_device === "string" ? data.source_device : "",
     note: typeof note === "string" ? note : null,
     revokedAt: typeof revoked === "string" ? revoked : null,
     createdAt: glucoseString(data, "created_at"),

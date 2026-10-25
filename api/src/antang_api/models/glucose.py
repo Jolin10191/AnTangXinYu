@@ -119,6 +119,9 @@ class GlucoseReading(Base):
     measured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     context: Mapped[str] = mapped_column(String(32), server_default=text("'other'"))
     source: Mapped[str] = mapped_column(String(16), server_default=text("'manual'"))
+    # 哪台血糖仪测的。只对手指血有意义（化验单没有机器、传感器走 cgm_samples 的
+    # source_system），空字符串表示没选。不加 CHECK：品牌会增补，别让加品牌要改表。
+    source_device: Mapped[str] = mapped_column(String(32), server_default=text("''"))
     note: Mapped[str | None] = mapped_column(String(200), default=None)
     # 撤回只打标记、不删行：数据不再被读取或送进模型，但"记录过又撤回"这件事
     # 本身对低血糖恐惧是有信息的（回避行为），所以留一个时间戳。
