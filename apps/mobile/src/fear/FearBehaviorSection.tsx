@@ -233,7 +233,7 @@ export function FearBehaviorSection({
             <Text style={styles.subtitle}>记录</Text>
           </View>
           <Text style={styles.description}>
-            每一条都是聊天里你自己说的。删掉就真的没了，所以先确认一次。
+            每一条都是聊天里你自己说的。删掉就从你的记录里消失，所以先确认一次。
           </Text>
           {logs.map((log) => (
             <RecordRow
@@ -270,7 +270,7 @@ export function FearBehaviorSection({
 
       {mode === 'beliefs' ? null : mode === 'records' ? (
         <Text style={styles.noteText}>
-          这里只列你自己说过的事，不是量表分数。删掉就没了，删之前会再问一次。
+          这里只列你自己说过的事，不是量表分数。删掉就从你的记录里消失，删之前会再问一次。
         </Text>
       ) : (
         <Text style={styles.noteText}>

@@ -725,7 +725,11 @@ async def delete_fear_behavior_log(
     user: Annotated[User, Depends(get_patient_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
-    """患者撤回一条「因为怕低血糖而做的事」记录：真删，不留痕。"""
+    """患者撤回一条「因为怕低血糖而做的事」记录：从本人的界面与统计里消失。
+
+    只做软删除（打 deleted_at）。已经同步给医护的记录不跟着消失，
+    否则「自行调药」这类需要复诊核对的事，患者单方面就能抹掉。
+    """
 
     deleted = await delete_behavior_log(session, user_id=user.id, log_id=log_id)
     if not deleted:

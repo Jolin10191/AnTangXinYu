@@ -83,6 +83,11 @@ class FearBehaviorLog(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    # 患者可以把自己那条从界面上删掉，但已经同步给医护的记录不能一起消失：
+    # 患者侧查询只看 deleted_at 为空的行，医护端带上已删除的行并标注。
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
 
 class HypoglycemiaBeliefEvent(Base):
