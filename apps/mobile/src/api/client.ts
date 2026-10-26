@@ -1241,6 +1241,14 @@ export class ApiClient {
     return parseGlucoseReports(await responseJson(response));
   }
 
+  async deleteGlucoseReport(id: string): Promise<void> {
+    const response = await this.authorizedFetch(
+      `/api/v1/health-profile/glucose-reports/${id}`,
+      { method: "DELETE" },
+    );
+    if (!response.ok) throw await this.apiError(response);
+  }
+
   async transcribeVoice(recording: {
     mimeType: string;
     name: string;

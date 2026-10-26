@@ -171,3 +171,51 @@ async def test_a_saved_report_summary_is_readable_only_by_its_patient(
     assert items[0]["note"] is None
 
     assert (await client.get(path, headers=second_headers)).json()["items"] == []
+
+
+async def test_a_patient_can_delete_a_report_summary_but_not_someone_elses(
+    client, db_session
+):
+    """删报告速览是真删：自己删得掉，别人的那条连「存在」都不该暴露。"""
+
+    from datetime import date
+
+    from sqlalchemy import select
+
+    from antang_api.health_profile.glucose import record_glucose_report
+    from antang_api.models import User
+
+    path = "/api/v1/health-profile/glucose-reports"
+    patient, headers = await signup(client)
+    _, second_headers = await signup(client)
+    user = (
+        await db_session.execute(
+            select(User).where(User.username == patient["user"]["username"])
+        )
+    ).scalar_one()
+    report = await record_glucose_report(
+        db_session,
+        user_id=user.id,
+        period_start=date(2025, 7, 28),
+        period_end=date(2025, 7, 31),
+        device="硅基动感Pro",
+        lbgi_level="high",
+    )
+    await db_session.commit()
+    report_id = str(report.id)
+
+    assert (await client.delete(f"{path}/{report_id}")).status_code == 401
+    # 别人的报告：404，而不是 403——别让「这份存在」变成可探测的信息。
+    assert (
+        await client.delete(f"{path}/{report_id}", headers=second_headers)
+    ).status_code == 404
+    assert len((await client.get(path, headers=headers)).json()["items"]) == 1
+
+    removed = await client.delete(f"{path}/{report_id}", headers=headers)
+    assert removed.status_code == 204, removed.text
+    assert (await client.get(path, headers=headers)).json()["items"] == []
+    # 删第二次就是没找到，不是静默成功。
+    assert (
+        await client.delete(f"{path}/{report_id}", headers=headers)
+    ).status_code == 404
+

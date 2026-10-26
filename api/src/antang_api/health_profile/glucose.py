@@ -10,6 +10,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import TypedDict
 from uuid import UUID
 
+from sqlalchemy import delete as sql_delete
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -362,6 +363,26 @@ async def list_glucose_reports(
         .limit(limit)
     )
     return list(result)
+
+
+async def delete_glucose_report(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+    report_id: UUID,
+) -> bool:
+    """删掉一条报告速览。
+
+    报告速览是我们替患者存的一份摘要，不是原始报告文件；患者说删就真删，
+    免得界面上留一条他否认的记录。
+    """
+
+    deleted = await session.scalar(
+        sql_delete(GlucoseReport)
+        .where(GlucoseReport.id == report_id, GlucoseReport.user_id == user_id)
+        .returning(GlucoseReport.id)
+    )
+    return deleted is not None
 
 
 def render_glucose_reports(reports: list[GlucoseReport]) -> str:

@@ -36,6 +36,7 @@ from antang_api.schemas.cgm import (
     CgmSourceSystem,
 )
 from antang_api.health_profile.glucose import (
+    delete_glucose_report,
     list_glucose_readings,
     list_glucose_reports,
     record_glucose_reading,
@@ -658,6 +659,25 @@ async def get_glucose_reports(
     return GlucoseReportsResponse(
         items=[GlucoseReportResponse.model_validate(item) for item in reports]
     )
+
+
+@router.delete(
+    "/glucose-reports/{report_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def remove_glucose_report(
+    report_id: UUID,
+    user: Annotated[User, Depends(get_patient_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    """删掉一份报告速览：患者不认这条，界面上就不该再留着。"""
+
+    deleted = await delete_glucose_report(
+        session, user_id=user.id, report_id=report_id
+    )
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="没有找到这份报告速览。"
+        )
 
 
 @router.get("/glucose-readings/summary", response_model=GlucoseSummaryResponse)

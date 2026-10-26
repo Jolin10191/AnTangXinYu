@@ -1,4 +1,5 @@
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import { Alert } from "react-native";
 
 import type { GlucoseReading, GlucoseSummary, MealLog, MedicationLog } from "../api/types";
 import { RecordScreen, formatGlucose, formatMeasuredAt } from "./record-screen";
@@ -89,6 +90,7 @@ function fakeApi(overrides: Record<string, unknown> = {}) {
     getWearableDashboard: jest.fn(async () => DASHBOARD),
     getCgmSamples: jest.fn(async () => ({ days: 7, count: 0, samples: [] })),
     getGlucoseReports: jest.fn(async () => []),
+    deleteGlucoseReport: jest.fn(async () => undefined),
     ...overrides,
   };
 }
@@ -208,6 +210,74 @@ describe("RecordScreen", () => {
     expect(text).toContain("低血糖风险高");
     expect(text).toContain("分档 正常 84.5% · 低 0.2%");
     expect(text).toContain("天津医科大学总医院");
+  });
+
+  it("opens a saved report's full detail and can delete it", async () => {
+    const api = fakeApi({
+      getGlucoseReports: jest.fn(async () => [
+        {
+          id: "report-summary-2",
+          periodStart: "2025-07-28",
+          periodEnd: "2025-07-31",
+          device: "硅基动感Pro",
+          deviceSerial: "LT2410FE3P",
+          reportGeneratedAt: "2025-07-31",
+          meanMmol: 5.81,
+          sdMmol: 0.9,
+          cvPercent: 15.53,
+          ehba1cPercent: 5.34,
+          tirPercent: 99.6,
+          tarPercent: 1.6,
+          tbrPercent: 0.4,
+          normalPercent: 99.6,
+          lowPercent: 0.4,
+          veryLowPercent: 0,
+          highPercent: 1.6,
+          veryHighPercent: 0,
+          lbgiLevel: "high",
+          note: "天津医科大学总医院",
+          createdAt: "2026-10-27T00:12:00+00:00",
+        },
+      ]),
+    });
+    const tree = await mount(api);
+
+    await act(async () => {
+      tree.root.findByProps({ accessibilityLabel: "传感器来源" }).props.onPress();
+    });
+    // 卡片上方那句提示；点开之后才看得到序列号与分组标题。
+    expect(JSON.stringify(tree.toJSON())).toContain("看全部指标");
+    expect(JSON.stringify(tree.toJSON())).not.toContain("序列号");
+
+    await act(async () => {
+      tree.root
+        .findByProps({ accessibilityLabel: "报告速览 07-28 至 07-31" })
+        .props.onPress();
+    });
+    const detail = JSON.stringify(tree.toJSON());
+    expect(detail).toContain("设备 硅基动感Pro · 序列号 LT2410FE3P");
+    expect(detail).toContain("整体水平");
+    expect(detail).toContain("时间花在哪");
+    expect(detail).toContain("报告写的档位");
+
+    const alert = jest
+      .spyOn(Alert, "alert")
+      .mockImplementation(() => undefined);
+    await act(async () => {
+      tree.root
+        .findByProps({ accessibilityLabel: "删除这份报告速览" })
+        .props.onPress();
+    });
+    const buttons = alert.mock.calls.at(-1)?.[2] as
+      | { text: string; onPress?: () => void }[]
+      | undefined;
+    await act(async () => {
+      buttons?.find((button) => button.text === "删掉")?.onPress?.();
+    });
+
+    expect(api.deleteGlucoseReport).toHaveBeenCalledWith("report-summary-2");
+    expect(JSON.stringify(tree.toJSON())).not.toContain("07-28 至 07-31 · 报告速览");
+    alert.mockRestore();
   });
 
   it("lists meals and saves a new one without leaving the tab", async () => {    const api = fakeApi();

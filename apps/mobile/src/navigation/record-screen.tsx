@@ -26,6 +26,7 @@ import type {
   HealthConnectController,
 } from "./device-channels";
 import { EventTimeField } from "../ui/event-time-field";
+import { GlucoseReportDetail } from "../glucose/report-detail";
 import Svg, { Line, Path, Polyline, Rect } from "react-native-svg";
 
 /**
@@ -308,6 +309,7 @@ type Props = {
     | "deleteMedicationLog"
     | "getCgmSamples"
     | "getGlucoseReports"
+    | "deleteGlucoseReport"
     | "getWearableDashboard"
   >;
   onImport: () => void;
@@ -346,6 +348,8 @@ export function RecordScreen({
   const [dashboard, setDashboard] = useState<WearableDashboard | null>(null);
   const [cgmSamples, setCgmSamples] = useState<CgmSample[]>([]);
   const [glucoseReports, setGlucoseReports] = useState<GlucoseReport[]>([]);
+  // 点开哪一份报告速览；null 表示详情页没开着。
+  const [openReport, setOpenReport] = useState<GlucoseReport | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -497,6 +501,16 @@ export function RecordScreen({
     }
   }
 
+  async function removeReport(report: GlucoseReport) {
+    setOpenReport(null);
+    try {
+      await api.deleteGlucoseReport(report.id);
+      setGlucoseReports((current) => current.filter((item) => item.id !== report.id));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "这份报告速览没删掉");
+    }
+  }
+
   return (
     <View style={styles.screen}>
       <View style={styles.header}>
@@ -638,7 +652,13 @@ export function RecordScreen({
                   </Text>
                 </View>
                 {glucoseReports.map((report) => (
-                  <View key={report.id} style={styles.card}>
+                  <Pressable
+                    accessibilityLabel={`报告速览 ${formatReportPeriod(report)}`}
+                    accessibilityRole="button"
+                    key={report.id}
+                    onPress={() => setOpenReport(report)}
+                    style={styles.card}
+                  >
                     <Text style={styles.cardTitle}>
                       {`${formatReportPeriod(report)} · 报告速览`}
                     </Text>
@@ -651,7 +671,8 @@ export function RecordScreen({
                     {report.note === null ? null : (
                       <Text style={styles.cardHint}>{report.note}</Text>
                     )}
-                  </View>
+                    <Text style={styles.cardAction}>看全部指标</Text>
+                  </Pressable>
                 ))}
                 {reportReadings.slice(0, 5).map((reading) => (
                   <View key={reading.id} style={styles.card}>
@@ -1016,6 +1037,14 @@ export function RecordScreen({
           </>
         ) : null}
       </ScrollView>
+
+      {openReport === null ? null : (
+        <GlucoseReportDetail
+          onClose={() => setOpenReport(null)}
+          onDelete={() => void removeReport(openReport)}
+          report={openReport}
+        />
+      )}
     </View>
   );
 }
@@ -1154,6 +1183,12 @@ const styles = StyleSheet.create({
     fontFamily: typefaces.sans,
     fontSize: 11.5,
     lineHeight: 17,
+  },
+  cardAction: {
+    marginTop: 8,
+    color: colors.primary,
+    fontFamily: typefaces.sansMedium,
+    fontSize: 12.5,
   },
   curveLegend: {
     flexDirection: "row",
