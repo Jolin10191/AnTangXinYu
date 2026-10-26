@@ -1,6 +1,6 @@
 """血糖记录的请求与响应模型。"""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -73,3 +73,27 @@ class GlucoseSummaryResponse(BaseModel):
     minimum_mg_dl: int | None
     maximum_mg_dl: int | None
     below_70_count: int
+
+
+class GlucoseReportResponse(BaseModel):
+    """一份报告速览。指标可空：报告上没写的，我们也不补。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    period_start: date
+    period_end: date
+    device: str
+    mean_mmol: float | None
+    sd_mmol: float | None
+    cv_percent: float | None
+    ehba1c_percent: float | None
+    tir_percent: float | None
+    tar_percent: float | None
+    tbr_percent: float | None
+    note: str | None
+    created_at: datetime
+
+
+class GlucoseReportsResponse(BaseModel):
+    items: list[GlucoseReportResponse]

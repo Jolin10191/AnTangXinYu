@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Self, cast
 from uuid import UUID, uuid4
 
@@ -21,9 +21,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from antang_api.agents.runtime import AgentContext
 from antang_api.chat import prepare_chat_run
-from antang_api.models import GlucoseReading, PersonalProfile, ProactiveCareSettings, User
+from antang_api.health_profile.glucose import list_glucose_reports, render_glucose_reports
+from antang_api.models import (
+    GlucoseReading,
+    GlucoseReport,
+    PersonalProfile,
+    ProactiveCareSettings,
+    User,
+)
 from antang_api.tools.glucose import (
+    RECORD_GLUCOSE_REPORT_TOOL_NAME,
     RECORD_GLUCOSE_TOOL_NAME,
+    build_glucose_report_tool,
     build_glucose_write_tool,
 )
 
@@ -297,4 +306,115 @@ async def test_the_agent_loop_can_write_a_report(db_session: AsyncSession) -> No
     rows = await _rows(db_session, user.id)
     assert [row.value_mg_dl for row in rows] == [74]
     assert rows[0].source == "cgm"
+
+
+def _report_tool(session: AsyncSession) -> Callable[..., Awaitable[dict[str, object]]]:
+    def sessions() -> _KeepOpen:
+        return _KeepOpen(session)
+
+    tool = build_glucose_report_tool(sessions=cast(Any, sessions))
+    assert isinstance(tool, StructuredTool)
+    assert tool.coroutine is not None
+    return cast("Callable[..., Awaitable[dict[str, object]]]", tool.coroutine)
+
+
+def test_the_report_tool_is_flat_too() -> None:
+    tool = build_glucose_report_tool()
+
+    assert tool.name == RECORD_GLUCOSE_REPORT_TOOL_NAME
+    assert set(tool.args) == {
+        "period_start",
+        "period_end",
+        "device",
+        "mean_mmol",
+        "sd_mmol",
+        "cv_percent",
+        "ehba1c_percent",
+        "tir_percent",
+        "tar_percent",
+        "tbr_percent",
+        "note",
+    }
+
+
+async def test_a_report_summary_is_kept_whole(db_session: AsyncSession) -> None:
+    """汇总指标要整份留着：这是报告自己的数字，不是我们算的曲线。"""
+
+    user = await _create_user(db_session, "glucose_summary")
+
+    result = await _report_tool(db_session)(
+        period_start="2024-05-30",
+        period_end="2024-06-11",
+        device="硅基动感Pro",
+        mean_mmol=6.29,
+        sd_mmol=1.46,
+        cv_percent=23.27,
+        ehba1c_percent=5.73,
+        tir_percent=84.5,
+        tar_percent=15.3,
+        tbr_percent=0.2,
+        note="天津医科大学总医院",
+        runtime=_runtime(user.id),
+    )
+
+    assert result["recorded"] is True
+    assert result["period"] == "2024-05-30~2024-06-11"
+
+    reports = await list_glucose_reports(db_session, user_id=user.id)
+    assert len(reports) == 1
+    assert reports[0].device == "硅基动感Pro"
+    assert float(cast("float", reports[0].tir_percent)) == 84.5
+    assert float(cast("float", reports[0].ehba1c_percent)) == 5.73
+    assert reports[0].note == "天津医科大学总医院"
+
+
+async def test_a_report_without_any_metric_is_refused(
+    db_session: AsyncSession,
+) -> None:
+    """读不出指标就别存空壳：空表比假数据更让人误会。"""
+
+    user = await _create_user(db_session, "glucose_empty")
+
+    with pytest.raises(ValueError, match="一个指标都没给"):
+        await _report_tool(db_session)(
+            period_start="2024-05-30",
+            period_end="2024-06-11",
+            runtime=_runtime(user.id),
+        )
+
+    assert await list_glucose_reports(db_session, user_id=user.id) == []
+
+
+async def test_a_report_ending_before_it_starts_is_refused(
+    db_session: AsyncSession,
+) -> None:
+    user = await _create_user(db_session, "glucose_order")
+
+    with pytest.raises(ValueError, match="结束日不能早于开始日"):
+        await _report_tool(db_session)(
+            period_start="2024-06-11",
+            period_end="2024-05-30",
+            mean_mmol=6.3,
+            runtime=_runtime(user.id),
+        )
+
+
+def test_a_report_summary_reaches_the_model_as_context() -> None:
+    """报告存下来之后，提示词里要看得见，否则每轮都得让患者再报一遍。"""
+
+    report = GlucoseReport(
+        user_id=uuid4(),
+        period_start=date(2024, 5, 30),
+        period_end=date(2024, 6, 11),
+        device="硅基动感Pro",
+        mean_mmol=6.29,
+        tir_percent=84.5,
+        ehba1c_percent=5.73,
+    )
+
+    text = render_glucose_reports([report])
+
+    assert "2024-05-30 至 2024-06-11" in text
+    assert "TIR 84.5%" in text
+    assert "不是我们算的" in text
 

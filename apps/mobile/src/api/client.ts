@@ -70,7 +70,9 @@ import {
   type MealLog,
   type MedicationLog,
   type GlucoseSummary,
+  type GlucoseReport,
   parseGlucoseSummary,
+  parseGlucoseReports,
   type CgmImportPreview,
   type CgmImportResult,
   type CgmSeries,
@@ -1229,6 +1231,14 @@ export class ApiClient {
     );
     if (!response.ok) throw await this.apiError(response);
     return parseCgmSeries(await responseJson(response));
+  }
+
+  async getGlucoseReports(limit = 5): Promise<GlucoseReport[]> {
+    const response = await this.authorizedFetch(
+      `/api/v1/health-profile/glucose-reports?limit=${limit}`,
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseGlucoseReports(await responseJson(response));
   }
 
   async transcribeVoice(recording: {

@@ -47,8 +47,10 @@ from antang_api.conversations import (
 from antang_api.health_profile.glucose import (
     GLUCOSE_CONTEXT_DAYS,
     list_glucose_readings,
+    list_glucose_reports,
     pending_hypo_review,
     render_glucose_context,
+    render_glucose_reports,
     summarize_glucose,
 )
 from antang_api.database import lock_user_conversation
@@ -85,7 +87,7 @@ from antang_api.psychosocial import read_latest_assessment, render_guidance
 from antang_api.psychosocial.hypo_review import render_hypo_review_prompt
 from antang_api.behavioral import read_fear_summary, render_behavior_context
 from antang_api.settings import settings
-from antang_api.tools.glucose import RECORD_GLUCOSE_TOOL_NAME
+from antang_api.tools.glucose import RECORD_GLUCOSE_REPORT_TOOL_NAME, RECORD_GLUCOSE_TOOL_NAME
 from antang_api.tools.records import (
     RECORD_MEAL_TOOL_NAME,
     RECORD_MEDICATION_TOOL_NAME,
@@ -167,6 +169,7 @@ RECORD_TOOL_NAMES = (
     RECORD_MEAL_TOOL_NAME,
     RECORD_MEDICATION_TOOL_NAME,
     RECORD_GLUCOSE_TOOL_NAME,
+    RECORD_GLUCOSE_REPORT_TOOL_NAME,
 )
 
 RECORD_NOT_SAVED_NOTICE = (
@@ -841,19 +844,30 @@ async def stream_chat_run(
         )
         # 患者自己记的血糖：模型只能从文字里猜，所以把近 7 天的读数摊开给它，
         # 并注明「自己记的、可能漏记」，免得被当成 CGM 曲线下判断。
-        glucose_context = render_glucose_context(
-            days=GLUCOSE_CONTEXT_DAYS,
-            summary=await summarize_glucose(
-                session,
-                user_id=user_id,
-                days=GLUCOSE_CONTEXT_DAYS,
-            ),
-            recent=await list_glucose_readings(
-                session,
-                user_id=user_id,
-                days=GLUCOSE_CONTEXT_DAYS,
-                limit=5,
-            ),
+        glucose_context = "\n".join(
+            part
+            for part in (
+                render_glucose_context(
+                    days=GLUCOSE_CONTEXT_DAYS,
+                    summary=await summarize_glucose(
+                        session,
+                        user_id=user_id,
+                        days=GLUCOSE_CONTEXT_DAYS,
+                    ),
+                    recent=await list_glucose_readings(
+                        session,
+                        user_id=user_id,
+                        days=GLUCOSE_CONTEXT_DAYS,
+                        limit=5,
+                    ),
+                ),
+                # 报告速览：患者发过 CGM 报告，模型就该记得那份报告说了什么，
+                # 而不是每轮都让患者再报一次数。
+                render_glucose_reports(
+                    await list_glucose_reports(session, user_id=user_id, limit=3),
+                ),
+            )
+            if part
         )
         # 复盘只问一次：读取最近 24 小时里偏低、还没问过的那一条。
         # prepare_chat_context 会 rollback，之后再碰 ORM 对象就会过期，

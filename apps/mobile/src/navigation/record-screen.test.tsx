@@ -88,6 +88,7 @@ function fakeApi(overrides: Record<string, unknown> = {}) {
     deleteMedicationLog: jest.fn(async () => undefined),
     getWearableDashboard: jest.fn(async () => DASHBOARD),
     getCgmSamples: jest.fn(async () => ({ days: 7, count: 0, samples: [] })),
+    getGlucoseReports: jest.fn(async () => []),
     ...overrides,
   };
 }
@@ -163,8 +164,42 @@ describe("RecordScreen", () => {
     expect(text).toContain("报告均值");
   });
 
-  it("lists meals and saves a new one without leaving the tab", async () => {
-    const api = fakeApi();
+  it("shows a saved report summary under the sensor tab", async () => {
+    // CGM 报告多数只有汇总指标、没有逐点读数，存成「速览」；这里要能看见。
+    const api = fakeApi({
+      getGlucoseReports: jest.fn(async () => [
+        {
+          id: "report-summary-1",
+          periodStart: "2024-05-30",
+          periodEnd: "2024-06-11",
+          device: "硅基动感Pro",
+          meanMmol: 6.3,
+          sdMmol: 1.46,
+          cvPercent: 23.27,
+          ehba1cPercent: 5.73,
+          tirPercent: 84.5,
+          tarPercent: 15.3,
+          tbrPercent: 0.2,
+          note: "天津医科大学总医院",
+          createdAt: "2026-10-26T14:41:00+00:00",
+        },
+      ]),
+    });
+    const tree = await mount(api);
+
+    await act(async () => {
+      tree.root.findByProps({ accessibilityLabel: "传感器来源" }).props.onPress();
+    });
+
+    const text = JSON.stringify(tree.toJSON());
+    expect(text).toContain("05-30 至 06-11 · 报告速览");
+    expect(text).toContain("硅基动感Pro");
+    expect(text).toContain("目标内 84.5%");
+    expect(text).toContain("预估糖化 5.73%");
+    expect(text).toContain("天津医科大学总医院");
+  });
+
+  it("lists meals and saves a new one without leaving the tab", async () => {    const api = fakeApi();
     const tree = await mount(api);
 
     await act(async () => {

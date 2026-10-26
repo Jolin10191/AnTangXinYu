@@ -14,6 +14,7 @@ from antang_api.models.glucose import (
     CgmSample,
     GlucoseImport,
     GlucoseReading,
+    GlucoseReport,
 )
 from antang_api.models.chat import (
     AgentRun,
@@ -98,6 +99,7 @@ __all__ = [
     "CgmSample",
     "GlucoseImport",
     "GlucoseReading",
+    "GlucoseReport",
     "HYPOGLYCEMIA_BELIEFS",
     "HypoglycemiaBeliefEvent",
     "LoginSession",

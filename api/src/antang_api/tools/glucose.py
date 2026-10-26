@@ -5,7 +5,7 @@
 不写库、不判读——判读留给对话本身。
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Literal
 
 from langchain.tools import ToolRuntime, tool
@@ -20,12 +20,14 @@ from antang_api.health_profile.glucose import (
     GLUCOSE_DEVICE_LABELS,
     list_glucose_readings,
     record_glucose_reading,
+    record_glucose_report as save_glucose_report,
     summarize_glucose,
     to_mmol,
 )
 
 READ_GLUCOSE_TOOL_NAME = "read_glucose_readings"
 RECORD_GLUCOSE_TOOL_NAME = "record_glucose_readings"
+RECORD_GLUCOSE_REPORT_TOOL_NAME = "record_glucose_report"
 
 # 患者发来的报告里能读出的一条读数：化验单一般几个点，CGM 报告最多一天几十个点。
 MAX_REPORT_READINGS = 120
@@ -267,3 +269,130 @@ def build_glucose_write_tool(
         }
 
     return record_glucose_readings
+
+
+def build_glucose_report_tool(
+    sessions: async_sessionmaker[AsyncSession] = default_session_factory,
+) -> BaseTool:
+    """创建把「一份报告说了什么」存进记录的工具。
+
+    报告常常只有 AGP 图谱和汇总指标（均值、SD、CV、TIR/TAR/TBR、eHbA1c），没有
+    逐点读数。硬拆成读数会变成一堆编出来的时间点，所以这一条只存指标本身。
+    """
+
+    @tool(RECORD_GLUCOSE_REPORT_TOOL_NAME)
+    async def record_glucose_report(
+        runtime: ToolRuntime[AgentContext],
+        period_start: Annotated[
+            str,
+            Field(description="监测区间开始日，ISO 日期，例如 2024-05-30。"),
+        ],
+        period_end: Annotated[
+            str,
+            Field(description="监测区间结束日，ISO 日期，例如 2024-06-11。"),
+        ],
+        device: Annotated[
+            str,
+            Field(default="", description="报告上的设备名，例如 硅基动感Pro。没有就留空。"),
+        ] = "",
+        mean_mmol: Annotated[
+            float | None,
+            Field(default=None, description="平均葡萄糖，mmol/L。报告没写就留空。"),
+        ] = None,
+        sd_mmol: Annotated[
+            float | None,
+            Field(default=None, description="标准差，mmol/L。"),
+        ] = None,
+        cv_percent: Annotated[
+            float | None,
+            Field(default=None, description="变异系数，百分数，例如 23.27。"),
+        ] = None,
+        ehba1c_percent: Annotated[
+            float | None,
+            Field(default=None, description="预估糖化血红蛋白，百分数。"),
+        ] = None,
+        tir_percent: Annotated[
+            float | None,
+            Field(default=None, description="目标范围内时间占比，百分数。"),
+        ] = None,
+        tar_percent: Annotated[
+            float | None,
+            Field(default=None, description="高于目标范围占比，百分数。"),
+        ] = None,
+        tbr_percent: Annotated[
+            float | None,
+            Field(default=None, description="低于目标范围占比，百分数。"),
+        ] = None,
+        note: Annotated[
+            str | None,
+            Field(default=None, description="一句备注，例如报告来自哪家医院。"),
+        ] = None,
+    ) -> dict[str, object]:
+        """把一份 CGM/化验报告的关键指标存进记录页，患者以后能回看。
+
+        患者发来报告、你读完之后调用一次，把区间和报告上写着的指标记下来：
+        记录页会显示「这份报告说了什么」，而不是我们编出来的曲线。
+        只记报告上真的写了的项，没写的留空，不要用估算值补齐，也不要自己算
+        平均值或 TIR 填进去。存完告诉患者「这份报告我记在血糖记录里了」。
+        """
+
+        try:
+            start = date.fromisoformat(period_start)
+            end = date.fromisoformat(period_end)
+        except ValueError as error:
+            raise ValueError(
+                "日期要写成 2024-05-30 这种格式：先问清监测的起止日期，再存这份报告。"
+            ) from error
+        if end < start:
+            raise ValueError(
+                "监测区间的结束日不能早于开始日。先跟患者确认这两个日期，再存。"
+            )
+        if end > datetime.now(UTC).date() + timedelta(days=1):
+            raise ValueError(
+                "结束日在将来，这份报告的时间还没到。先问清是哪一段时间的报告。"
+            )
+        metrics = [
+            mean_mmol,
+            sd_mmol,
+            cv_percent,
+            ehba1c_percent,
+            tir_percent,
+            tar_percent,
+            tbr_percent,
+        ]
+        if all(value is None for value in metrics):
+            raise ValueError(
+                "一个指标都没给：至少要读出一个（平均值、TIR、eHbA1c 都可以）。"
+                "读不清就跟患者说你没读清，不要存空壳。"
+            )
+
+        async with sessions() as session:
+            report = await save_glucose_report(
+                session,
+                user_id=runtime.context.user_id,
+                period_start=start,
+                period_end=end,
+                device=device[:64],
+                mean_mmol=mean_mmol,
+                sd_mmol=sd_mmol,
+                cv_percent=cv_percent,
+                ehba1c_percent=ehba1c_percent,
+                tir_percent=tir_percent,
+                tar_percent=tar_percent,
+                tbr_percent=tbr_percent,
+                note=(note or None) and note[:200],
+            )
+            await session.commit()
+            report_id = str(report.id)
+
+        return {
+            "recorded": True,
+            "id": report_id,
+            "period": f"{start.isoformat()}~{end.isoformat()}",
+            "note": (
+                "这份报告的速览已经存进血糖记录，患者能在记录页看到；"
+                "解释的时候按报告自己的目标范围说。"
+            ),
+        }
+
+    return record_glucose_report

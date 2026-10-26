@@ -37,6 +37,7 @@ from antang_api.schemas.cgm import (
 )
 from antang_api.health_profile.glucose import (
     list_glucose_readings,
+    list_glucose_reports,
     record_glucose_reading,
     revoke_glucose_reading,
     summarize_glucose,
@@ -44,6 +45,8 @@ from antang_api.health_profile.glucose import (
 from antang_api.schemas.glucose import (
     GlucoseReadingCreate,
     GlucoseReadingResponse,
+    GlucoseReportResponse,
+    GlucoseReportsResponse,
     GlucoseSummaryResponse,
 )
 from antang_api.schemas.nutrition import (
@@ -641,6 +644,20 @@ async def get_glucose_readings(
 
     readings = await list_glucose_readings(session, user_id=user.id, days=days)
     return [GlucoseReadingResponse.model_validate(item) for item in readings]
+
+
+@router.get("/glucose-reports", response_model=GlucoseReportsResponse)
+async def get_glucose_reports(
+    user: Annotated[User, Depends(get_patient_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+) -> GlucoseReportsResponse:
+    """患者存过的报告速览：对话里读过一份报告，这里就有一条。"""
+
+    reports = await list_glucose_reports(session, user_id=user.id, limit=limit)
+    return GlucoseReportsResponse(
+        items=[GlucoseReportResponse.model_validate(item) for item in reports]
+    )
 
 
 @router.get("/glucose-readings/summary", response_model=GlucoseSummaryResponse)

@@ -1,13 +1,15 @@
 """血糖读数：手工录入与将来的报告解析共用一张表。"""
 
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from sqlalchemy import (
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     UniqueConstraint,
     Uuid,
@@ -133,6 +135,44 @@ class GlucoseReading(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None
     )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class GlucoseReport(Base):
+    """一份 CGM/化验报告的速览：区间、均值、变异、TIR，留在记录里可以回看。
+
+    报告往往只有图形和汇总指标，没有逐点读数；把汇总指标硬拆成 glucose_readings
+    会变成一堆编出来的时间点。所以单独存一条「这份报告说了什么」：患者和医生回看时
+    看到的是原始指标，而不是我们重构出来的曲线。
+    """
+
+    __tablename__ = "glucose_reports"
+    __table_args__ = (
+        CheckConstraint(
+            "period_end >= period_start", name="ck_glucose_reports_period_order"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        Uuid, primary_key=True, server_default=text("uuidv7()")
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    period_start: Mapped[date] = mapped_column(Date)
+    period_end: Mapped[date] = mapped_column(Date)
+    device: Mapped[str] = mapped_column(String(64), server_default=text("''"))
+    # 指标一律可空：报告里没写的那一项就空着，不猜、不补默认值。
+    mean_mmol: Mapped[float | None] = mapped_column(Numeric(4, 1), default=None)
+    sd_mmol: Mapped[float | None] = mapped_column(Numeric(4, 2), default=None)
+    cv_percent: Mapped[float | None] = mapped_column(Numeric(5, 2), default=None)
+    ehba1c_percent: Mapped[float | None] = mapped_column(Numeric(4, 2), default=None)
+    tir_percent: Mapped[float | None] = mapped_column(Numeric(5, 2), default=None)
+    tar_percent: Mapped[float | None] = mapped_column(Numeric(5, 2), default=None)
+    tbr_percent: Mapped[float | None] = mapped_column(Numeric(5, 2), default=None)
+    note: Mapped[str | None] = mapped_column(String(200), default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

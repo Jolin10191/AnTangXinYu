@@ -6,14 +6,14 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import TypedDict
 from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from antang_api.models.glucose import GlucoseReading
+from antang_api.models.glucose import GlucoseReading, GlucoseReport
 
 
 async def record_glucose_reading(
@@ -258,5 +258,96 @@ def render_glucose_context(
     lines.append(
         "这些是患者自己记的，可能漏记，不是连续监测；不要拿一两次的波动说他"
         "「失控」，也不要替他判读高低。"
+    )
+    return "\n".join(lines)
+
+
+async def record_glucose_report(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+    period_start: date,
+    period_end: date,
+    device: str = "",
+    mean_mmol: float | None = None,
+    sd_mmol: float | None = None,
+    cv_percent: float | None = None,
+    ehba1c_percent: float | None = None,
+    tir_percent: float | None = None,
+    tar_percent: float | None = None,
+    tbr_percent: float | None = None,
+    note: str | None = None,
+) -> GlucoseReport:
+    """存一条报告速览。
+
+    只存患者自己那份报告上写着的指标；没写的保持空，不用平均值的默认值去补齐——
+    一条「TIR 50%」的假数据比空着更糟。
+    """
+
+    report = GlucoseReport(
+        user_id=user_id,
+        period_start=period_start,
+        period_end=period_end,
+        device=device,
+        mean_mmol=mean_mmol,
+        sd_mmol=sd_mmol,
+        cv_percent=cv_percent,
+        ehba1c_percent=ehba1c_percent,
+        tir_percent=tir_percent,
+        tar_percent=tar_percent,
+        tbr_percent=tbr_percent,
+        note=note,
+    )
+    session.add(report)
+    await session.flush()
+    return report
+
+
+async def list_glucose_reports(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+    limit: int = 20,
+) -> list[GlucoseReport]:
+    """按监测结束时间倒序返回患者存过的报告速览。"""
+
+    result = await session.scalars(
+        select(GlucoseReport)
+        .where(GlucoseReport.user_id == user_id)
+        .order_by(GlucoseReport.period_end.desc(), GlucoseReport.created_at.desc())
+        .limit(limit)
+    )
+    return list(result)
+
+
+def render_glucose_reports(reports: list[GlucoseReport]) -> str:
+    """把报告速览拼成一段给模型看的上下文。"""
+
+    if not reports:
+        return ""
+
+    lines = ["[患者存过的血糖报告速览]"]
+    for report in reports[:3]:
+        parts = [f"{report.period_start:%Y-%m-%d} 至 {report.period_end:%Y-%m-%d}"]
+        if report.device:
+            parts.append(f"设备 {report.device}")
+        if report.mean_mmol is not None:
+            parts.append(f"平均 {report.mean_mmol} mmol/L")
+        if report.sd_mmol is not None:
+            parts.append(f"标准差 {report.sd_mmol}")
+        if report.cv_percent is not None:
+            parts.append(f"变异系数 {report.cv_percent}%")
+        if report.ehba1c_percent is not None:
+            parts.append(f"预估糖化 {report.ehba1c_percent}%")
+        if report.tir_percent is not None:
+            parts.append(f"TIR {report.tir_percent}%")
+        if report.tar_percent is not None:
+            parts.append(f"高于目标 {report.tar_percent}%")
+        if report.tbr_percent is not None:
+            parts.append(f"低于目标 {report.tbr_percent}%")
+        lines.append("- " + " | ".join(parts))
+    lines.append(
+        "这些是报告上原本的指标，不是我们算的；解释时按报告自己的目标范围说，"
+        "不要跟 3.9–10.0 混着讲。"
     )
     return "\n".join(lines)

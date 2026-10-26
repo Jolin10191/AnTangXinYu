@@ -13,6 +13,7 @@ import type { ApiClient } from "../api/client";
 import type {
   CgmSample,
   GlucoseReading,
+  GlucoseReport,
   GlucoseSummary,
   MealLog,
   MedicationLog,
@@ -133,6 +134,29 @@ export function formatMeasuredAt(iso: string): string {
   const hour = `${date.getHours()}`.padStart(2, "0");
   const minute = `${date.getMinutes()}`.padStart(2, "0");
   return `${month}-${day} ${hour}:${minute}`;
+}
+
+/** 报告只写日期（05-30 至 06-11），不带时刻，所以单独一个格式。 */
+export function formatReportPeriod(report: GlucoseReport): string {
+  const shape = (iso: string): string => {
+    const parts = iso.split("-");
+    return parts.length === 3 ? `${parts[1]}-${parts[2]}` : iso;
+  };
+  return `${shape(report.periodStart)} 至 ${shape(report.periodEnd)}`;
+}
+
+/** 报告速览一行：只写报告上真有的指标，没写的不补。 */
+export function reportLine(report: GlucoseReport): string {
+  const parts: string[] = [];
+  if (report.device.trim().length > 0) parts.push(report.device.trim());
+  if (report.meanMmol !== null) parts.push(`平均 ${report.meanMmol} mmol/L`);
+  if (report.tirPercent !== null) parts.push(`目标内 ${report.tirPercent}%`);
+  if (report.tbrPercent !== null) parts.push(`低于目标 ${report.tbrPercent}%`);
+  if (report.tarPercent !== null) parts.push(`高于目标 ${report.tarPercent}%`);
+  if (report.ehba1cPercent !== null) parts.push(`预估糖化 ${report.ehba1cPercent}%`);
+  if (report.cvPercent !== null) parts.push(`变异系数 ${report.cvPercent}%`);
+  if (report.sdMmol !== null) parts.push(`标准差 ${report.sdMmol}`);
+  return parts.length === 0 ? "这份报告没有可显示的数字" : parts.join(" · ");
 }
 
 export function eventIso(minutesAgo: number): string {
@@ -261,6 +285,7 @@ type Props = {
     | "createMedicationLog"
     | "deleteMedicationLog"
     | "getCgmSamples"
+    | "getGlucoseReports"
     | "getWearableDashboard"
   >;
   onImport: () => void;
@@ -298,6 +323,7 @@ export function RecordScreen({
   const [medications, setMedications] = useState<MedicationLog[]>([]);
   const [dashboard, setDashboard] = useState<WearableDashboard | null>(null);
   const [cgmSamples, setCgmSamples] = useState<CgmSample[]>([]);
+  const [glucoseReports, setGlucoseReports] = useState<GlucoseReport[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -326,8 +352,9 @@ export function RecordScreen({
       api.getMedicationLogs(),
       api.getWearableDashboard(),
       api.getCgmSamples().catch(() => ({ days: 7, count: 0, samples: [] })),
+      api.getGlucoseReports().catch(() => [] as GlucoseReport[]),
     ])
-      .then(([rows, nextSummary, nextMeals, nextMedications, nextDashboard, series]) => {
+      .then(([rows, nextSummary, nextMeals, nextMedications, nextDashboard, series, reports]) => {
         if (!active) {
           return;
         }
@@ -337,6 +364,7 @@ export function RecordScreen({
         setMedications(nextMedications);
         setDashboard(nextDashboard);
         setCgmSamples(series.samples);
+        setGlucoseReports(reports);
         setError(null);
       })
       .catch((cause: unknown) => {
@@ -576,15 +604,30 @@ export function RecordScreen({
                 <View style={styles.card}>
                   <Text style={styles.cardTitle}>
                     {cgmSamples.length === 0
-                      ? reportReadings.length === 0
+                      ? reportReadings.length === 0 && glucoseReports.length === 0
                         ? "还没有导入传感器数据"
-                        : `报告里记下 ${reportReadings.length} 条`
+                        : reportReadings.length === 0
+                          ? `报告速览 ${glucoseReports.length} 份`
+                          : `报告里记下 ${reportReadings.length} 条`
                       : `已导入 ${cgmSamples.length} 条`}
                   </Text>
                   <Text style={styles.cardBody}>
                     从厂家 App 导出 CSV，先预览能用的行与可疑行，确认后才入库。
                   </Text>
                 </View>
+                {glucoseReports.map((report) => (
+                  <View key={report.id} style={styles.card}>
+                    <Text style={styles.cardTitle}>
+                      {`${formatReportPeriod(report)} · 报告速览`}
+                    </Text>
+                    <Text style={styles.cardBody}>
+                      {reportLine(report)}
+                    </Text>
+                    {report.note === null ? null : (
+                      <Text style={styles.cardHint}>{report.note}</Text>
+                    )}
+                  </View>
+                ))}
                 {reportReadings.slice(0, 5).map((reading) => (
                   <View key={reading.id} style={styles.card}>
                     <Text style={styles.cardTitle}>{formatGlucose(reading)}</Text>

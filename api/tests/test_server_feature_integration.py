@@ -127,3 +127,47 @@ async def test_deployed_instrument_remains_available_only_to_patients(client, db
     for role in (UserRole.CLINICIAN, UserRole.RESEARCHER):
         await set_user_role(db_session, username=patient["user"]["username"], role=role, maintainer="test-sync")
         assert (await client.get(path, headers=headers)).status_code == 403
+
+
+async def test_a_saved_report_summary_is_readable_only_by_its_patient(
+    client, db_session
+):
+    """报告速览是患者自己的数据：别人看不到。"""
+
+    from datetime import date
+
+    from sqlalchemy import select
+
+    from antang_api.health_profile.glucose import record_glucose_report
+    from antang_api.models import User
+
+    path = "/api/v1/health-profile/glucose-reports"
+    assert (await client.get(path)).status_code == 401
+
+    patient, headers = await signup(client)
+    _, second_headers = await signup(client)
+    user = (
+        await db_session.execute(
+            select(User).where(User.username == patient["user"]["username"])
+        )
+    ).scalar_one()
+    await record_glucose_report(
+        db_session,
+        user_id=user.id,
+        period_start=date(2024, 5, 30),
+        period_end=date(2024, 6, 11),
+        device="硅基动感Pro",
+        mean_mmol=6.29,
+        tir_percent=84.5,
+    )
+    await db_session.commit()
+
+    mine = await client.get(path, headers=headers)
+    assert mine.status_code == 200, mine.text
+    items = mine.json()["items"]
+    assert len(items) == 1
+    assert items[0]["period_start"] == "2024-05-30"
+    assert float(items[0]["tir_percent"]) == 84.5
+    assert items[0]["note"] is None
+
+    assert (await client.get(path, headers=second_headers)).json()["items"] == []

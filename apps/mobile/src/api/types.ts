@@ -2465,3 +2465,57 @@ export function parseCgmSeries(value: unknown): CgmSeries {
     samples: parseCgmSamples(data.samples ?? []),
   };
 }
+
+export type GlucoseReport = {
+  id: string;
+  periodStart: string;
+  periodEnd: string;
+  device: string;
+  meanMmol: number | null;
+  sdMmol: number | null;
+  cvPercent: number | null;
+  ehba1cPercent: number | null;
+  tirPercent: number | null;
+  tarPercent: number | null;
+  tbrPercent: number | null;
+  note: string | null;
+  createdAt: string;
+};
+
+function optionalNumber(data: Record<string, unknown>, key: string): number | null {
+  const value = data[key];
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  // 后端用 Numeric 存，序列化出来可能是字符串。
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+export function parseGlucoseReport(value: unknown): GlucoseReport {
+  const data = cgmObject(value);
+  return {
+    id: cgmString(data, "id"),
+    periodStart: cgmString(data, "period_start"),
+    periodEnd: cgmString(data, "period_end"),
+    device: typeof data.device === "string" ? data.device : "",
+    meanMmol: optionalNumber(data, "mean_mmol"),
+    sdMmol: optionalNumber(data, "sd_mmol"),
+    cvPercent: optionalNumber(data, "cv_percent"),
+    ehba1cPercent: optionalNumber(data, "ehba1c_percent"),
+    tirPercent: optionalNumber(data, "tir_percent"),
+    tarPercent: optionalNumber(data, "tar_percent"),
+    tbrPercent: optionalNumber(data, "tbr_percent"),
+    note: typeof data.note === "string" ? data.note : null,
+    createdAt: cgmString(data, "created_at"),
+  };
+}
+
+export function parseGlucoseReports(value: unknown): GlucoseReport[] {
+  const data = cgmObject(value);
+  const items = data.items;
+  if (!Array.isArray(items)) return [];
+  return items.map(parseGlucoseReport);
+}
