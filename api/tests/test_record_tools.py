@@ -8,7 +8,9 @@ from uuid import UUID, uuid4
 import pytest
 from langchain.tools import ToolRuntime
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+from langchain_core.tools import StructuredTool
 from pydantic import ValidationError
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from antang_api.agents.runtime import AgentContext
@@ -148,6 +150,82 @@ def test_meal_carbs_outside_a_plausible_range_are_refused() -> None:
     with pytest.raises(ValidationError):
         MealRequest(meal_type="lunch", eaten_at=NOW, description="火锅", carbs_grams=500)
 
+async def test_a_vague_medication_name_has_to_be_asked_about(
+    db_session: AsyncSession,
+) -> None:
+    """「吃了点感冒药」不是药名：工具拒绝，模型只能回头问是哪一种。"""
+
+    user = await _create_user(db_session, "vague_medication")
+    prepared_run = await prepare_chat_run(db_session, user.id, uuid4(), "吃了点感冒药")
+    await db_session.commit()
+
+    tools = build_record_tools(sessions=cast(Any, lambda: _KeepOpen(db_session)))
+    _meal, medication = tools
+    assert isinstance(medication, StructuredTool)
+
+    with pytest.raises(ValueError, match="不是具体药名"):
+        await cast("Callable[..., Awaitable[object]]", medication.coroutine)(
+            runtime=_runtime(user.id, prepared_run.run_id),
+            name="感冒药",
+            dose_text="两片",
+            taken_at=datetime.now(UTC).isoformat(),
+        )
+
+    rows = await db_session.execute(
+        select(MedicationLog).where(MedicationLog.user_id == user.id)
+    )
+    assert list(rows.scalars()) == []
+
+
+async def test_a_meal_without_a_portion_has_to_be_asked_about(
+    db_session: AsyncSession,
+) -> None:
+    """「我吃了凉皮」还差一句「吃了多少」：记下来之前必须先问。"""
+
+    user = await _create_user(db_session, "vague_meal")
+    prepared_run = await prepare_chat_run(db_session, user.id, uuid4(), "我吃了凉皮")
+    await db_session.commit()
+
+    meal, _medication = build_record_tools(sessions=cast(Any, lambda: _KeepOpen(db_session)))
+    assert isinstance(meal, StructuredTool)
+
+    with pytest.raises(ValueError, match="吃了多少"):
+        await cast("Callable[..., Awaitable[object]]", meal.coroutine)(
+            runtime=_runtime(user.id, prepared_run.run_id),
+            meal_type="dinner",
+            eaten_at=datetime.now(UTC).isoformat(),
+            description="凉皮",
+        )
+
+    rows = await db_session.execute(select(MealLog).where(MealLog.user_id == user.id))
+    assert list(rows.scalars()) == []
+
+
+async def test_a_meal_that_already_says_how_much_is_recorded(
+    db_session: AsyncSession,
+) -> None:
+    """「一碗凉皮」份量已经在话里了，不用再追问一遍。"""
+
+    user = await _create_user(db_session, "portion_meal")
+    prepared_run = await prepare_chat_run(db_session, user.id, uuid4(), "吃了一碗凉皮")
+    await db_session.commit()
+
+    meal, _medication = build_record_tools(sessions=cast(Any, lambda: _KeepOpen(db_session)))
+    assert isinstance(meal, StructuredTool)
+
+    result = await cast("Callable[..., Awaitable[object]]", meal.coroutine)(
+        runtime=_runtime(user.id, prepared_run.run_id),
+        meal_type="dinner",
+        eaten_at=datetime.now(UTC).isoformat(),
+        description="凉皮",
+        portion_hint="一碗",
+    )
+
+    assert cast("dict[str, object]", result)["recorded"] is True
+    rows = await db_session.execute(select(MealLog).where(MealLog.user_id == user.id))
+    assert [row.description for row in rows.scalars()] == ["凉皮（一碗）"]
+
+
 def test_an_empty_dose_is_refused_so_the_model_has_to_ask() -> None:
     """照片里只看得见药名、看不见剂量时：工具收不下这条，模型只能回去问。"""
 
@@ -250,6 +328,7 @@ async def test_the_agent_loop_can_invoke_the_record_tool(db_session: AsyncSessio
                             "meal_type": "dinner",
                             "eaten_at": datetime.now(UTC).isoformat(),
                             "description": "凉皮",
+                            "portion_hint": "一碗",
                         },
                         "id": "meal-call-1",
                         "type": "tool_call",
@@ -276,6 +355,6 @@ async def test_the_agent_loop_can_invoke_the_record_tool(db_session: AsyncSessio
     assert tool_messages[0].status != "error", str(tool_messages[0].content)
 
     rows = await db_session.execute(select(MealLog).where(MealLog.user_id == user.id))
-    assert [row.description for row in rows.scalars()] == ["凉皮"]
+    assert [row.description for row in rows.scalars()] == ["凉皮（一碗）"]
 
 

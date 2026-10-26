@@ -3,9 +3,12 @@
 设计约束（和产品口径一致）：
 - 只记录患者说过或照片里能看清的事实，不推断、不补剂量；
 - 剂量缺失时工具调用会失败，模型必须回头问患者（这就是「询问补全」的实现）；
+- 说得笼统（「吃了点感冒药」「就吃了凉皮」）也会被挡下来，逼模型先追问，
+  见 `_medication_name_is_vague` / `_meal_followup_question`；
 - 时间是真实发生时间，不是提交时间：晚上 16 点补记早上 10 点的药，记的是 10 点。
 """
 
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 from uuid import UUID
@@ -43,6 +46,71 @@ def _check_event_time(value: datetime, now: datetime) -> datetime:
     if value < now - BACKFILL_LIMIT:
         raise ValueError("只支持补记最近 30 天内的记录")
     return value.astimezone(UTC)
+
+
+# 「吃了点感冒药」不是药名。这类词挡下来，模型就只能回头问是哪一种。
+VAGUE_MEDICATION_NAMES = frozenset(
+    {
+        "药",
+        "这个药",
+        "那个药",
+        "感冒药",
+        "消炎药",
+        "抗生素",
+        "止痛药",
+        "退烧药",
+        "退热药",
+        "胃药",
+        "止泻药",
+        "过敏药",
+        "抗过敏药",
+        "维生素",
+        "中成药",
+        "降压药",
+        "降糖药",
+    }
+)
+
+# 「吃了点东西」也不是食物。同上。
+VAGUE_MEAL_DESCRIPTIONS = frozenset(
+    {
+        "东西",
+        "吃的",
+        "饭",
+        "食物",
+        "零食",
+        "主食",
+        "外卖",
+        "随便吃点",
+        "吃了点东西",
+    }
+)
+
+# 份量常常混在描述里（「一碗凉皮」「两个包子」「200 克米饭」），有就不追问。
+_QUANTITY_PATTERN = re.compile(
+    r"\d|[半一两二三四五六七八九十]\s*(?:碗|个|份|杯|片|块|盒|袋|根|勺|口|串|斤|克|毫升|瓶|罐|张|只|颗|两|g|ml)"
+)
+
+
+def _medication_name_is_vague(name: str) -> bool:
+    return name.strip().replace(" ", "") in VAGUE_MEDICATION_NAMES
+
+
+def _meal_followup_question(
+    description: str,
+    portion_hint: str | None,
+    carbs_grams: int | None,
+) -> str | None:
+    """这一餐还缺什么：缺就返回要追问的那句话，够了返回 None。"""
+
+    text = description.strip()
+    if not text:
+        return "还没说吃了什么。先问一句吃的是什么，再记这一餐。"
+    if text in VAGUE_MEAL_DESCRIPTIONS:
+        return "「东西」太笼统：先问清具体吃了什么（食物名），再记这一餐。"
+    if portion_hint is None and carbs_grams is None and not _QUANTITY_PATTERN.search(text):
+        return "还没说吃了多少。先问一句大概份量（半碗 / 一碗 / 一个 / 几块），再记这一餐。"
+    return None
 
 
 MealType = Annotated[
@@ -175,7 +243,8 @@ def build_record_tools(
         """把患者刚吃的一餐写进饮食记录。
 
         只在患者明确说了这一餐吃了什么、或发来照片并且你看清了食物时调用。
-        缺少份量或碳水时可以先记下来（份量与碳水都可以空），但不要把猜测写成事实。
+        说得很笼统（「吃了点东西」）或者没说份量（「就吃了凉皮」）时这个工具会报错，
+        报错里就是要问患者的那句话——照着问，问到了再调用一次。
         记完用一句话告诉患者记了什么、记到了几点，然后继续原来的话题。
         只有这个工具返回 recorded=true 才能说「已经记下来了」。
         """
@@ -187,12 +256,19 @@ def build_record_tools(
             carbs_grams=carbs_grams,
             portion_hint=portion_hint,
         )
+        followup = _meal_followup_question(
+            request.description, request.portion_hint, request.carbs_grams
+        )
+        if followup is not None:
+            raise ValueError(followup)
         now = datetime.now(UTC)
         eaten_at = _check_event_time(request.eaten_at, now)
 
         description = request.description.strip()
         if request.portion_hint:
-            description = f"{description}（{request.portion_hint.strip()}）".strip("（）")
+            # 份量附在描述后面（「凉皮（一碗）」）。这里不要 strip("（）")：
+            # 那会把右括号一起吃掉，列表里就显示成「凉皮（一碗」。
+            description = f"{description}（{request.portion_hint.strip()}）"
 
         async with sessions() as session:
             await _trigger_message_id(session, runtime)
@@ -225,6 +301,8 @@ def build_record_tools(
         """把患者这次用药写进用药记录（只记录，不给任何剂量建议）。
 
         剂量必须由患者说出或照片里能看清；没有剂量就先问，不要调用这个工具。
+        药名说得笼统（「吃了点感冒药」「消炎药」）时这个工具会报错，报错里就是要问的那句
+        ——先问清是哪一种药、几颗/几片，再调用一次。
         患者自己调了量也照原样记下来——这条记录之后可以给医生看。
         只有这个工具返回 recorded=true 才能说「已经记下来了」。
         """
@@ -236,6 +314,11 @@ def build_record_tools(
             kind=kind,
             note=note,
         )
+        if _medication_name_is_vague(request.name):
+            raise ValueError(
+                f"「{request.name.strip()}」不是具体药名：先问清是哪一种药"
+                "（例如 连花清瘟胶囊、泰诺、布洛芬），剂量也一并确认，再记这次用药。"
+            )
         now = datetime.now(UTC)
         taken_at = _check_event_time(request.taken_at, now)
 
