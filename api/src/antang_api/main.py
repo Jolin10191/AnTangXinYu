@@ -33,6 +33,7 @@ from antang_api.tools import (
     build_behavior_tools,
     build_care_plan_tool,
     build_glucose_read_tool,
+    build_glucose_write_tool,
     build_knowledge_search_tool,
     build_profile_tool,
     build_record_tools,
@@ -100,6 +101,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 behavior_tools = build_behavior_tools(session_factory)
                 record_tools = build_record_tools(session_factory)
                 glucose_tool = build_glucose_read_tool(session_factory)
+                glucose_write_tool = build_glucose_write_tool(session_factory)
                 knowledge_tool = build_knowledge_search_tool(session_factory)
                 web_tools = build_web_tools(
                     tavily_client,
@@ -113,6 +115,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     health_profile_delegate,
                     care_plan_tool,
                     glucose_tool,
+                    glucose_write_tool,
                     *behavior_tools,
                     *record_tools,
                 )

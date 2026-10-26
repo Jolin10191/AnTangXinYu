@@ -198,3 +198,31 @@
 - 测试：`api/tests/test_record_tools.py` 新增三条（笼统药名被拒、没说份量被拒、
   「一碗」已经在话里就直接记）共 15 例；全量 537 passed，ruff / pyright 干净。
   已部署（迁移无，仅代码）。
+
+### 2026-10-27 凌晨：报告里的血糖终于能留痕
+
+患者把 CGM 报告 PDF（还有一张化验单截图）发给糖糖，糖糖把数字念了一遍、说得也对，
+但回到「记录 → 血糖」是空的：模型手里只有**读**血糖的工具，没有任何**写**血糖的工具，
+`glucose_readings` 那一行永远不会出现。两处补上：
+
+- 新工具 `record_glucose_readings`（`api/src/antang_api/tools/glucose.py` 的
+  `build_glucose_write_tool`）：参数平铺——`readings`（`GlucosePoint` 列表：`measured_at` 带时区、
+  `value_mmol`、`context`、`note`）、`source`（cgm / lab / fingerstick / manual）、`device`。
+  一次最多 120 条；没有时区、超过 400 天前、落在未来、同一条重复读出的都跳过并在结果里报
+  `skipped`；一条都没剩下时返回 `recorded=false` 并告诉模型「先问清时间」。
+  化验单传了 `device` 也不会存（`record_glucose_reading` 里 `source != fingerstick` 时清空）。
+  在 `main.py` 的 `core_tools` 里注册（紧挨着读血糖的那个工具）。
+- 假承诺的核对扩到血糖：`chat.py` 的 `RECORD_TOOL_NAMES` 加上 `record_glucose_readings`，
+  说「记下来了」但这一轮没有成功写库的调用时照样追一句实话。
+- 提示词（`agents/core.py`）：患者发 CGM 报告 / 化验单 / 血糖截图，或念一串数字时，
+  除了解释还要把数字记进去（一条一个时间点、带时区、mmol/L，mg/dL 先除以 18；
+  来源按实际填 cgm / lab / fingerstick），读完说一句「已经记进血糖记录，记录页能看到，也能逐条撤回」。
+- 移动端（`apps/mobile/src/navigation/record-screen.tsx`）：`source` 是 `cgm` / `report` 的读数
+  以前被「手动」栏过滤掉、「传感器」栏又只渲染 CSV 导入的 `cgm_samples`，等于**哪一栏都看不见**。
+  现在「传感器」栏多一块「报告里记下 N 条」，把这几条连同时间、来源、备注列出来。
+- 测试：`api/tests/test_glucose_write_tool.py` 8 例（平铺 schema、逐条落库、缺时区被丢、
+  重复只写一次、未来时间被丢、化验单不带血糖仪、数值越界被拒、真走 Agent 图写库）；
+  移动端 `record-screen.test.tsx` 新增「报告来的读数出现在传感器栏」。
+  全量后端 545 passed、ruff / pyright 干净；移动端 50 套 305 用例、`tsc --noEmit` 无输出。
+  未部署（只有代码，无迁移）。
+

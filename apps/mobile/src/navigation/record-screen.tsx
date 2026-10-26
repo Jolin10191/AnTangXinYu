@@ -358,6 +358,11 @@ export function RecordScreen({
   const manualReadings = readings.filter(
     (reading) => reading.source !== "report" && reading.source !== "cgm",
   );
+  // 报告里读出来的数字也走 source=cgm/report，它们不在「手动」里，得在这栏露面，
+  // 否则对话说「已经记进血糖记录」，患者翻记录页却是空的。
+  const reportReadings = readings.filter(
+    (reading) => reading.source === "report" || reading.source === "cgm",
+  );
   const cgmSampleStats =
     cgmSamples.length === 0
       ? null
@@ -571,13 +576,25 @@ export function RecordScreen({
                 <View style={styles.card}>
                   <Text style={styles.cardTitle}>
                     {cgmSamples.length === 0
-                      ? "还没有导入传感器数据"
+                      ? reportReadings.length === 0
+                        ? "还没有导入传感器数据"
+                        : `报告里记下 ${reportReadings.length} 条`
                       : `已导入 ${cgmSamples.length} 条`}
                   </Text>
                   <Text style={styles.cardBody}>
                     从厂家 App 导出 CSV，先预览能用的行与可疑行，确认后才入库。
                   </Text>
                 </View>
+                {reportReadings.slice(0, 5).map((reading) => (
+                  <View key={reading.id} style={styles.card}>
+                    <Text style={styles.cardTitle}>{formatGlucose(reading)}</Text>
+                    <Text style={styles.cardBody}>
+                      {formatMeasuredAt(reading.measuredAt)} ·{" "}
+                      {SOURCE_LABELS[reading.source] ?? "传感器"}
+                      {reading.note === null ? "" : ` ·「${reading.note}」`}
+                    </Text>
+                  </View>
+                ))}
                 {cgmSamples.length === 0 ? null : <CgmCurve samples={cgmSamples} />}
                 {cgmSampleStats === null ? null : (
                   <View style={styles.metricRow}>

@@ -85,6 +85,7 @@ from antang_api.psychosocial import read_latest_assessment, render_guidance
 from antang_api.psychosocial.hypo_review import render_hypo_review_prompt
 from antang_api.behavioral import read_fear_summary, render_behavior_context
 from antang_api.settings import settings
+from antang_api.tools.glucose import RECORD_GLUCOSE_TOOL_NAME
 from antang_api.tools.records import (
     RECORD_MEAL_TOOL_NAME,
     RECORD_MEDICATION_TOOL_NAME,
@@ -162,7 +163,11 @@ RECORD_CLAIM_PATTERN = re.compile(
     r"记到(了)?你的记录|记进(了)?你的记录|帮你把.{0,16}记(下|进|录))"
 )
 
-RECORD_TOOL_NAMES = (RECORD_MEAL_TOOL_NAME, RECORD_MEDICATION_TOOL_NAME)
+RECORD_TOOL_NAMES = (
+    RECORD_MEAL_TOOL_NAME,
+    RECORD_MEDICATION_TOOL_NAME,
+    RECORD_GLUCOSE_TOOL_NAME,
+)
 
 RECORD_NOT_SAVED_NOTICE = (
     "（补一句实话：刚才这条我没能写进你的记录，"

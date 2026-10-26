@@ -1,0 +1,300 @@
+"""报告里的血糖要能留痕。
+
+线上真发生过：患者把 CGM 报告 PDF 发给糖糖，糖糖把数字念了一遍、说得挺好，
+患者回到「记录 → 血糖」却是空的——因为模型手里只有读血糖的工具，没有写血糖的。
+这组用例盯的就是「念一遍」和「写进库」之间的区别。
+"""
+
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable, Sequence
+from datetime import UTC, datetime, timedelta
+from typing import Any, Self, cast
+from uuid import UUID, uuid4
+
+import pytest
+from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+from langchain_core.tools.structured import StructuredTool
+from langchain.tools import ToolRuntime
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from antang_api.agents.runtime import AgentContext
+from antang_api.chat import prepare_chat_run
+from antang_api.models import GlucoseReading, PersonalProfile, ProactiveCareSettings, User
+from antang_api.tools.glucose import (
+    RECORD_GLUCOSE_TOOL_NAME,
+    build_glucose_write_tool,
+)
+
+
+class _KeepOpen:
+    """工具里只用到 `async with sessions() as session`，测试给的是当前事务。"""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def __aenter__(self) -> AsyncSession:
+        return self._session
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
+
+
+async def _create_user(session: AsyncSession, prefix: str) -> User:
+    username = f"{prefix}_{uuid4().hex[:12]}"
+    user = User(
+        username=username,
+        username_normalized=username,
+        password_hash="test-only-password-hash",
+    )
+    session.add(user)
+    await session.flush()
+    session.add_all(
+        [
+            PersonalProfile(user_id=user.id),
+            ProactiveCareSettings(user_id=user.id),
+        ]
+    )
+    await session.flush()
+    return user
+
+
+def _runtime(user_id: UUID) -> ToolRuntime[AgentContext]:
+    return ToolRuntime(
+        state={"messages": []},
+        context=AgentContext(
+            user_id=user_id,
+            run_id=uuid4(),
+            input_message_count=1,
+        ),
+        config={},
+        stream_writer=lambda _value: None,
+        tool_call_id="glucose-call",
+        store=None,
+        tools=[],
+    )
+
+
+def _write_tool(session: AsyncSession) -> Callable[..., Awaitable[dict[str, object]]]:
+    def sessions() -> _KeepOpen:
+        return _KeepOpen(session)
+
+    tool = build_glucose_write_tool(sessions=cast(Any, sessions))
+    assert isinstance(tool, StructuredTool)
+    assert tool.coroutine is not None
+    return cast("Callable[..., Awaitable[dict[str, object]]]", tool.coroutine)
+
+
+async def _rows(session: AsyncSession, user_id: UUID) -> list[GlucoseReading]:
+    result = await session.execute(
+        select(GlucoseReading)
+        .where(GlucoseReading.user_id == user_id)
+        .order_by(GlucoseReading.measured_at)
+    )
+    return list(result.scalars())
+
+
+def test_the_write_tool_is_flat_and_named_for_the_logs() -> None:
+    """平铺参数：嵌套成 `request` 的那种写法线上已经翻过车。"""
+
+    tool = build_glucose_write_tool()
+
+    assert tool.name == RECORD_GLUCOSE_TOOL_NAME
+    assert set(tool.args) == {"readings", "source", "device"}
+
+
+async def test_a_report_writes_every_point_it_read(db_session: AsyncSession) -> None:
+    user = await _create_user(db_session, "glucose_report")
+    measured = datetime.now(UTC) - timedelta(hours=3)
+
+    result = await _write_tool(db_session)(
+        readings=[
+            {
+                "measured_at": measured.isoformat(),
+                "value_mmol": 6.8,
+                "context": "post_meal",
+                "note": "报告日均",
+            },
+            {
+                "measured_at": (measured + timedelta(hours=1)).isoformat(),
+                "value_mmol": 3.6,
+                "context": "night",
+            },
+        ],
+        source="cgm",
+        runtime=_runtime(user.id),
+    )
+
+    assert result["recorded"] is True
+    assert result["count"] == 2
+    rows = await _rows(db_session, user.id)
+    assert [row.value_mg_dl for row in rows] == [122, 65]
+    assert {row.source for row in rows} == {"cgm"}
+    assert rows[0].note == "报告日均"
+    assert rows[1].context == "night"
+
+
+async def test_a_point_without_a_timezone_is_dropped(
+    db_session: AsyncSession,
+) -> None:
+    """没有时区的时间读不出「是哪一刻」，宁可少记，不要记错。"""
+
+    user = await _create_user(db_session, "glucose_naive")
+    now = datetime.now(UTC)
+
+    result = await _write_tool(db_session)(
+        readings=[
+            {"measured_at": now.replace(tzinfo=None).isoformat(), "value_mmol": 7.1},
+            {"measured_at": now.isoformat(), "value_mmol": 5.4},
+        ],
+        source="cgm",
+        runtime=_runtime(user.id),
+    )
+
+    assert result["count"] == 1
+    assert result["skipped"] == 1
+    assert [row.value_mg_dl for row in await _rows(db_session, user.id)] == [97]
+
+
+async def test_the_same_point_read_twice_is_written_once(
+    db_session: AsyncSession,
+) -> None:
+    user = await _create_user(db_session, "glucose_dupe")
+    measured = datetime.now(UTC) - timedelta(hours=2)
+    point = {"measured_at": measured.isoformat(), "value_mmol": 8.2}
+
+    result = await _write_tool(db_session)(
+        readings=[point, dict(point)],
+        source="cgm",
+        runtime=_runtime(user.id),
+    )
+
+    assert result["count"] == 1
+    assert result["skipped"] == 1
+    assert len(await _rows(db_session, user.id)) == 1
+
+
+async def test_a_point_that_has_not_happened_yet_is_dropped(
+    db_session: AsyncSession,
+) -> None:
+    user = await _create_user(db_session, "glucose_future")
+
+    result = await _write_tool(db_session)(
+        readings=[
+            {
+                "measured_at": (datetime.now(UTC) + timedelta(hours=5)).isoformat(),
+                "value_mmol": 9.0,
+            }
+        ],
+        source="cgm",
+        runtime=_runtime(user.id),
+    )
+
+    assert result["recorded"] is False
+    assert await _rows(db_session, user.id) == []
+
+
+async def test_a_lab_report_stays_a_lab_reading(db_session: AsyncSession) -> None:
+    user = await _create_user(db_session, "glucose_lab")
+
+    await _write_tool(db_session)(
+        readings=[{"measured_at": datetime.now(UTC).isoformat(), "value_mmol": 5.9}],
+        source="lab",
+        device="roche",
+        runtime=_runtime(user.id),
+    )
+
+    rows = await _rows(db_session, user.id)
+    assert rows[0].source == "lab"
+    # 化验单没有「哪台血糖仪」，存了会变成自相矛盾的记录。
+    assert rows[0].source_device == ""
+
+
+def test_a_point_needs_a_plausible_value() -> None:
+    from antang_api.tools.glucose import GlucosePoint
+
+    with pytest.raises(ValueError):
+        GlucosePoint(measured_at=datetime.now(UTC).isoformat(), value_mmol=900)
+
+
+class _ToolLoopFakeModel(FakeMessagesListChatModel):
+    """让 create_agent 能给它绑定工具。"""
+
+    def bind_tools(
+        self,
+        tools: Sequence[Any],
+        *,
+        tool_choice: str | None = None,
+        **kwargs: Any,
+    ) -> Self:
+        del tools, tool_choice, kwargs
+        return self
+
+
+async def test_the_agent_loop_can_write_a_report(db_session: AsyncSession) -> None:
+    """走一遍 Agent 的图：模型按 schema 传的 nested 列表要真的落到 glucose_readings。
+
+    记录工具就是在这一步翻的车（`**kwargs` 吃掉注入的 runtime），
+    列表参数比平铺参数更容易被压坏，所以这条必须走 ToolNode 而不是直接调函数。
+    """
+
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from antang_api.agents.core import SYSTEM_PROMPT, build_core_agent
+
+    user = await _create_user(db_session, "glucose_agent")
+    prepared_run = await prepare_chat_run(db_session, user.id, uuid4(), "这是我 10 月的报告")
+    await db_session.commit()
+
+    tool = build_glucose_write_tool(
+        sessions=cast(Any, lambda: _KeepOpen(db_session))
+    )
+    measured = datetime.now(UTC) - timedelta(hours=6)
+    model = _ToolLoopFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": RECORD_GLUCOSE_TOOL_NAME,
+                        "args": {
+                            "readings": [
+                                {
+                                    "measured_at": measured.isoformat(),
+                                    "value_mmol": 4.1,
+                                    "context": "fasting",
+                                    "note": "报告均值",
+                                }
+                            ],
+                            "source": "cgm",
+                        },
+                        "id": "glucose-call-1",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(content="已经记进血糖记录，记录页能看到。"),
+        ]
+    )
+    agent = build_core_agent(model, InMemorySaver(), tools=(tool,), middleware=())
+    state = await agent.ainvoke(
+        {"messages": [HumanMessage(content="这是我 10 月的报告")]},
+        config={"configurable": {"thread_id": str(prepared_run.run_id)}},
+        context=AgentContext(
+            user_id=user.id,
+            run_id=prepared_run.run_id,
+            input_message_count=1,
+            rendered_system_prompt=SYSTEM_PROMPT,
+        ),
+    )
+
+    tool_messages = [m for m in state["messages"] if isinstance(m, ToolMessage)]
+    assert len(tool_messages) == 1
+    assert tool_messages[0].status != "error", str(tool_messages[0].content)
+
+    rows = await _rows(db_session, user.id)
+    assert [row.value_mg_dl for row in rows] == [74]
+    assert rows[0].source == "cgm"
+

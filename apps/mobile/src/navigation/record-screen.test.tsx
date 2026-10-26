@@ -134,6 +134,35 @@ describe("RecordScreen", () => {
     expect(imported).toBe(1);
   });
 
+  it("shows a reading that came in from a report under the sensor tab", async () => {
+    // 报告里读出来的数字不应该凭空消失：对话说「已经记进血糖记录」，
+    // 患者翻到这一页必须看得见，否则又变成「说了没记」。
+    const api = fakeApi({
+      getGlucoseReadings: jest.fn(async () => [
+        READING,
+        {
+          ...READING,
+          id: "report-1",
+          valueMgDl: 74,
+          source: "cgm",
+          sourceDevice: "",
+          note: "报告均值",
+        },
+      ]),
+    });
+    const tree = await mount(api);
+
+    await act(async () => {
+      tree.root.findByProps({ accessibilityLabel: "传感器来源" }).props.onPress();
+    });
+
+    const text = JSON.stringify(tree.toJSON());
+    expect(text).toContain("报告里记下 1 条");
+    expect(text).toContain("4.1 mmol/L");
+    expect(text).toContain("传感器");
+    expect(text).toContain("报告均值");
+  });
+
   it("lists meals and saves a new one without leaving the tab", async () => {
     const api = fakeApi();
     const tree = await mount(api);
