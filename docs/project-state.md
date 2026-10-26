@@ -173,3 +173,12 @@
 - 迁移汇合头从 a5b6c7d8e9f1 变为 b6c7d8e9f1a2。
 - 验证：后端 528 passed、ruff/pyright 通过；移动端 50 套 302 用例通过、`tsc --noEmit` 无输出、`expo lint` 无问题。
 
+### 2026-10-26 深夜：AI 说「已经帮你记下来了」却没落库
+
+- 线上事故：患者说「连花清瘟胶囊 2 颗」，回复写着「已经帮你记下来了」，但 `medication_logs` 里没有这一行。查 `agent_tool_calls` 发现那一轮**一次工具调用都没有**，前一轮的 `record_medication` 更是 `status=failed`、`error_message` 里是 `request: Field required`。
+- 根因一：两个记录工具的签名是 `async def record_medication(request: MedicationRequest, runtime)`，生成的 schema 只有一个必填字段 `request`；模型把字段**平铺**传过来就整条失败。改成扁平 schema（`@tool(..., args_schema=MedicationRequest)` + `async def record_medication(runtime, **kwargs)` + `MedicationRequest.model_validate(kwargs)`），模型少套一层也能进；被 pydantic 拦下的仍然是「缺剂量」这类真的缺信息。
+- 根因二：工具失败后模型不纠正，下一轮干脆不调工具、直接说「记好了」。提示词加了硬规则（只有 `recorded=true` 才能说记好了，否则如实说没记上），同时服务端加一道核对：`_unconfirmed_record_claim` 在这一轮回复里出现「帮你记了/已经记录」这类字样、但该 run 没有任何 `status=completed` 的 `record_meal`/`record_medication` 调用时，追一句「（补一句实话：刚才这条我没能写进你的记录，麻烦你在「记录」页手动补一下，或者再说一次，我重新记。）」，并记 `logger.warning`。
+- 匹配用 `RECORD_CLAIM_PATTERN`，只认「帮你记了/已经帮你记下来/记到你的记录」这类记录口吻，「好的，我记住了」不会误伤（有测试守着）。
+- 验证：后端 533 passed、ruff/pyright 通过；`tests/test_record_tools.py` 新增「平铺参数真的写进 medication_logs」与「schema 是扁平的」两条；`tests/test_chat_service.py` 新增三条（说了没记 → 触发纠正、工具成功 → 不纠正、普通应答 → 不误伤）。
+
+

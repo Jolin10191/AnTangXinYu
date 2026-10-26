@@ -149,18 +149,24 @@ def build_record_tools(
 ) -> tuple[BaseTool, BaseTool]:
     """创建「记这一餐」「记这次用药」两个工具。"""
 
-    @tool(RECORD_MEAL_TOOL_NAME)
+    # 参数用扁平 schema（args_schema=...），不是「一个 request 对象里套所有字段」：
+    # 线上真的踩过——模型把字段平铺着传过来，框架报 "request: Field required"，
+    # 工具没执行、模型却回了一句「已经帮你记下来了」。扁平之后两种写法都只是字段，
+    # 少一层嵌套就少一次「参数对不上」的失败。
+    @tool(RECORD_MEAL_TOOL_NAME, args_schema=MealRequest)
     async def record_meal(
-        request: MealRequest,
         runtime: ToolRuntime[AgentContext],
+        **kwargs: object,
     ) -> dict[str, object]:
         """把患者刚吃的一餐写进饮食记录。
 
         只在患者明确说了这一餐吃了什么、或发来照片并且你看清了食物时调用。
         缺少份量或碳水时可以先记下来（份量与碳水都可以空），但不要把猜测写成事实。
         记完用一句话告诉患者记了什么、记到了几点，然后继续原来的话题。
+        只有这个工具返回 recorded=true 才能说「已经记下来了」。
         """
 
+        request = MealRequest.model_validate(kwargs)
         now = datetime.now(UTC)
         eaten_at = _check_event_time(request.eaten_at, now)
 
@@ -187,17 +193,19 @@ def build_record_tools(
                 "carbs_grams": log.carbs_grams,
             }
 
-    @tool(RECORD_MEDICATION_TOOL_NAME)
+    @tool(RECORD_MEDICATION_TOOL_NAME, args_schema=MedicationRequest)
     async def record_medication(
-        request: MedicationRequest,
         runtime: ToolRuntime[AgentContext],
+        **kwargs: object,
     ) -> dict[str, object]:
         """把患者这次用药写进用药记录（只记录，不给任何剂量建议）。
 
         剂量必须由患者说出或照片里能看清；没有剂量就先问，不要调用这个工具。
         患者自己调了量也照原样记下来——这条记录之后可以给医生看。
+        只有这个工具返回 recorded=true 才能说「已经记下来了」。
         """
 
+        request = MedicationRequest.model_validate(kwargs)
         now = datetime.now(UTC)
         taken_at = _check_event_time(request.taken_at, now)
 

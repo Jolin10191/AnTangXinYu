@@ -1,11 +1,23 @@
 """记录工具：时间口径、必填项，以及它们确实注册进了 Agent 的工具集。"""
 
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
+from uuid import UUID, uuid4
 
 import pytest
+from langchain.tools import ToolRuntime
 from pydantic import ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from antang_api.chat import TOOL_ACTIVITY_PHASES
+from antang_api.agents.runtime import AgentContext
+from antang_api.chat import TOOL_ACTIVITY_PHASES, prepare_chat_run
+from antang_api.models import (
+    MedicationLog,
+    PersonalProfile,
+    ProactiveCareSettings,
+    User,
+)
 from antang_api.tools.records import (
     RECORD_MEAL_TOOL_NAME,
     RECORD_MEDICATION_TOOL_NAME,
@@ -16,6 +28,55 @@ from antang_api.tools.records import (
 )
 
 NOW = datetime(2026, 10, 24, 12, 0, tzinfo=UTC)
+
+
+class _KeepOpen:
+    """让工具复用测试事务里的会话，写完能在同一个事务里读回来。"""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def __aenter__(self) -> AsyncSession:
+        return self._session
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
+
+
+async def _create_user(session: AsyncSession, prefix: str) -> User:
+    username = f"{prefix}_{uuid4().hex[:12]}"
+    user = User(
+        username=username,
+        username_normalized=username,
+        password_hash="test-only-password-hash",
+    )
+    session.add(user)
+    await session.flush()
+    session.add_all(
+        [
+            PersonalProfile(user_id=user.id),
+            ProactiveCareSettings(user_id=user.id),
+        ]
+    )
+    await session.flush()
+    return user
+
+
+def _runtime(user_id: UUID, run_id: UUID) -> ToolRuntime[AgentContext]:
+    return ToolRuntime(
+        state={"messages": []},
+        context=AgentContext(
+            user_id=user_id,
+            run_id=run_id,
+            input_message_count=1,
+        ),
+        config={},
+        stream_writer=lambda _value: None,
+        tool_call_id="record-call",
+        store=None,
+        tools=[],
+    )
+
 
 
 def test_both_recording_tools_are_registered() -> None:
@@ -77,3 +138,67 @@ def test_an_empty_dose_is_refused_so_the_model_has_to_ask() -> None:
 
     with pytest.raises(ValidationError):
         MedicationRequest(name="门冬胰岛素", dose_text="", taken_at=NOW)
+
+
+def test_the_tool_schema_is_flat_so_the_model_cannot_nest_it_wrong() -> None:
+    """线上踩过：模型把字段平铺着传，框架报 "request: Field required"，工具没执行。
+
+    参数是一个 request 对象时，模型只要少套一层就全军覆没；扁平之后没有这一层，
+    模型怎么传都是字段本身。
+    """
+
+    meal, medication = build_record_tools()
+
+    assert "request" not in meal.args
+    assert "request" not in medication.args
+    assert set(medication.args) == {"name", "dose_text", "taken_at", "kind", "note"}
+    assert set(meal.args) == {
+        "meal_type",
+        "eaten_at",
+        "description",
+        "carbs_grams",
+        "portion_hint",
+    }
+
+
+async def test_flat_arguments_actually_reach_the_database(
+    db_session: AsyncSession,
+) -> None:
+    """模型平铺着传字段时，这一条必须真的写进 medication_logs。
+
+    线上那次失败就死在这一步：`request: Field required`，工具没执行，
+    但回复照样说「已经帮你记下来了」。所以这里验证的是「真的落库」。
+    """
+
+    from langchain_core.tools.structured import StructuredTool
+    from sqlalchemy import select
+
+    user = await _create_user(db_session, "flat_args")
+    prepared_run = await prepare_chat_run(
+        db_session, user.id, uuid4(), "吃了连花清瘟胶囊 2 颗"
+    )
+    await db_session.commit()
+
+    def sessions() -> _KeepOpen:
+        return _KeepOpen(db_session)
+
+    # 工具只用到 `async with sessions() as session` 这一件事，
+    # 这里给的是测试事务里的会话，不是真的 sessionmaker。
+    _meal, medication = build_record_tools(sessions=cast(Any, sessions))
+    assert isinstance(medication, StructuredTool)
+    assert medication.coroutine is not None
+
+    result = await cast("Callable[..., Awaitable[object]]", medication.coroutine)(
+        name="连花清瘟胶囊",
+        dose_text="2 颗",
+        kind="other",
+        taken_at=datetime.now(UTC).isoformat(),
+        runtime=_runtime(user.id, prepared_run.run_id),
+    )
+
+    assert cast("dict[str, object]", result)["recorded"] is True
+    rows = await db_session.execute(
+        select(MedicationLog).where(MedicationLog.user_id == user.id)
+    )
+    assert [row.name for row in rows.scalars()] == ["连花清瘟胶囊"]
+

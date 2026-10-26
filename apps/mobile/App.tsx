@@ -20,6 +20,7 @@ import { secureTokenStore } from "./src/auth/token-store";
 import { ChatScreen, type ChatPage } from "./src/chat/ChatScreen";
 import { useGadgetbridge } from "./src/health-connect/useGadgetbridge";
 import { useHealthConnect } from "./src/health-connect/use-health-connect";
+import { LiveHeartRateProvider } from "./src/live-heart-rate/LiveHeartRateProvider";
 import { AppTabBar, type AppTabKey } from "./src/navigation/tab-bar";
 import { MindScreen } from "./src/navigation/mind-screen";
 import { ProfileScreen } from "./src/navigation/profile-screen";
@@ -251,6 +252,9 @@ function PatientShell({
 
   return (
     <View style={styles.shell}>
+      {/* 实时心率会话挂在四个 tab 的壳上：健康看板、对话、记录页共用同一条 BLE 连接，
+          切换页面不会断，只有用户点「停止监测」或退到后台才会断。 */}
+      <LiveHeartRateProvider active>
       <View style={styles.shellBody}>
         <View
           pointerEvents={tab === "chat" ? "auto" : "none"}
@@ -309,6 +313,7 @@ function PatientShell({
         </View>
       </View>
       <AppTabBar active={tab} onChange={setTab} />
+      </LiveHeartRateProvider>
 
       <Modal
         animationType="slide"

@@ -65,10 +65,7 @@ import { HealthDashboardScreen } from '../health/HealthDashboardScreen';
 import { PatientAccessScreen } from '../patient-access/patient-access-screen';
 import { GlucoseScreen } from '../glucose/GlucoseScreen';
 import { GlucoseImportScreen } from '../glucose/GlucoseImportScreen';
-import {
-  LiveHeartRateProvider,
-  useLiveHeartRateController,
-} from '../live-heart-rate/LiveHeartRateProvider';
+import { useLiveHeartRateControllerOrNull } from '../live-heart-rate/LiveHeartRateProvider';
 import type { LiveHeartRateController } from '../live-heart-rate/use-live-heart-rate';
 import { AppMenu, type ConversationAnchor } from '../navigation/app-menu';
 import { useNotifications } from '../notifications/use-notifications';
@@ -203,18 +200,16 @@ export function ChatScreen({
   healthConnect,
   gadgetbridge,
 }: Props) {
-  // 实时心率会话挂在聊天页根组件上，切换健康看板、对话和健康档案都不会断开。
+  // 实时心率会话由 App 外壳的 LiveHeartRateProvider 提供，四个 tab 共用一条 BLE 连接。
   return (
-    <LiveHeartRateProvider active>
-      <ChatScreenContent
-        api={api}
-        gadgetbridge={gadgetbridge}
-        healthConnect={healthConnect}
-        onOpenProfile={onOpenProfile}
-        pageRequest={pageRequest}
-        user={user}
-      />
-    </LiveHeartRateProvider>
+    <ChatScreenContent
+      api={api}
+      gadgetbridge={gadgetbridge}
+      healthConnect={healthConnect}
+      onOpenProfile={onOpenProfile}
+      pageRequest={pageRequest}
+      user={user}
+    />
   );
 }
 
@@ -226,7 +221,8 @@ function ChatScreenContent({
   gadgetbridge,
   pageRequest = null,
 }: Props) {
-  const liveHeartRate = useLiveHeartRateController();
+  // 会话由 App 外壳提供；单独渲染聊天页（例如测试里）时没有 Provider，就当成没有心率。
+  const liveHeartRate = useLiveHeartRateControllerOrNull();
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
   const [draft, setDraft] = useState('');
   const [historyReady, setHistoryReady] = useState(false);
@@ -636,7 +632,7 @@ function ChatScreenContent({
           uploadedAttachment?.id ?? null,
           onEvent,
           signal,
-          currentLiveHeartRate(liveHeartRate),
+          liveHeartRate === null ? null : currentLiveHeartRate(liveHeartRate),
           targetConversationId,
         ),
     );

@@ -449,12 +449,8 @@ export function RecordScreen({
         <Text style={styles.headerHint}>最近 7 天</Text>
       </View>
 
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.tabRow}
-        contentContainerStyle={styles.tabRowContent}
-      >
+      {/* 五个分类芯片：不横向滚动，放不下就换行——横向滚动会把「睡眠」切掉半个。 */}
+      <View style={styles.tabRow}>
         {RECORD_TABS.map((item) => {
           const selected = item.key === tab;
           return (
@@ -473,7 +469,7 @@ export function RecordScreen({
             </Pressable>
           );
         })}
-      </ScrollView>
+      </View>
 
       <ScrollView contentContainerStyle={styles.body}>
         <Pressable
@@ -964,17 +960,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   tabRow: {
-    flexGrow: 0,
-    paddingHorizontal: spacing.md,
-  },
-  tabRowContent: {
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingTop: 2,
   },
   tab: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
-    paddingHorizontal: spacing.sm,
+    gap: 4,
+    paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: radii.pill,
     backgroundColor: colors.paperMuted,
@@ -985,7 +981,7 @@ const styles = StyleSheet.create({
   tabText: {
     color: colors.muted,
     fontFamily: typefaces.sans,
-    fontSize: 12.5,
+    fontSize: 12,
   },
   tabTextActive: {
     color: "#FFFFFF",
