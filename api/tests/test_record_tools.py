@@ -1,18 +1,20 @@
 """记录工具：时间口径、必填项，以及它们确实注册进了 Agent 的工具集。"""
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import Any, Self, cast
 from uuid import UUID, uuid4
 
 import pytest
 from langchain.tools import ToolRuntime
+from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from antang_api.agents.runtime import AgentContext
 from antang_api.chat import TOOL_ACTIVITY_PHASES, prepare_chat_run
 from antang_api.models import (
+    MealLog,
     MedicationLog,
     PersonalProfile,
     ProactiveCareSettings,
@@ -62,6 +64,20 @@ async def _create_user(session: AsyncSession, prefix: str) -> User:
     return user
 
 
+class _ToolLoopFakeModel(FakeMessagesListChatModel):
+    """让 create_agent 能给它绑定工具。"""
+
+    def bind_tools(
+        self,
+        tools: Sequence[Any],
+        *,
+        tool_choice: str | None = None,
+        **kwargs: Any,
+    ) -> Self:
+        del tools, tool_choice, kwargs
+        return self
+
+
 def _runtime(user_id: UUID, run_id: UUID) -> ToolRuntime[AgentContext]:
     return ToolRuntime(
         state={"messages": []},
@@ -76,7 +92,6 @@ def _runtime(user_id: UUID, run_id: UUID) -> ToolRuntime[AgentContext]:
         store=None,
         tools=[],
     )
-
 
 
 def test_both_recording_tools_are_registered() -> None:
@@ -166,8 +181,8 @@ async def test_flat_arguments_actually_reach_the_database(
 ) -> None:
     """模型平铺着传字段时，这一条必须真的写进 medication_logs。
 
-    线上那次失败就死在这一步：`request: Field required`，工具没执行，
-    但回复照样说「已经帮你记下来了」。所以这里验证的是「真的落库」。
+    线上那次失败就死在这一步：工具没执行，回复照样说「已经帮你记下来了」。
+    所以这里验证的是「真的落库」。
     """
 
     from langchain_core.tools.structured import StructuredTool
@@ -201,4 +216,66 @@ async def test_flat_arguments_actually_reach_the_database(
         select(MedicationLog).where(MedicationLog.user_id == user.id)
     )
     assert [row.name for row in rows.scalars()] == ["连花清瘟胶囊"]
+
+
+async def test_the_agent_loop_can_invoke_the_record_tool(db_session: AsyncSession) -> None:
+    """真的让 Agent 跑一轮工具调用——线上就是这一步失败的。
+
+    之前的写法 `record_meal(runtime, **kwargs)` 在 ToolNode 里拿不到注入的 runtime，
+    每次调用都是 `missing 1 required positional argument: 'runtime'`；
+    直接调 coroutine 测不出来，必须走 Agent 的图。
+    """
+
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+    from langgraph.checkpoint.memory import InMemorySaver
+    from sqlalchemy import select
+
+    from antang_api.agents.core import SYSTEM_PROMPT, build_core_agent
+
+    user = await _create_user(db_session, "agent_meal")
+    prepared_run = await prepare_chat_run(db_session, user.id, uuid4(), "刚吃了凉皮")
+    await db_session.commit()
+
+    meal, _medication = build_record_tools(
+        sessions=cast(Any, lambda: _KeepOpen(db_session))
+    )
+    model = _ToolLoopFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": RECORD_MEAL_TOOL_NAME,
+                        "args": {
+                            "meal_type": "dinner",
+                            "eaten_at": datetime.now(UTC).isoformat(),
+                            "description": "凉皮",
+                        },
+                        "id": "meal-call-1",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(content="记下了：今晚吃了凉皮。"),
+        ]
+    )
+    agent = build_core_agent(model, InMemorySaver(), tools=(meal,), middleware=())
+    state = await agent.ainvoke(
+        {"messages": [HumanMessage(content="我吃了凉皮")]},
+        config={"configurable": {"thread_id": str(prepared_run.run_id)}},
+        context=AgentContext(
+            user_id=user.id,
+            run_id=prepared_run.run_id,
+            input_message_count=1,
+            rendered_system_prompt=SYSTEM_PROMPT,
+        ),
+    )
+
+    tool_messages = [m for m in state["messages"] if isinstance(m, ToolMessage)]
+    assert len(tool_messages) == 1
+    assert tool_messages[0].status != "error", str(tool_messages[0].content)
+
+    rows = await db_session.execute(select(MealLog).where(MealLog.user_id == user.id))
+    assert [row.description for row in rows.scalars()] == ["凉皮"]
+
 

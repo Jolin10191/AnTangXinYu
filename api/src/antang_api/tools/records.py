@@ -45,48 +45,84 @@ def _check_event_time(value: datetime, now: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
+MealType = Annotated[
+    Literal["breakfast", "lunch", "dinner", "snack"],
+    Field(description="早餐 / 午餐 / 晚餐 / 加餐；不确定就按现在的时间推断。"),
+]
+EatenAt = Annotated[
+    datetime,
+    Field(
+        description=(
+            "这餐真实发生的时刻，带时区。用户说「刚才」就用当前时间；"
+            "补记早上的一餐要写早上那个时刻，不是现在。"
+        )
+    ),
+]
+MealDescription = Annotated[
+    str,
+    Field(
+        max_length=200,
+        description="吃了什么，用患者自己的说法，例如「一碗米饭、青菜、鸡胸」。",
+    ),
+]
+MealCarbs = Annotated[
+    int | None,
+    Field(
+        ge=0,
+        le=400,
+        description=(
+            "碳水克数估计，可选。患者没说、照片里也看不出就不要填，不要凭习惯猜。"
+        ),
+    ),
+]
+PortionHint = Annotated[
+    str | None,
+    Field(max_length=40, description="份量描述，例如「一碗」「半碗」；没有就说不要填。"),
+]
+
+MedicationName = Annotated[
+    str,
+    Field(min_length=1, max_length=64, description="药名或胰岛素名，照患者说的写。"),
+]
+DoseText = Annotated[
+    str,
+    Field(
+        min_length=1,
+        max_length=64,
+        description=(
+            "患者说出的剂量原文，例如「6 单位」「一片」；"
+            "患者没说剂量就不要调用这个工具，先问清楚——系统不会替你算剂量。"
+        ),
+    ),
+]
+TakenAt = Annotated[
+    datetime,
+    Field(
+        description=(
+            "真实用药时刻，带时区。下午才想起来早上 10 点吃的药，写早上 10 点。"
+        )
+    ),
+]
+MedicationKind = Annotated[
+    Literal["oral", "insulin", "other"],
+    Field(description="胰岛素 / 口服药 / 其它。"),
+]
+MedicationNote = Annotated[
+    str | None,
+    Field(max_length=200, description="患者原话片段或当时情境，可选。"),
+]
+
+
 class MealRequest(BaseModel):
     """患者刚吃的一餐。"""
 
     model_config = ConfigDict(extra="forbid")
 
-    meal_type: Annotated[
-        Literal["breakfast", "lunch", "dinner", "snack"],
-        Field(description="早餐 / 午餐 / 晚餐 / 加餐；不确定就按现在的时间推断。"),
-    ]
-    eaten_at: Annotated[
-        datetime,
-        Field(
-            description=(
-                "这餐真实发生的时刻，带时区。用户说「刚才」就用当前时间；"
-                "补记早上的一餐要写早上那个时刻，不是现在。"
-            )
-        ),
-    ]
-    description: Annotated[
-        str,
-        Field(
-            max_length=200,
-            description="吃了什么，用患者自己的说法，例如「一碗米饭、青菜、鸡胸」。",
-        ),
-    ] = ""
-    carbs_grams: Annotated[
-        int | None,
-        Field(
-            ge=0,
-            le=400,
-            description=(
-                "碳水克数估计，可选。患者没说、照片里也看不出就不要填，不要凭习惯猜。"
-            ),
-        ),
-    ] = None
-    portion_hint: Annotated[
-        str | None,
-        Field(
-            max_length=40,
-            description="份量描述，例如「一碗」「半碗」；没有就说不要填。",
-        ),
-    ] = None
+    meal_type: MealType
+    eaten_at: EatenAt
+    description: MealDescription = ""
+    carbs_grams: MealCarbs = None
+    portion_hint: PortionHint = None
 
 
 class MedicationRequest(BaseModel):
@@ -94,37 +130,11 @@ class MedicationRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: Annotated[
-        str,
-        Field(min_length=1, max_length=64, description="药名或胰岛素名，照患者说的写。"),
-    ]
-    dose_text: Annotated[
-        str,
-        Field(
-            min_length=1,
-            max_length=64,
-            description=(
-                "患者说出的剂量原文，例如「6 单位」「一片」；"
-                "患者没说剂量就不要调用这个工具，先问清楚——系统不会替你算剂量。"
-            ),
-        ),
-    ]
-    taken_at: Annotated[
-        datetime,
-        Field(
-            description=(
-                "真实用药时刻，带时区。下午才想起来早上 10 点吃的药，写早上 10 点。"
-            )
-        ),
-    ]
-    kind: Annotated[
-        Literal["insulin", "oral", "other"],
-        Field(description="胰岛素 / 口服药 / 其它。"),
-    ] = "other"
-    note: Annotated[
-        str | None,
-        Field(max_length=200, description="患者原话片段或当时情境，可选。"),
-    ] = None
+    name: MedicationName
+    dose_text: DoseText
+    taken_at: TakenAt
+    kind: MedicationKind = "other"
+    note: MedicationNote = None
 
 
 async def _trigger_message_id(
@@ -153,10 +163,14 @@ def build_record_tools(
     # 线上真的踩过——模型把字段平铺着传过来，框架报 "request: Field required"，
     # 工具没执行、模型却回了一句「已经帮你记下来了」。扁平之后两种写法都只是字段，
     # 少一层嵌套就少一次「参数对不上」的失败。
-    @tool(RECORD_MEAL_TOOL_NAME, args_schema=MealRequest)
+    @tool(RECORD_MEAL_TOOL_NAME)
     async def record_meal(
         runtime: ToolRuntime[AgentContext],
-        **kwargs: object,
+        meal_type: MealType,
+        eaten_at: EatenAt,
+        description: MealDescription = "",
+        carbs_grams: MealCarbs = None,
+        portion_hint: PortionHint = None,
     ) -> dict[str, object]:
         """把患者刚吃的一餐写进饮食记录。
 
@@ -166,7 +180,13 @@ def build_record_tools(
         只有这个工具返回 recorded=true 才能说「已经记下来了」。
         """
 
-        request = MealRequest.model_validate(kwargs)
+        request = MealRequest(
+            meal_type=meal_type,
+            eaten_at=eaten_at,
+            description=description,
+            carbs_grams=carbs_grams,
+            portion_hint=portion_hint,
+        )
         now = datetime.now(UTC)
         eaten_at = _check_event_time(request.eaten_at, now)
 
@@ -193,10 +213,14 @@ def build_record_tools(
                 "carbs_grams": log.carbs_grams,
             }
 
-    @tool(RECORD_MEDICATION_TOOL_NAME, args_schema=MedicationRequest)
+    @tool(RECORD_MEDICATION_TOOL_NAME)
     async def record_medication(
         runtime: ToolRuntime[AgentContext],
-        **kwargs: object,
+        name: MedicationName,
+        dose_text: DoseText,
+        taken_at: TakenAt,
+        kind: MedicationKind = "other",
+        note: MedicationNote = None,
     ) -> dict[str, object]:
         """把患者这次用药写进用药记录（只记录，不给任何剂量建议）。
 
@@ -205,7 +229,13 @@ def build_record_tools(
         只有这个工具返回 recorded=true 才能说「已经记下来了」。
         """
 
-        request = MedicationRequest.model_validate(kwargs)
+        request = MedicationRequest(
+            name=name,
+            dose_text=dose_text,
+            taken_at=taken_at,
+            kind=kind,
+            note=note,
+        )
         now = datetime.now(UTC)
         taken_at = _check_event_time(request.taken_at, now)
 
