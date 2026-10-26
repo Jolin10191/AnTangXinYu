@@ -226,3 +226,27 @@
   全量后端 545 passed、ruff / pyright 干净；移动端 50 套 305 用例、`tsc --noEmit` 无输出。
   未部署（只有代码，无迁移）。
 
+### 2026-10-27 凌晨（二）：报告只有汇总指标时，存的是报告本身
+
+上一版只写「逐点读数」。患者真发来的那份天津医科大学总医院《动态葡萄糖评估报告》
+是 2024-05-30 至 06-11 的 AGP：**没有任何逐点读数**，只有 eHbA1c 5.73%、平均 6.29、
+SD 1.46、CV 23.27%、高 15.3% / 正常 84.5% / 低 0.2%。硬拆成读数就是一堆编出来的时间点。
+
+- 新表 `glucose_reports`（迁移 `c7d8e9f1a2b3`）：区间、设备、均值、SD、CV、eHbA1c、
+  TIR/TAR/TBR、备注；指标全部可空，报告没写的就空着，不用估算值补齐。
+  约束 `ck_glucose_reports_period_order`（结束日不早于开始日）。
+- 新工具 `record_glucose_report`（`build_glucose_report_tool`，平铺 11 个参数）：
+  日期解析失败、结束日早于开始日、结束日在将来、一个指标都没读出来，四种情况都抛错并
+  告诉模型该去问什么；存完回一句「这份报告我记在血糖记录里了」。
+- 每轮上下文带上最近 3 份报告速览（`render_glucose_reports`），并注明「这些是报告上原本的
+  指标，不是我们算的」。
+- 接口 `GET /api/v1/health-profile/glucose-reports?limit=`（患者自己可见，按结束日倒序）。
+- 记录页「传感器」栏新增「05-30 至 06-11 · 报告速览」卡片，只列报告上真有的项。
+- 提示词：报告只有汇总指标时用「记这份报告」，不要编成读数。
+- 测试：`test_glucose_write_tool.py` 新增 5 例（平铺 schema、整份留存、无指标被拒、
+  日期倒置被拒、上下文渲染）；`test_server_feature_integration.py` 新增「报告速览只有本人看得到」。
+  全量后端 **551 passed**、ruff / pyright 干净；移动端 50 套 **306 用例**、`tsc` 干净。
+- 已部署：`antang-api:deploy-20261026-232702`，线上 `alembic_version = c7d8e9f1a2b3`，
+  容器内 `record_glucose_report` 的 11 个平铺参数已验证。
+
+
