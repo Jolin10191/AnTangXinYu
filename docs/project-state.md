@@ -181,4 +181,20 @@
 - 匹配用 `RECORD_CLAIM_PATTERN`，只认「帮你记了/已经帮你记下来/记到你的记录」这类记录口吻，「好的，我记住了」不会误伤（有测试守着）。
 - 验证：后端 533 passed、ruff/pyright 通过；`tests/test_record_tools.py` 新增「平铺参数真的写进 medication_logs」与「schema 是扁平的」两条；`tests/test_chat_service.py` 新增三条（说了没记 → 触发纠正、工具成功 → 不纠正、普通应答 → 不误伤）。
 
+### 2026-10-26 深夜：笼统的话要先追问，再记
 
+患者故意说了句「吃了点感冒药」看会不会被追问，结果直接被记了下来；
+「我吃了凉皮」也一样，没问吃了多少、也没问是不是刚才。
+
+- `api/src/antang_api/tools/records.py`：`VAGUE_MEDICATION_NAMES`（药 / 感冒药 / 消炎药 /
+  止痛药 / 退烧药 / 胃药 …）里的名字直接拒绝；`VAGUE_MEAL_DESCRIPTIONS`（东西 / 吃的 / 饭 …）
+  拒绝；说了什么但既没 `portion_hint` 也没有 `carbs_grams`、描述里也没有量词时拒绝。
+  拒绝信息就是让模型去问的那句话，模型只能回头问患者。
+- `api/src/antang_api/agents/core.py`：记录规则加一条——笼统的话先追问，一次只问一件
+  （先药名 / 吃了什么，再量，再时间），问完立刻记，不要堆成一段审问；
+  患者说「不用问了」就按他说得出的记，空着的不补。
+- 顺手修掉：份量拼进描述后调用 `.strip("（）")` 会把右括号一起吃掉，
+  列表里显示成「凉皮（一碗」；现在只在有份量时拼接，不 strip。
+- 测试：`api/tests/test_record_tools.py` 新增三条（笼统药名被拒、没说份量被拒、
+  「一碗」已经在话里就直接记）共 15 例；全量 537 passed，ruff / pyright 干净。
+  已部署（迁移无，仅代码）。
