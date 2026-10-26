@@ -55,6 +55,34 @@ function typeInto(
   (byLabel(tree, label).props.onChangeText as (value: string) => void)(text);
 }
 
+/** 时间字段的 label 带着当前时刻（「测量时间：今天 10:47，点按修改」），按前缀找。 */
+function byLabelPrefix(tree: ReturnType<typeof create>, prefix: string): Node {
+  const found = tree.root.findAll(node =>
+    typeof node.props.accessibilityLabel === 'string'
+      ? node.props.accessibilityLabel.startsWith(prefix)
+      : false,
+  );
+  if (found.length === 0) throw new Error(`找不到以 ${prefix} 开头的节点`);
+  return found[0] as unknown as Node;
+}
+
+async function mountWithCapture() {
+  const sent: Record<string, unknown>[] = [];
+  const api = {
+    ...fakeApi([]),
+    createGlucoseReading: async (input: Record<string, unknown>) => {
+      sent.push(input);
+      return { id: 'g-new' } as never;
+    },
+  };
+  let tree: ReturnType<typeof create> | null = null;
+  await act(async () => {
+    tree = create(<GlucoseScreen api={api as never} />);
+  });
+  if (tree === null) throw new Error('render failed');
+  return { sent, host: tree as ReturnType<typeof create> };
+}
+
 describe('GlucoseScreen', () => {
   it('shows the empty hint when nothing has been logged', async () => {
     const rendered = await render([]);
@@ -166,5 +194,77 @@ describe('GlucoseScreen', () => {
     expect(sent).toHaveLength(1);
     expect(sent[0].source).toBe('lab');
     expect(sent[0].sourceDevice).toBeUndefined();
+  });
+
+  it('sends the measurement time the patient picked, not the moment of saving', async () => {
+    const { sent, host } = await mountWithCapture();
+
+    await act(async () => {
+      typeInto(host, '血糖数值', '132');
+    });
+    // 打开「这次测量是什么时候」，往回拨两小时（模拟测完过一会儿才记）。
+    await act(async () => {
+      (byLabelPrefix(host, '测量时间：').props.onPress as () => void)();
+    });
+    await act(async () => {
+      press(host, '小时减一');
+    });
+    await act(async () => {
+      press(host, '小时减一');
+    });
+    await act(async () => {
+      press(host, '用这个时间');
+    });
+    await act(async () => {
+      press(host, '保存这条血糖记录');
+    });
+
+    expect(sent).toHaveLength(1);
+    const measured = new Date(String(sent[0].measuredAt)).getTime();
+    const twoHoursAgo = Date.now() - 2 * 60 * 60_000;
+    expect(Math.abs(measured - twoHoursAgo)).toBeLessThan(180_000);
+  });
+
+  it('refuses a measurement time in the future', async () => {
+    const { sent, host } = await mountWithCapture();
+
+    await act(async () => {
+      typeInto(host, '血糖数值', '90');
+    });
+    await act(async () => {
+      (byLabelPrefix(host, '测量时间：').props.onPress as () => void)();
+    });
+    await act(async () => {
+      press(host, '小时加一');
+    });
+    await act(async () => {
+      press(host, '用这个时间');
+    });
+    await act(async () => {
+      press(host, '保存这条血糖记录');
+    });
+
+    expect(sent).toHaveLength(0);
+    expect(JSON.stringify(host.toJSON())).toContain('测量时间不能是将来');
+  });
+
+  it('separates the measurement time from the record time in the list', async () => {
+    const rendered = await render([
+      {
+        id: 'g5',
+        valueMgDl: 100,
+        measuredAt: '2026-10-25T10:47:00+08:00',
+        context: 'fasting',
+        source: 'fingerstick',
+        sourceDevice: 'sannuo',
+        note: null,
+        revokedAt: null,
+        createdAt: '2026-10-26T10:47:00+08:00',
+      },
+    ]);
+    expect(rendered).toContain('测量');
+    expect(rendered).toContain('记录于');
+    expect(rendered).toContain('（补记）');
+    expect(rendered).toContain('三诺');
   });
 });

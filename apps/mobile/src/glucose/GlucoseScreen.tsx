@@ -11,6 +11,7 @@ import {
 
 import type { ApiClient } from '../api/client';
 import type { GlucoseReading, GlucoseSummary } from '../api/types';
+import { EventTimeField } from '../ui/event-time-field';
 
 const CONTEXTS: { value: string; label: string }[] = [
   { value: 'fasting', label: '空腹' },
@@ -58,13 +59,14 @@ const DEVICE_LABELS: Record<string, string> = {
   other: '其它血糖仪',
 };
 
-/** 补记时要写明「测量」和「记录」不是同一时刻，否则看不出这条是事后补的。 */
-function recordedLate(item: GlucoseReading): string | null {
+/** 测量时刻和记录时刻是两件事：测完过一会儿才记、或者第二天补记，都常见。
+    这里给的是「什么时候测的」，保存那一刻由系统记成记录时间，两条分开存。 */
+function recordedLine(item: GlucoseReading): string {
   const measured = new Date(item.measuredAt).getTime();
   const recorded = new Date(item.createdAt).getTime();
-  if (Number.isNaN(measured) || Number.isNaN(recorded)) return null;
-  if (Math.abs(recorded - measured) < 5 * 60_000) return null;
-  return `测量在 ${formatDay(item.measuredAt)} ${formatTime(item.measuredAt)}，记录在 ${formatDay(item.createdAt)} ${formatTime(item.createdAt)}`;
+  if (Number.isNaN(measured) || Number.isNaN(recorded)) return '';
+  const late = Math.abs(recorded - measured) >= 5 * 60_000;
+  return `记录于 ${formatDay(item.createdAt)} ${formatTime(item.createdAt)}${late ? '（补记）' : ''}`;
 }
 
 type Props = {
@@ -110,6 +112,8 @@ export function GlucoseScreen({ api }: Props) {
   const [context, setContext] = useState('fasting');
   const [source, setSource] = useState<'fingerstick' | 'lab' | 'manual'>('fingerstick');
   const [device, setDevice] = useState<'roche' | 'abbott' | 'sannuo' | 'other' | null>(null);
+  // 测量时间：默认现在，可以往前改（测完过一会儿才记、或者翻到昨天补记）。
+  const [measuredAt, setMeasuredAt] = useState<Date>(() => new Date());
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -148,12 +152,16 @@ export function GlucoseScreen({ api }: Props) {
       setError('请输入 20 到 600 之间的整数血糖值（mg/dL）');
       return;
     }
+    if (measuredAt.getTime() > Date.now() + 2 * 60_000) {
+      setError('测量时间不能是将来。请把时间改到现在或更早。');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
       await api.createGlucoseReading({
         valueMgDl: parsed,
-        measuredAt: new Date().toISOString(),
+        measuredAt: measuredAt.toISOString(),
         context,
         source,
         sourceDevice: source === 'fingerstick' && device !== null ? device : undefined,
@@ -161,13 +169,14 @@ export function GlucoseScreen({ api }: Props) {
       });
       setValue('');
       setNote('');
+      setMeasuredAt(new Date());
       await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '这条血糖没有保存成功');
     } finally {
       setSaving(false);
     }
-  }, [api, context, device, source, load, note, value]);
+  }, [api, context, device, source, load, note, value, measuredAt]);
 
   const revoke = useCallback(
     async (reading: GlucoseReading) => {
@@ -273,6 +282,20 @@ export function GlucoseScreen({ api }: Props) {
           </>
         ) : null}
 
+        {/* 测量时间可以往前改：测完过一会儿才记、翻到昨天补记，都常见。
+            记录时间由系统在保存那一刻写下，两者分开存、列表里也分开写。 */}
+        <View style={styles.timeBlock}>
+          <EventTimeField
+            accessibilityLabel="测量时间"
+            label="这次测量是什么时候"
+            onChange={setMeasuredAt}
+            value={measuredAt}
+          />
+          <Text style={styles.deviceHint}>
+            记录时间会用你点保存的那一刻，不写进这里。
+          </Text>
+        </View>
+
         <TextInput
           value={note}
           onChangeText={setNote}
@@ -341,7 +364,6 @@ export function GlucoseScreen({ api }: Props) {
             <Text style={styles.dayLabel}>{day}</Text>
             {items.map(item => {
               const revoked = item.revokedAt !== null;
-              const late = recordedLate(item);
               return (
                 <View key={item.id} style={styles.row}>
                   <View style={styles.rowMain}>
@@ -350,7 +372,7 @@ export function GlucoseScreen({ api }: Props) {
                       <Text style={styles.rowUnit}> mg/dL</Text>
                     </Text>
                     <Text style={styles.rowMeta}>
-                      {formatTime(item.measuredAt)} ·{' '}
+                      测量 {formatTime(item.measuredAt)} ·{' '}
                       {SOURCE_LABELS[item.source] ?? '手动'}
                       {item.sourceDevice
                         ? `（${DEVICE_LABELS[item.sourceDevice] ?? item.sourceDevice}）`
@@ -359,9 +381,7 @@ export function GlucoseScreen({ api }: Props) {
                       {CONTEXT_LABELS[item.context] ?? '其他'}
                       {item.note === null ? '' : ` · ${item.note}`}
                     </Text>
-                    {late === null ? null : (
-                      <Text style={styles.rowHint}>{late}</Text>
-                    )}
+                    <Text style={styles.rowHint}>{recordedLine(item)}</Text>
                   </View>
                   {revoked ? (
                     <Text style={styles.revokedTag}>已撤回</Text>
@@ -418,6 +438,7 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 13, color: '#41524D' },
   chipTextActive: { color: '#FFFFFF', fontWeight: '600' },
   deviceHint: { marginTop: 6, fontSize: 11.5, lineHeight: 16, color: '#8B9A96' },
+  timeBlock: { marginTop: 12 },
   noteInput: {
     marginTop: 12,
     paddingHorizontal: 12,

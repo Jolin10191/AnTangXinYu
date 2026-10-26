@@ -91,12 +91,13 @@ const SOURCE_LABELS: Record<string, string> = {
   report: "报告解读",
 };
 
-function recordedNote(reading: GlucoseReading): string | null {
-  const measured = new Date(reading.measuredAt).getTime();
-  const created = new Date(reading.createdAt).getTime();
-  if (Number.isNaN(measured) || Number.isNaN(created)) return null;
-  if (Math.abs(created - measured) < 5 * 60_000) return null;
-  return `测量在 ${formatMeasuredAt(reading.measuredAt)}，记录在 ${formatMeasuredAt(reading.createdAt)}`;
+/** 事件时刻和记录时刻分开写：补记时这两个时间不一样，得一眼看得出来。 */
+function recordedLine(occurredAt: string, createdAt: string): string {
+  const occurred = new Date(occurredAt).getTime();
+  const recorded = new Date(createdAt).getTime();
+  if (Number.isNaN(occurred) || Number.isNaN(recorded)) return "";
+  const late = Math.abs(recorded - occurred) >= 5 * 60_000;
+  return `记录于 ${formatMeasuredAt(createdAt)}${late ? "（补记）" : ""}`;
 }
 
 const MEAL_LABELS: Record<string, string> = {
@@ -550,14 +551,14 @@ export function RecordScreen({
                   <View key={reading.id} style={styles.card}>
                     <Text style={styles.cardTitle}>{formatGlucose(reading)}</Text>
                     <Text style={styles.cardBody}>
-                      {formatMeasuredAt(reading.measuredAt)} ·{" "}
+                      测量 {formatMeasuredAt(reading.measuredAt)} ·{" "}
                       {SOURCE_LABELS[reading.source] ?? "手动"} ·{" "}
                       {GLUCOSE_CONTEXT_LABELS[reading.context] ?? reading.context}
                       {reading.note === null ? "" : ` ·「${reading.note}」`}
                     </Text>
-                    {recordedNote(reading) === null ? null : (
-                      <Text style={styles.cardHint}>{recordedNote(reading)}</Text>
-                    )}
+                    <Text style={styles.cardHint}>
+                      {recordedLine(reading.measuredAt, reading.createdAt)}
+                    </Text>
                   </View>
                 ))}
                 <Pressable
@@ -644,6 +645,9 @@ export function RecordScreen({
                 <Text style={styles.cardBody}>
                   {formatMeasuredAt(meal.eatenAt)}
                   {meal.description === "" ? "" : ` · ${meal.description}`}
+                </Text>
+                <Text style={styles.cardHint}>
+                  {recordedLine(meal.eatenAt, meal.createdAt)}
                 </Text>
                 <Pressable
                   accessibilityRole="button"
@@ -783,6 +787,9 @@ export function RecordScreen({
                 <Text style={styles.cardBody}>
                   {formatMeasuredAt(log.takenAt)} · {MEDICATION_LABELS[log.kind] ?? log.kind}
                   {log.note === null ? "" : ` · ${log.note}`}
+                </Text>
+                <Text style={styles.cardHint}>
+                  {recordedLine(log.takenAt, log.createdAt)}
                 </Text>
                 <Pressable
                   accessibilityRole="button"

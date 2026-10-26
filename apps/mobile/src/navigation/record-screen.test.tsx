@@ -142,6 +142,8 @@ describe("RecordScreen", () => {
       tree.root.findByProps({ accessibilityLabel: "饮食分类" }).props.onPress();
     });
     expect(JSON.stringify(tree.toJSON())).toContain("一碗米饭、青菜、鸡胸");
+    // 吃的时间与记录时间分开写：12:30 吃的、12:31 记的。
+    expect(JSON.stringify(tree.toJSON())).toContain("记录于 10-24 12:31");
 
     await act(async () => {
       tree.root
@@ -168,6 +170,7 @@ describe("RecordScreen", () => {
       tree.root.findByProps({ accessibilityLabel: "用药分类" }).props.onPress();
     });
     expect(JSON.stringify(tree.toJSON())).toContain("诺和锐");
+    expect(JSON.stringify(tree.toJSON())).toContain("记录于 10-24 07:51");
 
     await act(async () => {
       tree.root.findByProps({ accessibilityLabel: "药名" }).props.onChangeText("二甲双胍");
