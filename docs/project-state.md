@@ -162,3 +162,14 @@
 - 验证：后端 524 passed、ruff 通过；移动端 50 套 297 用例通过、`tsc --noEmit` 无输出、`expo lint` 无问题。
 
 出包与部署状态（2026-10-26 凌晨）：后端镜像 `antang-api:deploy-20261025-221744`（含 `source_device`，健康检查通过），`alembic_version = a5b6c7d8e9f1`；测试包 `26102502`（buildCommit `95f1b92`，51,453,850 字节）在 `https://82.157.48.200:8000/download/t-26102502/antang-26102502-test.apk`。`latest.json` 未改，仍指向正式包。
+
+### 2026-10-26 晚：会话按时间切段，侧边栏才看得懂
+
+- 之前每次打开 App 都接在「最近一段」上聊，从不动手切段，结果所有历史被压成一整段（线上 akaa 账号 234 条消息全在一段里），侧边栏只有一条、点进去还在原地打转。现在说话间隔超过 6 小时就当作另一次对话：`SESSION_GAP = timedelta(hours=6)`，`ensure_chat_conversation` 发现最近一段过期就新建一段。
+- 历史数据用迁移 `b6c7d8e9f1a2` 回填切段（相邻消息间隔 > 6 小时就开新段，标题取该段第一条用户消息前 24 字），原会话 id 留给最早一段。`downgrade()` 是并回一段的有损操作，已在 docstring 写明。
+- `GET /api/v1/chat/conversations` 多返回 `message_count`；侧边栏不再显示一条消息都没有的空对话（当前正在看的那段除外）。
+- 打开 App 时只有「最近一段还在 6 小时内」才接上它，否则从空白开始，旧对话留在侧边栏里可以回去看；手机回前台同步的 `useNotifications` 现在带 `conversationId`，不会把你正在看的这段换成别的会话。
+- 分组标签改为 今天 / 近 7 天 / 近 30 天 / 更早；侧边栏每次打开都刷新列表时间；点当前正在看的那条不再重拉整屏。
+- 迁移汇合头从 a5b6c7d8e9f1 变为 b6c7d8e9f1a2。
+- 验证：后端 528 passed、ruff/pyright 通过；移动端 50 套 302 用例通过、`tsc --noEmit` 无输出、`expo lint` 无问题。
+

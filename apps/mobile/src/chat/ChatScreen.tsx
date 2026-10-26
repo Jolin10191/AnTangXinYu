@@ -144,13 +144,26 @@ export function medicalFootnote(text: string): string | null {
   return base;
 }
 
+/**
+ * 隔了这么久再说话就算另一次对话（和后端 `SESSION_GAP` 一致）：离开几小时
+ * 回来，不该接着上一次那一段，也不该把历史全堆在一条里。
+ */
+export const SESSION_GAP_MS = 6 * 3_600_000;
+
+function staleSession(value: string | null): boolean {
+  if (value === null) return false;
+  const at = new Date(value).getTime();
+  if (Number.isNaN(at)) return false;
+  return Date.now() - at > SESSION_GAP_MS;
+}
+
 function conversationGroup(value: string): string {
   const date = new Date(value);
   const now = new Date();
   if (localDay(value) === localDay(now.toISOString())) return '今天';
   const ageDays = (now.getTime() - date.getTime()) / 86_400_000;
-  if (ageDays < 7) return '7 天内';
-  if (ageDays < 30) return '30 天内';
+  if (ageDays < 7) return '近 7 天';
+  if (ageDays < 30) return '近 30 天';
   return '更早';
 }
 
@@ -253,17 +266,23 @@ function ChatScreenContent({
   const [conversationId, setConversationId] = useState<string | null>(null);
   const conversationAnchors = useMemo<ConversationAnchor[]>(
     () =>
-      conversations.map((conversation) => ({
-        group: conversationGroup(
-          conversation.lastMessageAt ?? conversation.createdAt,
-        ),
-        id: conversation.id,
-        title: conversation.title,
-        time: conversationStamp(
-          conversation.lastMessageAt ?? conversation.createdAt,
-        ),
-      })),
-    [conversations],
+      conversations
+        // 点了「新的对话」却一句没说的空段不占位（当前正打开的那段除外）。
+        .filter(
+          (conversation) =>
+            conversation.messageCount > 0 || conversation.id === conversationId,
+        )
+        .map((conversation) => ({
+          group: conversationGroup(
+            conversation.lastMessageAt ?? conversation.createdAt,
+          ),
+          id: conversation.id,
+          title: conversation.title,
+          time: conversationStamp(
+            conversation.lastMessageAt ?? conversation.createdAt,
+          ),
+        })),
+    [conversationId, conversations],
   );
 
   useEffect(() => {
@@ -320,6 +339,12 @@ function ChatScreenContent({
   }, []);
 
   const fetchLatest = useCallback(async () => {
+    // 还没开新会话时不要顺手把「最近一段」的历史拉进来——那段已经过去很久了，
+    // 拉进来会让人以为自己在接着聊，其实是一段旧对话。
+    if (conversationId === null) {
+      await refreshHealthProfileCards();
+      return { messages: [], nextBefore: null } satisfies MessageHistory;
+    }
     const [page] = await Promise.all([
       api.getMessages(null, conversationId),
       refreshHealthProfileCards(),
@@ -355,12 +380,26 @@ function ChatScreenContent({
     void (async () => {
       try {
         const existing = await api.getConversations();
-        const conversation =
-          existing[0] ?? (await api.startConversation());
+        const newest = existing[0];
         if (!active) return;
-        setConversations(existing.length === 0 ? [conversation] : existing);
-        setConversationId(conversation.id);
-        applyLatest(await api.getMessages(null, conversation.id));
+        setConversations(existing);
+        if (
+          newest === undefined ||
+          staleSession(newest.lastMessageAt ?? newest.createdAt)
+        ) {
+          // 上次聊天已经过去很久：从一段空白开始，旧对话留在侧边栏里可以回去看。
+          setConversationId(null);
+          dispatch({
+            type: 'history-replaced',
+            messages: [],
+            nextBefore: null,
+          });
+          setHistoryReady(true);
+          return;
+        }
+        setConversationId(newest.id);
+        const page = await api.getMessages(null, newest.id);
+        if (active) applyLatest(page);
       } catch (error) {
         if (active) {
           dispatch({ type: 'history-failed', message: errorMessage(error) });
@@ -373,10 +412,38 @@ function ChatScreenContent({
     };
   }, [api, applyLatest]);
 
+  /** 侧边栏的列表要跟着最新的消息走，否则时间停在打开 App 那一刻。 */
+  const refreshConversations = useCallback(async () => {
+    try {
+      const latest = await api.getConversations();
+      setConversations(latest);
+    } catch {
+      // 列表刷新失败不该打断正在进行的聊天，下次打开侧边栏会再试。
+    }
+  }, [api]);
+
+  useEffect(() => {
+    if (!showMenu) return;
+    // 放进下一拍：直接在这里拉列表会同步 setState，触发 react-hooks 的告警。
+    const timer = setTimeout(() => void refreshConversations(), 0);
+    return () => clearTimeout(timer);
+  }, [refreshConversations, showMenu]);
+
+  /** 发消息时才真正建会话：只点开 App 不该在列表里留下一段空对话。 */
+  const ensureConversation = useCallback(async (): Promise<string> => {
+    if (conversationId !== null) return conversationId;
+    const conversation = await api.startConversation();
+    setConversations((current) => [conversation, ...current]);
+    setConversationId(conversation.id);
+    return conversation.id;
+  }, [api, conversationId]);
+
   const openConversation = useCallback(
     async (id: string) => {
       if (streamController.current !== null) return;
       setShowMenu(false);
+      // 点的就是当前这段：不用重拉，否则整屏消息会闪一下。
+      if (id === conversationId && historyReady) return;
       setConversationId(id);
       dispatch({ type: 'history-loading' });
       try {
@@ -385,7 +452,7 @@ function ChatScreenContent({
         dispatch({ type: 'history-failed', message: errorMessage(error) });
       }
     },
-    [api, applyLatest],
+    [api, applyLatest, conversationId, historyReady],
   );
 
   const startNewConversation = useCallback(async () => {
@@ -409,6 +476,7 @@ function ChatScreenContent({
   const notifications = useNotifications({
     api,
     userId: user.id,
+    conversationId,
     historyReady: historyReady && !state.historyLoading,
     streamActive: state.pendingRequestId !== null,
     onMessages: mergeNotificationMessages,
@@ -541,6 +609,13 @@ function ChatScreenContent({
     }
 
     const clientMessageId = randomUUID();
+    let targetConversationId: string;
+    try {
+      targetConversationId = await ensureConversation();
+    } catch (error) {
+      dispatch({ type: 'history-failed', message: errorMessage(error) });
+      return;
+    }
     await runChatStream(
       clientMessageId,
       () => {
@@ -562,9 +637,10 @@ function ChatScreenContent({
           onEvent,
           signal,
           currentLiveHeartRate(liveHeartRate),
-          conversationId,
+          targetConversationId,
         ),
     );
+    void refreshConversations();
   }
 
   function cancelCurrentResponse() {
@@ -592,6 +668,13 @@ function ChatScreenContent({
         dispatch({ type: 'history-failed', message: '找不到这次发送的原消息。' });
         return;
       }
+      let targetConversationId: string;
+      try {
+        targetConversationId = await ensureConversation();
+      } catch (error) {
+        dispatch({ type: 'history-failed', message: errorMessage(error) });
+        return;
+      }
       await runChatStream(
         clientMessageId,
         () =>
@@ -610,7 +693,7 @@ function ChatScreenContent({
             onEvent,
             signal,
             undefined,
-            conversationId,
+            targetConversationId,
           ),
       );
       return;

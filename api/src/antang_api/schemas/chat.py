@@ -198,6 +198,8 @@ class ConversationResponse(BaseModel):
     title: str
     created_at: datetime
     last_message_at: datetime | None
+    # 侧边栏靠它藏掉「点了新的对话却一句没说」的空段。
+    message_count: int = 0
 
 
 class ConversationListResponse(BaseModel):

@@ -882,6 +882,8 @@ export type Conversation = {
   title: string;
   createdAt: string;
   lastMessageAt: string | null;
+  /** 这段对话里已有几条消息。旧后端不给这个字段，按 0 算。 */
+  messageCount: number;
 };
 
 export function parseConversation(value: unknown): Conversation {
@@ -894,6 +896,10 @@ export function parseConversation(value: unknown): Conversation {
       data.last_message_at === null
         ? null
         : zonedDateTimeValue(data.last_message_at, "conversation.last_message_at"),
+    messageCount:
+      typeof data.message_count === "number" && data.message_count > 0
+        ? data.message_count
+        : 0,
   };
 }
 

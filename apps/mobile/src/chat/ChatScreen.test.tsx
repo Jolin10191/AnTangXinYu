@@ -79,7 +79,8 @@ describe('ChatScreen', () => {
           id: '019b3333-3333-7333-8333-333333333333',
           title: '早上的对话',
           createdAt: '2026-08-16T04:00:00.000Z',
-          lastMessageAt: null,
+          lastMessageAt: new Date().toISOString(),
+          messageCount: 1,
         },
       ]),
       startConversation: jest.fn().mockResolvedValue({
@@ -87,6 +88,7 @@ describe('ChatScreen', () => {
         title: '新对话',
         createdAt: '2026-08-16T05:00:00.000Z',
         lastMessageAt: null,
+        messageCount: 0,
       }),
       getMessages: jest.fn().mockResolvedValue({
         messages: [
@@ -159,7 +161,8 @@ describe('ChatScreen', () => {
           id: '019b3333-3333-7333-8333-333333333333',
           title: '早上的对话',
           createdAt: '2026-08-16T04:00:00.000Z',
-          lastMessageAt: null,
+          lastMessageAt: new Date().toISOString(),
+          messageCount: 1,
         },
       ]),
       startConversation: jest.fn().mockResolvedValue({
@@ -167,6 +170,7 @@ describe('ChatScreen', () => {
         title: '新对话',
         createdAt: '2026-08-16T05:00:00.000Z',
         lastMessageAt: null,
+        messageCount: 0,
       }),
       getMessages: jest.fn().mockResolvedValue({
         messages: [],
@@ -205,8 +209,10 @@ describe('ChatScreen', () => {
     act(() => {
       tree!.root.findByType(TextInput).props.onChangeText('我有点担心低血糖');
     });
-    act(() => {
+    // 发送前会先把会话确定下来（没有会话就新建一段），所以这里要等一个微任务。
+    await act(async () => {
       tree!.root.findByProps({ accessibilityLabel: '发送消息' }).props.onPress();
+      await Promise.resolve();
     });
 
     expect(api.streamMessage).toHaveBeenCalledTimes(1);
@@ -225,6 +231,125 @@ describe('ChatScreen', () => {
       finishStream();
       await stream;
     });
+    act(() => tree!.unmount());
+  });
+  test('starts a fresh session when the last conversation is hours old', async () => {
+    const eightHoursAgo = new Date(Date.now() - 8 * 3_600_000).toISOString();
+    const getMessages = jest
+      .fn()
+      .mockResolvedValue({ messages: [], nextBefore: null });
+    const streamMessage = jest.fn().mockResolvedValue(undefined);
+    const api = {
+      getConversations: jest.fn().mockResolvedValue([
+        {
+          id: '019b3333-3333-7333-8333-333333333333',
+          title: '早上的对话',
+          createdAt: eightHoursAgo,
+          lastMessageAt: eightHoursAgo,
+          messageCount: 4,
+        },
+      ]),
+      startConversation: jest.fn().mockResolvedValue({
+        id: '019b4444-4444-7444-8444-444444444444',
+        title: '新对话',
+        createdAt: new Date().toISOString(),
+        lastMessageAt: null,
+        messageCount: 0,
+      }),
+      getMessages,
+      streamMessage,
+    } as unknown as ApiClient;
+
+    let tree: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(
+        <ChatScreen
+          gadgetbridge={fakeGadgetbridge()}
+          healthConnect={fakeHealthConnect()}
+          api={api}
+          user={{ id: 'user-1', username: 'demo', role: 'patient' }}
+        />,
+      );
+      await Promise.resolve();
+    });
+
+    // 上一次聊天已经过去 8 小时：不该把它当成正在聊的那段，历史也不该拉进来。
+    expect(getMessages).not.toHaveBeenCalled();
+
+    act(() => {
+      tree!.root.findByType(TextInput).props.onChangeText('又来问一下');
+    });
+    await act(async () => {
+      tree!.root.findByProps({ accessibilityLabel: '发送消息' }).props.onPress();
+      await Promise.resolve();
+    });
+
+    expect(api.startConversation).toHaveBeenCalledTimes(1);
+    expect(streamMessage).toHaveBeenCalledTimes(1);
+    expect(streamMessage.mock.calls[0][6]).toBe(
+      '019b4444-4444-7444-8444-444444444444',
+    );
+    act(() => tree!.unmount());
+  });
+
+  test('leaves empty conversations out of the drawer and groups by recency', async () => {
+    const now = new Date().toISOString();
+    const eightDaysAgo = new Date(Date.now() - 8 * 86_400_000).toISOString();
+    const api = {
+      getConversations: jest.fn().mockResolvedValue([
+        {
+          id: '019b3333-3333-7333-8333-333333333333',
+          title: '今天的对话',
+          createdAt: now,
+          lastMessageAt: now,
+          messageCount: 3,
+        },
+        {
+          id: '019b5555-5555-7555-8555-555555555555',
+          title: '新对话',
+          createdAt: now,
+          lastMessageAt: null,
+          messageCount: 0,
+        },
+        {
+          id: '019b6666-6666-7666-8666-666666666666',
+          title: '上周的对话',
+          createdAt: eightDaysAgo,
+          lastMessageAt: eightDaysAgo,
+          messageCount: 9,
+        },
+      ]),
+      getMessages: jest
+        .fn()
+        .mockResolvedValue({ messages: [], nextBefore: null }),
+      startConversation: jest.fn(),
+      streamMessage: jest.fn(),
+    } as unknown as ApiClient;
+
+    let tree: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(
+        <ChatScreen
+          gadgetbridge={fakeGadgetbridge()}
+          healthConnect={fakeHealthConnect()}
+          api={api}
+          user={{ id: 'user-1', username: 'demo', role: 'patient' }}
+        />,
+      );
+      await Promise.resolve();
+    });
+
+    const menuProps = mockAppMenu.mock.calls.at(-1)![0] as {
+      conversations: { id: string; group: string }[];
+    };
+    expect(menuProps.conversations.map((item) => item.id)).toEqual([
+      '019b3333-3333-7333-8333-333333333333',
+      '019b6666-6666-7666-8666-666666666666',
+    ]);
+    expect(menuProps.conversations.map((item) => item.group)).toEqual([
+      '今天',
+      '近 30 天',
+    ]);
     act(() => tree!.unmount());
   });
 });

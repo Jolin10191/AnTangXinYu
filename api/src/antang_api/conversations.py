@@ -6,17 +6,21 @@
 - 主动关怀落在单独的 kind='care' 会话里，不和患者自己开的对话混在一起。
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from typing import Sequence
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from antang_api.models import Conversation
+from antang_api.models import Conversation, Message
 
 CONVERSATION_TITLE_CHARS = 24
 CARE_CONVERSATION_TITLE = "关怀消息"
 NEW_CONVERSATION_TITLE = "新对话"
+# 隔了这么久再开口，算另一次对话：不然一整天、一个月的消息全堆在同一段里，
+# 侧边栏只剩一条，谁也回不到「上周那次问心率」。
+SESSION_GAP = timedelta(hours=6)
 
 
 def conversation_title(content: str) -> str:
@@ -51,12 +55,45 @@ async def create_chat_conversation(
 async def ensure_chat_conversation(
     session: AsyncSession, user_id: UUID
 ) -> Conversation:
-    """没有会话时建一段，供老客户端（不传 conversation_id）继续用。"""
+    """没有会话、或者上一次说话已经过去很久，就开一段新的。
+
+    老客户端（不传 conversation_id）也走这里：隔了几天的消息不该继续堆在
+    上一段里，否则列表里只会有一条，患者没法回看某一次。
+    """
 
     conversation = await latest_chat_conversation(session, user_id)
-    if conversation is not None:
+    if conversation is not None and not await _stale(session, conversation):
         return conversation
     return await create_chat_conversation(session, user_id)
+
+
+async def _stale(session: AsyncSession, conversation: Conversation) -> bool:
+    last = conversation.last_message_at
+    if last is None:
+        last = await session.scalar(
+            select(func.max(Message.created_at)).where(
+                Message.conversation_id == conversation.id
+            )
+        )
+    if last is None:
+        # 空会话（患者点了「新的对话」但没发）：不算过期，接着用。
+        return False
+    return datetime.now(UTC) - last > SESSION_GAP
+
+
+async def conversation_message_counts(
+    session: AsyncSession, conversation_ids: Sequence[UUID]
+) -> dict[UUID, int]:
+    """侧边栏要显示「这条对话里有几条消息」，空的就别占位。"""
+
+    if not conversation_ids:
+        return {}
+    rows = await session.execute(
+        select(Message.conversation_id, func.count(Message.id))
+        .where(Message.conversation_id.in_(conversation_ids))
+        .group_by(Message.conversation_id)
+    )
+    return {conversation_id: count for conversation_id, count in rows.all()}
 
 
 async def owned_conversation(

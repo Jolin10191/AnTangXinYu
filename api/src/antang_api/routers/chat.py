@@ -34,6 +34,7 @@ from antang_api.chat import (
 )
 from antang_api.companion_memory import CompanionMemory
 from antang_api.conversations import (
+    conversation_message_counts,
     create_chat_conversation,
     list_conversations,
 )
@@ -311,9 +312,14 @@ async def get_conversations(
     """侧边栏的对话列表，按最近一条消息倒序。"""
 
     conversations = await list_conversations(session, user.id, limit=limit)
+    counts = await conversation_message_counts(
+        session, [conversation.id for conversation in conversations]
+    )
     return ConversationListResponse(
         conversations=[
-            ConversationResponse.model_validate(conversation)
+            ConversationResponse.model_validate(conversation).model_copy(
+                update={"message_count": counts.get(conversation.id, 0)}
+            )
             for conversation in conversations
         ]
     )

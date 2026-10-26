@@ -1,6 +1,6 @@
 """侧边栏的会话层：新建一段对话、每段只看自己的消息、关怀消息单独一段。"""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from sqlalchemy import update
@@ -12,6 +12,7 @@ from antang_api.conversations import (
     CARE_CONVERSATION_TITLE,
     NEW_CONVERSATION_TITLE,
     care_conversation,
+    conversation_message_counts,
     conversation_title,
     create_chat_conversation,
     list_conversations,
@@ -19,6 +20,7 @@ from antang_api.conversations import (
 from antang_api.models import (
     AgentRun,
     AgentRunStatus,
+    Conversation,
     PersonalProfile,
     ProactiveCareSettings,
     User,
@@ -145,3 +147,55 @@ async def test_care_messages_do_not_mix_with_the_patients_own_chats(
 
     listed = await list_conversations(db_session, user.id)
     assert [conversation.id for conversation in listed] == [chat.id]
+
+
+async def test_a_new_session_starts_once_the_last_one_is_hours_old(
+    db_session: AsyncSession,
+) -> None:
+    """隔了 6 小时以上再开口算另一次对话：不然历史全堆一段，侧边栏只有一条。"""
+
+    user = await create_user(db_session, "conv_gap")
+    first = await prepare_chat_run(db_session, user.id, uuid4(), "今天血糖还行。")
+    await finish_run(db_session, first.run_id)
+
+    await db_session.execute(
+        update(Conversation)
+        .where(Conversation.id == first.conversation_id)
+        .values(last_message_at=datetime.now(UTC) - timedelta(hours=7))
+    )
+    await db_session.commit()
+
+    second = await prepare_chat_run(db_session, user.id, uuid4(), "又低血糖了。")
+
+    assert second.conversation_id != first.conversation_id
+    listed = await list_conversations(db_session, user.id)
+    assert len(listed) == 2
+
+
+async def test_a_quick_follow_up_stays_in_the_same_session(
+    db_session: AsyncSession,
+) -> None:
+    user = await create_user(db_session, "conv_same")
+    first = await prepare_chat_run(db_session, user.id, uuid4(), "今天血糖还行。")
+    await finish_run(db_session, first.run_id)
+
+    second = await prepare_chat_run(db_session, user.id, uuid4(), "晚饭吃了两碗饭。")
+
+    assert second.conversation_id == first.conversation_id
+
+
+async def test_the_list_counts_the_messages_in_each_session(
+    db_session: AsyncSession,
+) -> None:
+    user = await create_user(db_session, "conv_count")
+    first = await prepare_chat_run(db_session, user.id, uuid4(), "今天血糖还行。")
+    await finish_run(db_session, first.run_id)
+    empty = await create_chat_conversation(db_session, user.id)
+    await db_session.commit()
+
+    counts = await conversation_message_counts(
+        db_session, [first.conversation_id, empty.id]
+    )
+
+    assert counts[first.conversation_id] == 2  # 一条用户消息 + 一条待生成的回复
+    assert counts.get(empty.id, 0) == 0

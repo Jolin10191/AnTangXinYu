@@ -46,6 +46,17 @@ async def test_a_new_conversation_shows_up_in_the_list(client: AsyncClient) -> N
     assert [item["id"] for item in conversations] == [created.json()["id"]]
 
 
+async def test_a_fresh_conversation_has_no_messages_yet(client: AsyncClient) -> None:
+    """侧边栏用 message_count 藏掉「点了新的对话却一句没说」的空段。"""
+
+    auth = await register(client, "conv_empty")
+
+    await client.post("/api/v1/chat/conversations", headers=auth_headers(auth))
+    listed = await client.get("/api/v1/chat/conversations", headers=auth_headers(auth))
+
+    assert listed.json()["conversations"][0]["message_count"] == 0
+
+
 async def test_one_patients_conversations_are_invisible_to_another(
     client: AsyncClient,
 ) -> None:
