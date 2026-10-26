@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Self, cast
@@ -326,6 +327,8 @@ def test_the_report_tool_is_flat_too() -> None:
         "period_start",
         "period_end",
         "device",
+        "device_serial",
+        "report_generated_at",
         "mean_mmol",
         "sd_mmol",
         "cv_percent",
@@ -333,6 +336,12 @@ def test_the_report_tool_is_flat_too() -> None:
         "tir_percent",
         "tar_percent",
         "tbr_percent",
+        "normal_percent",
+        "low_percent",
+        "very_low_percent",
+        "high_percent",
+        "very_high_percent",
+        "lbgi_level",
         "note",
     }
 
@@ -417,4 +426,55 @@ def test_a_report_summary_reaches_the_model_as_context() -> None:
     assert "2024-05-30 至 2024-06-11" in text
     assert "TIR 84.5%" in text
     assert "不是我们算的" in text
+
+
+async def test_five_bands_fill_in_the_three_totals(
+    db_session: AsyncSession,
+) -> None:
+    """报告按五档给占比时，三档的 TAR/TBR 由我们自己加，别让模型算。"""
+
+    user = await _create_user(db_session, "glucose_bands")
+
+    result = await _report_tool(db_session)(
+        period_start="2025-07-28",
+        period_end="2025-07-31",
+        device="硅基动感Pro",
+        device_serial="LT2410FE3P",
+        report_generated_at="2025-07-31",
+        normal_percent=99.6,
+        low_percent=0.4,
+        very_low_percent=0.0,
+        high_percent=0.0,
+        very_high_percent=0.0,
+        lbgi_level="high",
+        runtime=_runtime(user.id),
+    )
+
+    assert result["recorded"] is True
+
+    reports = await list_glucose_reports(db_session, user_id=user.id)
+    assert len(reports) == 1
+    report = reports[0]
+    assert float(cast("float", report.tir_percent)) == 99.6
+    assert float(cast("float", report.tar_percent)) == 0.0
+    assert float(cast("float", report.tbr_percent)) == 0.4
+    assert float(cast("float", report.very_low_percent)) == 0.0
+    assert report.lbgi_level == "high"
+    assert report.device_serial == "LT2410FE3P"
+    assert report.report_generated_at == date(2025, 7, 31)
+
+    text = render_glucose_reports(reports)
+    assert "分档 正常 99.6%" in text
+    assert "偏低血糖风险高" in text
+    assert "序列号 LT2410FE3P" in text
+
+
+async def test_a_percentage_is_bounded_in_the_schema() -> None:
+    """占比超过 100% 就是读错了：schema 里要把上下界写死，模型才不容易传错。"""
+
+    tool = build_glucose_report_tool()
+
+    properties = json.dumps(tool.args["tir_percent"], ensure_ascii=False)
+    assert "maximum" in properties
+    assert "100" in properties
 

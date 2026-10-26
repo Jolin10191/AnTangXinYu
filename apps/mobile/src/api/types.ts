@@ -2471,6 +2471,8 @@ export type GlucoseReport = {
   periodStart: string;
   periodEnd: string;
   device: string;
+  deviceSerial: string;
+  reportGeneratedAt: string | null;
   meanMmol: number | null;
   sdMmol: number | null;
   cvPercent: number | null;
@@ -2478,6 +2480,14 @@ export type GlucoseReport = {
   tirPercent: number | null;
   tarPercent: number | null;
   tbrPercent: number | null;
+  // 报告把 TIR 拆成五档时才有值：正常 / 低 / 很低 / 高 / 很高。
+  normalPercent: number | null;
+  lowPercent: number | null;
+  veryLowPercent: number | null;
+  highPercent: number | null;
+  veryHighPercent: number | null;
+  // 报告写的「低血糖风险」档位：high / moderate / low / lowest，没写是空串。
+  lbgiLevel: string;
   note: string | null;
   createdAt: string;
 };
@@ -2501,6 +2511,9 @@ export function parseGlucoseReport(value: unknown): GlucoseReport {
     periodStart: cgmString(data, "period_start"),
     periodEnd: cgmString(data, "period_end"),
     device: typeof data.device === "string" ? data.device : "",
+    deviceSerial: typeof data.device_serial === "string" ? data.device_serial : "",
+    reportGeneratedAt:
+      typeof data.report_generated_at === "string" ? data.report_generated_at : null,
     meanMmol: optionalNumber(data, "mean_mmol"),
     sdMmol: optionalNumber(data, "sd_mmol"),
     cvPercent: optionalNumber(data, "cv_percent"),
@@ -2508,6 +2521,12 @@ export function parseGlucoseReport(value: unknown): GlucoseReport {
     tirPercent: optionalNumber(data, "tir_percent"),
     tarPercent: optionalNumber(data, "tar_percent"),
     tbrPercent: optionalNumber(data, "tbr_percent"),
+    normalPercent: optionalNumber(data, "normal_percent"),
+    lowPercent: optionalNumber(data, "low_percent"),
+    veryLowPercent: optionalNumber(data, "very_low_percent"),
+    highPercent: optionalNumber(data, "high_percent"),
+    veryHighPercent: optionalNumber(data, "very_high_percent"),
+    lbgiLevel: typeof data.lbgi_level === "string" ? data.lbgi_level : "",
     note: typeof data.note === "string" ? data.note : null,
     createdAt: cgmString(data, "created_at"),
   };

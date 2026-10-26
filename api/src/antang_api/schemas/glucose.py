@@ -84,6 +84,8 @@ class GlucoseReportResponse(BaseModel):
     period_start: date
     period_end: date
     device: str
+    device_serial: str
+    report_generated_at: date | None
     mean_mmol: float | None
     sd_mmol: float | None
     cv_percent: float | None
@@ -91,6 +93,13 @@ class GlucoseReportResponse(BaseModel):
     tir_percent: float | None
     tar_percent: float | None
     tbr_percent: float | None
+    normal_percent: float | None
+    low_percent: float | None
+    very_low_percent: float | None
+    high_percent: float | None
+    very_high_percent: float | None
+    # high / moderate / low / lowest，留空表示报告上没写。
+    lbgi_level: str
     note: str | None
     created_at: datetime
 

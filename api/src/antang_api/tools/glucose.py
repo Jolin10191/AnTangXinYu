@@ -295,6 +295,20 @@ def build_glucose_report_tool(
             str,
             Field(default="", description="报告上的设备名，例如 硅基动感Pro。没有就留空。"),
         ] = "",
+        device_serial: Annotated[
+            str,
+            Field(
+                default="",
+                description="设备序列号/编号，例如 LT2410FE3P。报告上没有就留空。",
+            ),
+        ] = "",
+        report_generated_at: Annotated[
+            str | None,
+            Field(
+                default=None,
+                description="报告生成日期，ISO 日期；报告上写了才填。",
+            ),
+        ] = None,
         mean_mmol: Annotated[
             float | None,
             Field(default=None, description="平均葡萄糖，mmol/L。报告没写就留空。"),
@@ -305,24 +319,59 @@ def build_glucose_report_tool(
         ] = None,
         cv_percent: Annotated[
             float | None,
-            Field(default=None, description="变异系数，百分数，例如 23.27。"),
+            Field(default=None, ge=0, le=100, description="变异系数，百分数，例如 23.27。"),
         ] = None,
         ehba1c_percent: Annotated[
             float | None,
-            Field(default=None, description="预估糖化血红蛋白，百分数。"),
+            Field(default=None, ge=0, le=100, description="预估糖化血红蛋白，百分数。"),
         ] = None,
         tir_percent: Annotated[
             float | None,
-            Field(default=None, description="目标范围内时间占比，百分数。"),
+            Field(default=None, ge=0, le=100, description="目标范围内时间占比，百分数。"),
         ] = None,
         tar_percent: Annotated[
             float | None,
-            Field(default=None, description="高于目标范围占比，百分数。"),
+            Field(default=None, ge=0, le=100, description="高于目标范围占比，百分数。"),
         ] = None,
         tbr_percent: Annotated[
             float | None,
-            Field(default=None, description="低于目标范围占比，百分数。"),
+            Field(default=None, ge=0, le=100, description="低于目标范围占比，百分数。"),
         ] = None,
+        normal_percent: Annotated[
+            float | None,
+            Field(
+                default=None,
+                ge=0,
+                le=100,
+                description="分档里的「正常/目标范围内」占比，百分数。报告分五档时才填。",
+            ),
+        ] = None,
+        low_percent: Annotated[
+            float | None,
+            Field(default=None, ge=0, le=100, description="分档里的「低」占比，百分数。"),
+        ] = None,
+        very_low_percent: Annotated[
+            float | None,
+            Field(default=None, ge=0, le=100, description="分档里的「很低」占比，百分数。"),
+        ] = None,
+        high_percent: Annotated[
+            float | None,
+            Field(default=None, ge=0, le=100, description="分档里的「高」占比，百分数。"),
+        ] = None,
+        very_high_percent: Annotated[
+            float | None,
+            Field(default=None, ge=0, le=100, description="分档里的「很高」占比，百分数。"),
+        ] = None,
+        lbgi_level: Annotated[
+            Literal["", "high", "moderate", "low", "lowest"],
+            Field(
+                default="",
+                description=(
+                    "报告上「低血糖风险」的档位：high=高、moderate=中、low=低、"
+                    "lowest=最低；报告没写就留空。"
+                ),
+            ),
+        ] = "",
         note: Annotated[
             str | None,
             Field(default=None, description="一句备注，例如报告来自哪家医院。"),
@@ -333,7 +382,10 @@ def build_glucose_report_tool(
         患者发来报告、你读完之后调用一次，把区间和报告上写着的指标记下来：
         记录页会显示「这份报告说了什么」，而不是我们编出来的曲线。
         只记报告上真的写了的项，没写的留空，不要用估算值补齐，也不要自己算
-        平均值或 TIR 填进去。存完告诉患者「这份报告我记在血糖记录里了」。
+        平均值或 TIR 填进去。报告如果按「正常/低/很低/高/很高」五档给占比，
+        就填 normal/low/very_low/high/very_high 五档（三档的 TAR/TBR 由系统加，
+        你不用算）；报告写了「低血糖风险 高/中/低/最低」，就填 lbgi_level。
+        存完告诉患者「这份报告我记在血糖记录里了」。
         """
 
         try:
@@ -351,6 +403,16 @@ def build_glucose_report_tool(
             raise ValueError(
                 "结束日在将来，这份报告的时间还没到。先问清是哪一段时间的报告。"
             )
+        generated: date | None = None
+        if report_generated_at:
+            try:
+                generated = date.fromisoformat(report_generated_at)
+            except ValueError as error:
+                raise ValueError(
+                    "报告生成日期要写成 2025-07-31 这种格式；读不准就留空。"
+                ) from error
+            if generated > datetime.now(UTC).date() + timedelta(days=1):
+                raise ValueError("报告生成日期在将来，先跟患者核对一遍。")
         metrics = [
             mean_mmol,
             sd_mmol,
@@ -359,6 +421,11 @@ def build_glucose_report_tool(
             tir_percent,
             tar_percent,
             tbr_percent,
+            normal_percent,
+            low_percent,
+            very_low_percent,
+            high_percent,
+            very_high_percent,
         ]
         if all(value is None for value in metrics):
             raise ValueError(
@@ -373,6 +440,8 @@ def build_glucose_report_tool(
                 period_start=start,
                 period_end=end,
                 device=device[:64],
+                device_serial=device_serial[:32],
+                report_generated_at=generated,
                 mean_mmol=mean_mmol,
                 sd_mmol=sd_mmol,
                 cv_percent=cv_percent,
@@ -380,6 +449,12 @@ def build_glucose_report_tool(
                 tir_percent=tir_percent,
                 tar_percent=tar_percent,
                 tbr_percent=tbr_percent,
+                normal_percent=normal_percent,
+                low_percent=low_percent,
+                very_low_percent=very_low_percent,
+                high_percent=high_percent,
+                very_high_percent=very_high_percent,
+                lbgi_level=lbgi_level,
                 note=(note or None) and note[:200],
             )
             await session.commit()

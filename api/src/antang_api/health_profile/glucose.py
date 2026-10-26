@@ -262,6 +262,24 @@ def render_glucose_context(
     return "\n".join(lines)
 
 
+LBGI_LEVEL_LABELS = {
+    "high": "偏低血糖风险高",
+    "moderate": "偏低血糖风险中",
+    "low": "偏低血糖风险低",
+    "lowest": "偏低血糖风险最低",
+}
+
+
+def _band_total(*values: float | None) -> float:
+    return round(sum(value for value in values if value is not None), 2)
+
+
+def _num(value: object) -> str:
+    """Numeric 取出来是 Decimal（99.60），跟报告一样写成 99.6。"""
+
+    return f"{float(str(value)):g}"
+
+
 async def record_glucose_report(
     session: AsyncSession,
     *,
@@ -269,6 +287,8 @@ async def record_glucose_report(
     period_start: date,
     period_end: date,
     device: str = "",
+    device_serial: str = "",
+    report_generated_at: date | None = None,
     mean_mmol: float | None = None,
     sd_mmol: float | None = None,
     cv_percent: float | None = None,
@@ -276,19 +296,37 @@ async def record_glucose_report(
     tir_percent: float | None = None,
     tar_percent: float | None = None,
     tbr_percent: float | None = None,
+    normal_percent: float | None = None,
+    low_percent: float | None = None,
+    very_low_percent: float | None = None,
+    high_percent: float | None = None,
+    very_high_percent: float | None = None,
+    lbgi_level: str = "",
     note: str | None = None,
 ) -> GlucoseReport:
     """存一条报告速览。
 
     只存患者自己那份报告上写着的指标；没写的保持空，不用平均值的默认值去补齐——
     一条「TIR 50%」的假数据比空着更糟。
+
+    报告如果给了五档区间，三档的 TAR/TBR 就在本地由「高+很高」「低+很低」加出来，
+    不再让模型自己算（模型算错一次，记录就永远错着）。
     """
+
+    if normal_percent is not None and tir_percent is None:
+        tir_percent = normal_percent
+    if tar_percent is None and (high_percent is not None or very_high_percent is not None):
+        tar_percent = _band_total(high_percent, very_high_percent)
+    if tbr_percent is None and (low_percent is not None or very_low_percent is not None):
+        tbr_percent = _band_total(low_percent, very_low_percent)
 
     report = GlucoseReport(
         user_id=user_id,
         period_start=period_start,
         period_end=period_end,
         device=device,
+        device_serial=device_serial,
+        report_generated_at=report_generated_at,
         mean_mmol=mean_mmol,
         sd_mmol=sd_mmol,
         cv_percent=cv_percent,
@@ -296,6 +334,12 @@ async def record_glucose_report(
         tir_percent=tir_percent,
         tar_percent=tar_percent,
         tbr_percent=tbr_percent,
+        normal_percent=normal_percent,
+        low_percent=low_percent,
+        very_low_percent=very_low_percent,
+        high_percent=high_percent,
+        very_high_percent=very_high_percent,
+        lbgi_level=lbgi_level,
         note=note,
     )
     session.add(report)
@@ -330,21 +374,38 @@ def render_glucose_reports(reports: list[GlucoseReport]) -> str:
     for report in reports[:3]:
         parts = [f"{report.period_start:%Y-%m-%d} 至 {report.period_end:%Y-%m-%d}"]
         if report.device:
-            parts.append(f"设备 {report.device}")
+            serial = f"（序列号 {report.device_serial}）" if report.device_serial else ""
+            parts.append(f"设备 {report.device}{serial}")
         if report.mean_mmol is not None:
-            parts.append(f"平均 {report.mean_mmol} mmol/L")
+            parts.append(f"平均 {_num(report.mean_mmol)} mmol/L")
         if report.sd_mmol is not None:
-            parts.append(f"标准差 {report.sd_mmol}")
+            parts.append(f"标准差 {_num(report.sd_mmol)}")
         if report.cv_percent is not None:
-            parts.append(f"变异系数 {report.cv_percent}%")
+            parts.append(f"变异系数 {_num(report.cv_percent)}%")
         if report.ehba1c_percent is not None:
-            parts.append(f"预估糖化 {report.ehba1c_percent}%")
+            parts.append(f"预估糖化 {_num(report.ehba1c_percent)}%")
         if report.tir_percent is not None:
-            parts.append(f"TIR {report.tir_percent}%")
+            parts.append(f"TIR {_num(report.tir_percent)}%")
         if report.tar_percent is not None:
-            parts.append(f"高于目标 {report.tar_percent}%")
+            parts.append(f"高于目标 {_num(report.tar_percent)}%")
         if report.tbr_percent is not None:
-            parts.append(f"低于目标 {report.tbr_percent}%")
+            parts.append(f"低于目标 {_num(report.tbr_percent)}%")
+        bands = [
+            f"{label} {_num(value)}%"
+            for label, value in (
+                ("正常", report.normal_percent),
+                ("低", report.low_percent),
+                ("很低", report.very_low_percent),
+                ("高", report.high_percent),
+                ("很高", report.very_high_percent),
+            )
+            if value is not None
+        ]
+        if bands:
+            parts.append("分档 " + " / ".join(bands))
+        if report.lbgi_level:
+            label = LBGI_LEVEL_LABELS.get(report.lbgi_level, report.lbgi_level)
+            parts.append(f"报告写的低血糖风险：{label}")
         lines.append("- " + " | ".join(parts))
     lines.append(
         "这些是报告上原本的指标，不是我们算的；解释时按报告自己的目标范围说，"

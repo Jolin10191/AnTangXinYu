@@ -173,6 +173,8 @@ describe("RecordScreen", () => {
           periodStart: "2024-05-30",
           periodEnd: "2024-06-11",
           device: "硅基动感Pro",
+          deviceSerial: "LT2410FE3P",
+          reportGeneratedAt: "2024-06-11",
           meanMmol: 6.3,
           sdMmol: 1.46,
           cvPercent: 23.27,
@@ -180,6 +182,12 @@ describe("RecordScreen", () => {
           tirPercent: 84.5,
           tarPercent: 15.3,
           tbrPercent: 0.2,
+          normalPercent: 84.5,
+          lowPercent: 0.2,
+          veryLowPercent: 0,
+          highPercent: 14.6,
+          veryHighPercent: 0.7,
+          lbgiLevel: "high",
           note: "天津医科大学总医院",
           createdAt: "2026-10-26T14:41:00+00:00",
         },
@@ -196,6 +204,9 @@ describe("RecordScreen", () => {
     expect(text).toContain("硅基动感Pro");
     expect(text).toContain("目标内 84.5%");
     expect(text).toContain("预估糖化 5.73%");
+    // 报告上写着的档位要照原话说，别自己换算成「风险等级 1」。
+    expect(text).toContain("低血糖风险高");
+    expect(text).toContain("分档 正常 84.5% · 低 0.2%");
     expect(text).toContain("天津医科大学总医院");
   });
 

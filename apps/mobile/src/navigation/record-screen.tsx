@@ -145,6 +145,14 @@ export function formatReportPeriod(report: GlucoseReport): string {
   return `${shape(report.periodStart)} 至 ${shape(report.periodEnd)}`;
 }
 
+/** 报告上「低血糖风险」的档位，说成患者能听懂的话。 */
+export const LBGI_LABELS: Record<string, string> = {
+  high: "低血糖风险高",
+  moderate: "低血糖风险中",
+  low: "低血糖风险低",
+  lowest: "低血糖风险最低",
+};
+
 /** 报告速览一行：只写报告上真有的指标，没写的不补。 */
 export function reportLine(report: GlucoseReport): string {
   const parts: string[] = [];
@@ -156,7 +164,21 @@ export function reportLine(report: GlucoseReport): string {
   if (report.ehba1cPercent !== null) parts.push(`预估糖化 ${report.ehba1cPercent}%`);
   if (report.cvPercent !== null) parts.push(`变异系数 ${report.cvPercent}%`);
   if (report.sdMmol !== null) parts.push(`标准差 ${report.sdMmol}`);
+  const lbgi = LBGI_LABELS[report.lbgiLevel];
+  if (lbgi !== undefined) parts.push(lbgi);
   return parts.length === 0 ? "这份报告没有可显示的数字" : parts.join(" · ");
+}
+
+/** 报告按五档给占比时，另起一行照原样列出来；合并过的三档对不上原数。 */
+export function reportBandsLine(report: GlucoseReport): string | null {
+  const bands: string[] = [];
+  if (report.normalPercent !== null) bands.push(`正常 ${report.normalPercent}%`);
+  if (report.lowPercent !== null) bands.push(`低 ${report.lowPercent}%`);
+  if (report.veryLowPercent !== null) bands.push(`很低 ${report.veryLowPercent}%`);
+  if (report.highPercent !== null) bands.push(`高 ${report.highPercent}%`);
+  if (report.veryHighPercent !== null) bands.push(`很高 ${report.veryHighPercent}%`);
+  if (bands.length === 0) return null;
+  return `分档 ${bands.join(" · ")}`;
 }
 
 export function eventIso(minutesAgo: number): string {
@@ -623,6 +645,9 @@ export function RecordScreen({
                     <Text style={styles.cardBody}>
                       {reportLine(report)}
                     </Text>
+                    {reportBandsLine(report) === null ? null : (
+                      <Text style={styles.cardBody}>{reportBandsLine(report)}</Text>
+                    )}
                     {report.note === null ? null : (
                       <Text style={styles.cardHint}>{report.note}</Text>
                     )}

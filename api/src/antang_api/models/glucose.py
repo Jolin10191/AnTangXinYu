@@ -164,6 +164,9 @@ class GlucoseReport(Base):
     period_start: Mapped[date] = mapped_column(Date)
     period_end: Mapped[date] = mapped_column(Date)
     device: Mapped[str] = mapped_column(String(64), server_default=text("''"))
+    # 同一款探头有不同序列号，随访时能对上「这份报告是哪一次戴的」。
+    device_serial: Mapped[str] = mapped_column(String(32), server_default=text("''"))
+    report_generated_at: Mapped[date | None] = mapped_column(Date, default=None)
     # 指标一律可空：报告里没写的那一项就空着，不猜、不补默认值。
     mean_mmol: Mapped[float | None] = mapped_column(Numeric(4, 1), default=None)
     sd_mmol: Mapped[float | None] = mapped_column(Numeric(4, 2), default=None)
@@ -172,6 +175,15 @@ class GlucoseReport(Base):
     tir_percent: Mapped[float | None] = mapped_column(Numeric(5, 2), default=None)
     tar_percent: Mapped[float | None] = mapped_column(Numeric(5, 2), default=None)
     tbr_percent: Mapped[float | None] = mapped_column(Numeric(5, 2), default=None)
+    # 报告把 TIR 拆成五档（正常 / 低 / 很低 / 高 / 很高）。三档的 TAR/TBR 是合并值，
+    # 合并后就对不上报告上的原数了，所以五档也分开存，显示时按报告自己的口径念。
+    normal_percent: Mapped[float | None] = mapped_column(Numeric(5, 2), default=None)
+    low_percent: Mapped[float | None] = mapped_column(Numeric(5, 2), default=None)
+    very_low_percent: Mapped[float | None] = mapped_column(Numeric(5, 2), default=None)
+    high_percent: Mapped[float | None] = mapped_column(Numeric(5, 2), default=None)
+    very_high_percent: Mapped[float | None] = mapped_column(Numeric(5, 2), default=None)
+    # 报告上的「低血糖风险」档位（LBGI 预测）：high / moderate / low / lowest。
+    lbgi_level: Mapped[str] = mapped_column(String(12), server_default=text("''"))
     note: Mapped[str | None] = mapped_column(String(200), default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
