@@ -50,6 +50,7 @@ import {
   ReportPickerScreen,
 } from './attachment-flows';
 import { chatReducer, initialChatState } from './chat-state';
+import { shrinkPhoto } from './photo-size';
 import { formatVoiceDuration, mergeTranscriptIntoDraft } from './voice-recording';
 import { useVoiceInput } from './useVoiceInput';
 import { VOICE_INPUT_ENABLED } from '../config';
@@ -588,8 +589,10 @@ function ChatScreenContent({
     if (selectedAttachment !== null) {
       setUploadingAttachment(true);
       try {
-        uploadedAttachment = await api.uploadChatAttachment(selectedAttachment);
-        uploadedAttachment.localUri = selectedAttachment.uri;
+        // 照片先缩到长边 1568 再上传：模型那边一整张图看得清，也省流量。
+        const prepared = await shrinkPhoto(selectedAttachment);
+        uploadedAttachment = await api.uploadChatAttachment(prepared);
+        uploadedAttachment.localUri = prepared.uri;
       } catch (error) {
         dispatch({ type: 'history-failed', message: errorMessage(error) });
         return;

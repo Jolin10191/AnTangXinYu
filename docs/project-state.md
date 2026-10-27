@@ -340,6 +340,28 @@ SD 1.46、CV 23.27%、高 15.3% / 正常 84.5% / 低 0.2%。硬拆成读数就�
 验证：后端 **572 passed**（新增 3 例：文字够厚走文本块、文字太少走原文件、扫描件走原文件），
 ruff / pyright 干净。
 
+### 2026-10-27 白天（二）：照片先缩到长边 1568 再上传
+
+PDF 那条省的是服务端编码，照片这条路省的是**手机上传流量和视觉 token**。
+
+- `apps/mobile/src/chat/photo-size.ts`：`shrinkPhoto(attachment)` 只处理 `kind === 'photo'`
+  且 mime 是 `image/*`；长边超过 `MAX_PHOTO_EDGE = 1568` 才 `manipulateAsync` 缩放
+  （横图按宽、竖图按高），输出 `image/jpeg`、`compress: 0.82`，文件名后缀换成 `.jpg`。
+  **只缩不放**：本来就不大的照片原样发。
+- 三处兜底，全都「宁可按原图上传，也别让患者发不出照片」：`Image.getSize` 失败、
+  `manipulateAsync` 抛错、非图片/报告附件 → 原样返回。
+- 接线点在 `apps/mobile/src/chat/ChatScreen.tsx` 的 `sendContent`：先 `shrinkPhoto`
+  再 `uploadChatAttachment`，所以相机拍的和相册选的照片走同一条。
+- 新依赖 `expo-image-manipulator@~57.0.21`（`npx expo install` 装的），原生模块，
+  **要重新打包才生效**；`jest.setup.ts` 给 `manipulateAsync` 加了 mock。
+
+1568 这个数不是拍的：多数多模态模型会把更大的图切成多块、一块块算 token，
+1568 长边基本是「一张图看全」的拐点。
+
+验证：移动端 53 套 **323 用例**（新增 6 例 `photo-size` 单测 + 1 例端到端：选照片 →
+缩图 → 上传时带的是缩过的 uri）、`tsc --noEmit` 干净、`expo lint` 干净。
+
+
 
 
 

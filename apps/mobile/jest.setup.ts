@@ -64,3 +64,8 @@ jest.mock('expo-secure-store', () => {
     }),
   };
 });
+
+jest.mock('expo-image-manipulator', () => ({
+  SaveFormat: { JPEG: 'jpeg' },
+  manipulateAsync: jest.fn(async (uri: string) => ({ uri, width: 1568, height: 1176 })),
+}));

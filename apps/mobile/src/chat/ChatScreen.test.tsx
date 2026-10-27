@@ -13,6 +13,27 @@ jest.mock('react-native-safe-area-context', () => ({
   SafeAreaView: jest.requireActual('react-native').View,
 }));
 
+jest.mock('expo-camera', () => ({
+  CameraView: () => null,
+  useCameraPermissions: () => [{ granted: true }, jest.fn()],
+}));
+
+jest.mock('expo-image-picker', () => ({
+  launchImageLibraryAsync: jest.fn(async () => ({
+    canceled: false,
+    assets: [
+      {
+        uri: 'file:///photos/IMG_0001.jpg',
+        mimeType: 'image/jpeg',
+        fileName: 'IMG_0001.jpg',
+        fileSize: 4_000_000,
+        width: 4032,
+        height: 3024,
+      },
+    ],
+  })),
+}));
+
 jest.mock('../health-profile/use-health-profile-cards', () => ({
   useHealthProfileCards: () => ({
     actingCardId: null,
@@ -352,6 +373,86 @@ describe('ChatScreen', () => {
     ]);
     act(() => tree!.unmount());
   });
+});
+
+test('a picked photo is shrunk before it is uploaded', async () => {
+  const { manipulateAsync } = jest.requireMock('expo-image-manipulator');
+  const { Image } = jest.requireActual('react-native');
+  jest
+    .spyOn(Image, 'getSize')
+    .mockImplementation((_uri, onLoad, _onError) => {
+      (onLoad as (w: number, h: number) => void)(4032, 3024);
+    });
+
+  const now = new Date().toISOString();
+  const api = {
+    getConversations: jest.fn().mockResolvedValue([
+      {
+        id: '019b7777-7777-7777-8777-777777777777',
+        title: '今天的对话',
+        createdAt: now,
+        lastMessageAt: now,
+        messageCount: 1,
+      },
+    ]),
+    getMessages: jest.fn().mockResolvedValue({ messages: [], nextBefore: null }),
+    startConversation: jest.fn(),
+    uploadChatAttachment: jest.fn().mockResolvedValue({
+      id: 'attachment-1',
+      kind: 'photo',
+      filename: 'IMG_0001.jpg',
+      mimeType: 'image/jpeg',
+      sizeBytes: 120_000,
+    }),
+    streamMessage: jest.fn().mockResolvedValue(undefined),
+  } as unknown as ApiClient;
+
+  let tree: ReturnType<typeof create>;
+  await act(async () => {
+    tree = create(
+      <ChatScreen
+        gadgetbridge={fakeGadgetbridge()}
+        healthConnect={fakeHealthConnect()}
+        api={api}
+        user={{ id: 'user-1', username: 'demo', role: 'patient' }}
+      />,
+    );
+    await Promise.resolve();
+  });
+
+  await act(async () => {
+    tree!.root.findByProps({ accessibilityLabel: '拍照' }).props.onPress();
+    await Promise.resolve();
+  });
+  await act(async () => {
+    tree!.root
+      .findAllByProps({ accessibilityLabel: '从相册选择' })[0]
+      .props.onPress();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  expect(
+    tree!.root.findAllByProps({ accessibilityLabel: '移除附件' }).length,
+  ).toBeGreaterThan(0);
+
+  await act(async () => {
+    tree!.root.findByProps({ accessibilityLabel: '发送消息' }).props.onPress();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  expect(manipulateAsync).toHaveBeenCalledWith(
+    'file:///photos/IMG_0001.jpg',
+    [{ resize: { width: 1568 } }],
+    { compress: 0.82, format: 'jpeg' },
+  );
+  const uploaded = (api as unknown as { uploadChatAttachment: jest.Mock })
+    .uploadChatAttachment;
+  expect(uploaded).toHaveBeenCalledWith(
+    expect.objectContaining({ kind: 'photo', mimeType: 'image/jpeg' }),
+  );
+  act(() => tree!.unmount());
 });
 
 test('only attaches a fresh sample from an active heart rate stream', () => {
