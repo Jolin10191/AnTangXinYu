@@ -184,6 +184,13 @@ class GlucoseReport(Base):
     very_high_percent: Mapped[float | None] = mapped_column(Numeric(5, 2), default=None)
     # 报告上的「低血糖风险」档位（LBGI 预测）：high / moderate / low / lowest。
     lbgi_level: Mapped[str] = mapped_column(String(12), server_default=text("''"))
+    # 这份速览是从哪张附件里读出来的：患者想回看原始报告时按它去取。
+    # 附件被清理就置空，速览本身还在——指标是患者的数据，不该跟着文件一起消失。
+    source_attachment_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("message_attachments.id", ondelete="SET NULL"),
+        default=None,
+        index=True,
+    )
     note: Mapped[str | None] = mapped_column(String(200), default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

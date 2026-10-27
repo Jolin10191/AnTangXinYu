@@ -26,6 +26,8 @@ from antang_api.health_profile.glucose import list_glucose_reports, render_gluco
 from antang_api.models import (
     GlucoseReading,
     GlucoseReport,
+    MessageAttachment,
+    MessageAttachmentKind,
     PersonalProfile,
     ProactiveCareSettings,
     User,
@@ -477,4 +479,80 @@ async def test_a_percentage_is_bounded_in_the_schema() -> None:
     properties = json.dumps(tool.args["tir_percent"], ensure_ascii=False)
     assert "maximum" in properties
     assert "100" in properties
+
+
+def _runtime_of(user_id: UUID, run_id: UUID) -> ToolRuntime[AgentContext]:
+    return ToolRuntime(
+        state={"messages": []},
+        context=AgentContext(
+            user_id=user_id,
+            run_id=run_id,
+            input_message_count=1,
+        ),
+        config={},
+        stream_writer=lambda _value: None,
+        tool_call_id="report-call",
+        store=None,
+        tools=[],
+    )
+
+
+async def test_the_report_remembers_which_pdf_it_came_from(
+    db_session: AsyncSession,
+) -> None:
+    """患者发的那份 PDF 要记下来：详情页的「打开原报告」靠这一列才有得开。"""
+
+    user = await _create_user(db_session, "glucose_source")
+    attachment = MessageAttachment(
+        user_id=user.id,
+        kind=MessageAttachmentKind.REPORT,
+        filename="cgm-report.pdf",
+        mime_type="application/pdf",
+        size_bytes=8,
+        data=b"%PDF-1.4",
+    )
+    db_session.add(attachment)
+    await db_session.flush()
+    prepared_run = await prepare_chat_run(
+        db_session,
+        user.id,
+        uuid4(),
+        "帮我分析这份 cgm 报告",
+        attachment_id=attachment.id,
+    )
+    await db_session.commit()
+
+    result = await _report_tool(db_session)(
+        period_start="2024-05-30",
+        period_end="2024-06-11",
+        mean_mmol=6.29,
+        tir_percent=84.5,
+        runtime=_runtime_of(user.id, prepared_run.run_id),
+    )
+
+    assert result["recorded"] is True
+    reports = await list_glucose_reports(db_session, user_id=user.id)
+    assert [report.source_attachment_id for report in reports] == [attachment.id]
+
+
+async def test_a_report_typed_in_by_hand_has_no_source_file(
+    db_session: AsyncSession,
+) -> None:
+    """患者自己口述数字、手里没有文件时，别指一个不存在的附件。"""
+
+    user = await _create_user(db_session, "glucose_typing")
+    prepared_run = await prepare_chat_run(
+        db_session, user.id, uuid4(), "我的报告 TIR 是 84.5%"
+    )
+    await db_session.commit()
+
+    await _report_tool(db_session)(
+        period_start="2024-05-30",
+        period_end="2024-06-11",
+        tir_percent=84.5,
+        runtime=_runtime_of(user.id, prepared_run.run_id),
+    )
+
+    reports = await list_glucose_reports(db_session, user_id=user.id)
+    assert [report.source_attachment_id for report in reports] == [None]
 

@@ -2488,6 +2488,8 @@ export type GlucoseReport = {
   veryHighPercent: number | null;
   // 报告写的「低血糖风险」档位：high / moderate / low / lowest，没写是空串。
   lbgiLevel: string;
+  // 原文件（患者发进对话的那份 PDF）的附件 id；没有就是 null，不显示「打开原报告」。
+  sourceAttachmentId: string | null;
   note: string | null;
   createdAt: string;
 };
@@ -2527,8 +2529,64 @@ export function parseGlucoseReport(value: unknown): GlucoseReport {
     highPercent: optionalNumber(data, "high_percent"),
     veryHighPercent: optionalNumber(data, "very_high_percent"),
     lbgiLevel: typeof data.lbgi_level === "string" ? data.lbgi_level : "",
+    sourceAttachmentId:
+      typeof data.source_attachment_id === "string" && data.source_attachment_id.length > 0
+        ? data.source_attachment_id
+        : null,
     note: typeof data.note === "string" ? data.note : null,
     createdAt: cgmString(data, "created_at"),
+  };
+}
+
+export type GlucoseReportPreview = {
+  fileName: string;
+  periodStart: string;
+  periodEnd: string;
+  reportGeneratedAt: string | null;
+  device: string;
+  deviceSerial: string;
+  hospital: string;
+  meanMmol: number | null;
+  sdMmol: number | null;
+  cvPercent: number | null;
+  ehba1cPercent: number | null;
+  normalPercent: number | null;
+  lowPercent: number | null;
+  veryLowPercent: number | null;
+  highPercent: number | null;
+  veryHighPercent: number | null;
+  // 报告上没印、或者版式里读不出来的项目：界面要说「没读到」，不能显示成 0。
+  missing: string[];
+};
+
+/**
+ * 服务端从 PDF 里读出来的字段。确认导入时把这份原样传回去，
+ * 所以它既是预览、也是写库的请求体。
+ */
+export function parseGlucoseReportPreview(value: unknown): GlucoseReportPreview {
+  const data = cgmObject(value);
+  const missing = Array.isArray(data.missing)
+    ? data.missing.filter((item): item is string => typeof item === "string")
+    : [];
+  return {
+    fileName: typeof data.file_name === "string" ? data.file_name : "report.pdf",
+    periodStart: cgmString(data, "period_start"),
+    periodEnd: cgmString(data, "period_end"),
+    reportGeneratedAt:
+      typeof data.report_generated_at === "string" ? data.report_generated_at : null,
+    device: typeof data.device === "string" ? data.device : "",
+    deviceSerial: typeof data.device_serial === "string" ? data.device_serial : "",
+    hospital: typeof data.hospital === "string" ? data.hospital : "",
+    meanMmol: optionalNumber(data, "mean_mmol"),
+    sdMmol: optionalNumber(data, "sd_mmol"),
+    cvPercent: optionalNumber(data, "cv_percent"),
+    ehba1cPercent: optionalNumber(data, "ehba1c_percent"),
+    normalPercent: optionalNumber(data, "normal_percent"),
+    lowPercent: optionalNumber(data, "low_percent"),
+    veryLowPercent: optionalNumber(data, "very_low_percent"),
+    highPercent: optionalNumber(data, "high_percent"),
+    veryHighPercent: optionalNumber(data, "very_high_percent"),
+    missing,
   };
 }
 

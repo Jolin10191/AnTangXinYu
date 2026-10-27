@@ -40,12 +40,16 @@ from antang_api.health_profile.glucose import (
     list_glucose_readings,
     list_glucose_reports,
     record_glucose_reading,
+    record_glucose_report,
     revoke_glucose_reading,
     summarize_glucose,
 )
+from antang_api.health_profile.report_parse import UnreadableReport, parse_report_pdf
 from antang_api.schemas.glucose import (
     GlucoseReadingCreate,
     GlucoseReadingResponse,
+    GlucoseReportCreate,
+    GlucoseReportPreview,
     GlucoseReportResponse,
     GlucoseReportsResponse,
     GlucoseSummaryResponse,
@@ -808,7 +812,7 @@ def _decode_upload(upload: UploadFile, data: bytes) -> None:
     if not (name.endswith(".csv") or name.endswith(".txt")):
         raise HTTPException(
             status_code=415,
-            detail="目前只支持 CSV 导出文件；PDF 或截图请在「报告解读」里发送，由对话读取。",
+            detail="这里收的是 CSV 导出文件。PDF 报告请用「导入报告 PDF」，",
         )
 
 
@@ -904,6 +908,114 @@ async def get_cgm_samples(
         count=len(samples),
         samples=[CgmSampleResponse.model_validate(item) for item in samples],
     )
+
+
+MAX_REPORT_PDF_BYTES = 10 * 1024 * 1024
+# 报告上一定有这些字段里的大部分；读不到的要告诉患者「没读到」，不能显示成 0。
+_METRIC_LABELS = {
+    "mean_mmol": "平均葡萄糖",
+    "sd_mmol": "标准差",
+    "cv_percent": "变异系数",
+    "ehba1c_percent": "预估糖化",
+    "normal_percent": "正常分档",
+    "low_percent": "低分档",
+    "very_low_percent": "很低分档",
+    "high_percent": "高分档",
+    "very_high_percent": "很高分档",
+}
+
+
+def _read_report_pdf(upload: UploadFile, data: bytes) -> None:
+    if len(data) == 0:
+        raise HTTPException(status_code=422, detail="这个文件是空的")
+    if len(data) > MAX_REPORT_PDF_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"文件超过 {MAX_REPORT_PDF_BYTES // (1024 * 1024)} MB，"
+            "请只选报告那一份 PDF，不要把整套资料一起发。",
+        )
+    name = (upload.filename or "").lower()
+    if not name.endswith(".pdf"):
+        detail = "这里只收 PDF。CSV 导出文件请用「导入传感器数据」。"
+        raise HTTPException(status_code=415, detail=detail)
+
+
+@router.post("/glucose-reports/preview", response_model=GlucoseReportPreview)
+async def preview_glucose_report(
+    file: Annotated[UploadFile, File()],
+    user: Annotated[User, Depends(get_patient_user)],
+) -> GlucoseReportPreview:
+    """先解析、不落库：把读到的字段摆出来，患者确认了才存。"""
+
+    del user
+    data = await file.read()
+    _read_report_pdf(file, data)
+    try:
+        parsed = parse_report_pdf(data)
+    except UnreadableReport as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    metrics = parsed.metrics()
+    return GlucoseReportPreview(
+        file_name=file.filename or "report.pdf",
+        period_start=parsed.period_start,
+        period_end=parsed.period_end,
+        report_generated_at=parsed.generated_at,
+        device=parsed.device,
+        device_serial=parsed.device_serial,
+        hospital=parsed.hospital,
+        mean_mmol=parsed.mean_mmol,
+        sd_mmol=parsed.sd_mmol,
+        cv_percent=parsed.cv_percent,
+        ehba1c_percent=parsed.ehba1c_percent,
+        normal_percent=parsed.normal_percent,
+        low_percent=parsed.low_percent,
+        very_low_percent=parsed.very_low_percent,
+        high_percent=parsed.high_percent,
+        very_high_percent=parsed.very_high_percent,
+        missing=[
+            label for key, label in _METRIC_LABELS.items() if metrics[key] is None
+        ],
+    )
+
+
+@router.post(
+    "/glucose-reports",
+    response_model=GlucoseReportResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_glucose_report(
+    payload: GlucoseReportCreate,
+    user: Annotated[User, Depends(get_patient_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> GlucoseReportResponse:
+    """确认导入：把预览里那几个数字存成一份报告速览。
+
+    这份速览没有对应的附件（文件是患者从手机里选的，没进对话），
+    所以 `source_attachment_id` 留空，详情页也就不会显示「打开原报告」。
+    """
+
+    report = await record_glucose_report(
+        session,
+        user_id=user.id,
+        period_start=payload.period_start,
+        period_end=payload.period_end,
+        device=payload.device,
+        device_serial=payload.device_serial,
+        report_generated_at=payload.report_generated_at,
+        mean_mmol=payload.mean_mmol,
+        sd_mmol=payload.sd_mmol,
+        cv_percent=payload.cv_percent,
+        ehba1c_percent=payload.ehba1c_percent,
+        normal_percent=payload.normal_percent,
+        low_percent=payload.low_percent,
+        very_low_percent=payload.very_low_percent,
+        high_percent=payload.high_percent,
+        very_high_percent=payload.very_high_percent,
+        note=payload.note,
+    )
+    await session.commit()
+    return GlucoseReportResponse.model_validate(report)
+
 
 @router.post(
     "/meal-logs",

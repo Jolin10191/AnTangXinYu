@@ -73,6 +73,9 @@ import {
   type GlucoseReport,
   parseGlucoseSummary,
   parseGlucoseReports,
+  parseGlucoseReport,
+  parseGlucoseReportPreview,
+  type GlucoseReportPreview,
   type CgmImportPreview,
   type CgmImportResult,
   type CgmSeries,
@@ -624,6 +627,20 @@ export class ApiClient {
   async getChatAttachmentImageSource(attachmentId: string): Promise<{
     uri: string;
   }> {
+    const { uri } = await this.saveChatAttachment(attachmentId);
+    return { uri };
+  }
+
+  /**
+   * 把一条聊天附件取到本地缓存，返回文件路径和类型。
+   *
+   * 图片和 PDF 都走这一条：附件要带 token 才能下载，所以只能自己取字节写文件，
+   * 不能把需要鉴权的 URL 直接交给 <Image> 或系统打开方式。
+   */
+  async saveChatAttachment(attachmentId: string): Promise<{
+    uri: string;
+    mimeType: string;
+  }> {
     const version = this.sessionVersion;
     const tokens = await this.tokenStore.load();
     this.assertSessionVersion(version);
@@ -644,7 +661,7 @@ export class ApiClient {
     await LegacyFileSystem.writeAsStringAsync(target, bytesToBase64(bytes), {
       encoding: LegacyFileSystem.EncodingType.Base64,
     });
-    return { uri: target };
+    return { uri: target, mimeType };
   }
 
   async syncPushInstallation(
@@ -1247,6 +1264,53 @@ export class ApiClient {
       { method: "DELETE" },
     );
     if (!response.ok) throw await this.apiError(response);
+  }
+
+  /**
+   * 选一份报告 PDF，先看服务端读到了什么。不落库——读错了还能改，读不到也会直说。
+   */
+  async previewGlucoseReport(file: {
+    mimeType: string;
+    name: string;
+    uri: string;
+  }): Promise<GlucoseReportPreview> {
+    const response = await this.authorizedFetch(
+      "/api/v1/health-profile/glucose-reports/preview",
+      { body: uploadForm(file), method: "POST" },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseGlucoseReportPreview(await responseJson(response));
+  }
+
+  /** 患者确认之后才写库：把预览里那几个数字原样传回去。 */
+  async createGlucoseReport(
+    preview: GlucoseReportPreview,
+  ): Promise<GlucoseReport> {
+    const response = await this.authorizedFetch(
+      "/api/v1/health-profile/glucose-reports",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          period_start: preview.periodStart,
+          period_end: preview.periodEnd,
+          report_generated_at: preview.reportGeneratedAt,
+          device: preview.device,
+          device_serial: preview.deviceSerial,
+          mean_mmol: preview.meanMmol,
+          sd_mmol: preview.sdMmol,
+          cv_percent: preview.cvPercent,
+          ehba1c_percent: preview.ehba1cPercent,
+          normal_percent: preview.normalPercent,
+          low_percent: preview.lowPercent,
+          very_low_percent: preview.veryLowPercent,
+          high_percent: preview.highPercent,
+          very_high_percent: preview.veryHighPercent,
+        }),
+      },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseGlucoseReport(await responseJson(response));
   }
 
   async transcribeVoice(recording: {

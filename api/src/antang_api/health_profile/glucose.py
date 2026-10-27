@@ -304,6 +304,7 @@ async def record_glucose_report(
     very_high_percent: float | None = None,
     lbgi_level: str = "",
     note: str | None = None,
+    source_attachment_id: UUID | None = None,
 ) -> GlucoseReport:
     """存一条报告速览。
 
@@ -342,6 +343,7 @@ async def record_glucose_report(
         very_high_percent=very_high_percent,
         lbgi_level=lbgi_level,
         note=note,
+        source_attachment_id=source_attachment_id,
     )
     session.add(report)
     await session.flush()

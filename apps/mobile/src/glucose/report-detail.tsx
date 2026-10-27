@@ -15,6 +15,8 @@ export const LBGI_LABELS: Record<string, string> = {
 type Props = {
   onClose: () => void;
   onDelete: () => void;
+  /** 打开患者当初发进对话的那份 PDF；报告没有原文件时传 undefined。 */
+  onOpenOriginal?: () => void;
   report: GlucoseReport;
 };
 
@@ -48,7 +50,7 @@ function MetricRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function GlucoseReportDetail({ onClose, onDelete, report }: Props) {
+export function GlucoseReportDetail({ onClose, onDelete, onOpenOriginal, report }: Props) {
   const percent = (value: number | null): string | null =>
     value === null ? null : `${value}%`;
 
@@ -121,6 +123,23 @@ export function GlucoseReportDetail({ onClose, onDelete, report }: Props) {
               <Text style={styles.cardHint}>{report.note}</Text>
             )}
           </View>
+
+          {onOpenOriginal === undefined ? null : (
+            <Pressable
+              accessibilityLabel="打开原报告"
+              accessibilityRole="button"
+              onPress={onOpenOriginal}
+              style={styles.openCard}
+            >
+              <View style={styles.openCopy}>
+                <Text style={styles.openTitle}>打开原报告</Text>
+                <Text style={styles.cardHint}>
+                  就是你当时发进来的那份 PDF，用手机的打开方式看原始图谱。
+                </Text>
+              </View>
+              <Text style={styles.openAction}>打开</Text>
+            </Pressable>
+          )}
 
           {shownControl.length === 0 ? null : (
             <View style={styles.card}>
@@ -241,8 +260,26 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     marginTop: 6,
   },
-  metricRow: {
+  openCard: {
     flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.paper,
+    borderRadius: radii.lg,
+    padding: spacing.md,
+  },
+  openCopy: { flex: 1 },
+  openTitle: {
+    color: colors.ink,
+    fontSize: 15,
+    fontFamily: typefaces.sansMedium,
+  },
+  openAction: {
+    color: colors.primary,
+    fontSize: 13,
+    fontFamily: typefaces.sansMedium,
+  },
+  metricRow: {    flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: spacing.sm,

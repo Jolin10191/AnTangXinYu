@@ -24,13 +24,18 @@ const REPORT: GlucoseReport = {
   highPercent: 1.6,
   veryHighPercent: 0,
   lbgiLevel: 'high',
+  sourceAttachmentId: 'attachment-1',
   note: '天津医科大学总医院',
   createdAt: '2026-10-27T00:12:00+00:00',
 };
 
 async function mount(
   report: GlucoseReport = REPORT,
-  handlers: { onClose?: () => void; onDelete?: () => void } = {},
+  handlers: {
+    onClose?: () => void;
+    onDelete?: () => void;
+    onOpenOriginal?: () => void;
+  } = {},
 ): Promise<ReactTestRenderer> {
   let renderer: ReactTestRenderer | null = null;
   await act(async () => {
@@ -38,6 +43,7 @@ async function mount(
       <GlucoseReportDetail
         onClose={handlers.onClose ?? (() => undefined)}
         onDelete={handlers.onDelete ?? (() => undefined)}
+        onOpenOriginal={handlers.onOpenOriginal}
         report={report}
       />,
     );
@@ -124,5 +130,23 @@ describe('报告速览详情', () => {
     });
 
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the original report only when the summary remembers its file', async () => {
+    const onOpenOriginal = jest.fn();
+    const tree = await mount(REPORT, { onOpenOriginal });
+
+    expect(JSON.stringify(tree.toJSON())).toContain('打开原报告');
+    await act(async () => {
+      tree.root.findByProps({ accessibilityLabel: '打开原报告' }).props.onPress();
+    });
+    expect(onOpenOriginal).toHaveBeenCalledTimes(1);
+
+    // 没有原文件（例如患者是口述数字、或者附件被清理）就不给这个入口。
+    const withoutFile = await mount(
+      { ...REPORT, sourceAttachmentId: null },
+      { onOpenOriginal: undefined },
+    );
+    expect(JSON.stringify(withoutFile.toJSON())).not.toContain('打开原报告');
   });
 });

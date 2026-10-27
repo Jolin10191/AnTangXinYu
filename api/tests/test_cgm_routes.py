@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from fastapi import FastAPI
@@ -11,11 +12,20 @@ from antang_api.models import CgmSample, GlucoseImport
 from antang_api.routers.auth import router as auth_router
 from antang_api.routers.health_profile import router as health_profile_router
 
+# 样本时间按「两小时前」算：写死日期会在几天后掉出「近 7 天」窗口，
+# 测试就会在某天早上突然变红，而这跟代码没关系。
+_START = datetime.now(UTC) - timedelta(hours=2)
+
+
+def _stamp(offset_minutes: int) -> str:
+    return (_START + timedelta(minutes=offset_minutes)).strftime("%Y-%m-%d %H:%M")
+
+
 CSV = (
     "时间,血糖,单位,趋势\n"
-    "2026-10-20 08:00,5.5,mmol/L,Flat\n"
-    "2026-10-20 08:05,6.1,mmol/L,Rising\n"
-    "2026-10-20 08:10,12.2,mmol/L,\n"
+    f"{_stamp(0)},5.5,mmol/L,Flat\n"
+    f"{_stamp(5)},6.1,mmol/L,Rising\n"
+    f"{_stamp(10)},12.2,mmol/L,\n"
 ).encode("utf-8")
 
 
@@ -107,9 +117,11 @@ async def test_importing_twice_does_not_duplicate_samples(
         assert series.json()["samples"][0]["value_mg_dl"] == 99
 
 
-async def test_a_pdf_is_refused_with_a_pointer_to_the_report_reader(
+async def test_a_pdf_is_refused_with_a_pointer_to_the_report_import(
     db_session: AsyncSession,
 ) -> None:
+    """CSV 这条路不收 PDF，但要把「该走哪儿」说清楚。"""
+
     async for client in _client(db_session):
         headers = await _patient_headers(client)
         response = await client.post(
@@ -119,7 +131,7 @@ async def test_a_pdf_is_refused_with_a_pointer_to_the_report_reader(
         )
 
         assert response.status_code == 415
-        assert "报告解读" in response.json()["detail"]
+        assert "导入报告 PDF" in response.json()["detail"]
 
 
 async def test_a_broken_file_is_refused_and_anonymous_callers_are_rejected(

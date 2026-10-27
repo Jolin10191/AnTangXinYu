@@ -7,10 +7,12 @@
 
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Literal
+from uuid import UUID
 
 from langchain.tools import ToolRuntime, tool
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from antang_api.agents.runtime import AgentContext
@@ -24,6 +26,7 @@ from antang_api.health_profile.glucose import (
     summarize_glucose,
     to_mmol,
 )
+from antang_api.models import AgentRun, MessageAttachment
 
 READ_GLUCOSE_TOOL_NAME = "read_glucose_readings"
 RECORD_GLUCOSE_TOOL_NAME = "record_glucose_readings"
@@ -161,6 +164,30 @@ class GlucosePoint(BaseModel):
         str | None,
         Field(default=None, description="一条备注，例如「报告日均值」「化验单」"),
     ] = None
+
+
+async def _report_attachment_id(
+    session: AsyncSession, run_id: UUID
+) -> UUID | None:
+    """这一轮用户消息里如果恰好挂了一份 PDF，就是这份速览的原文件。
+
+    只在「恰好一份」时认：一条消息里挂了两份 PDF，谁是谁说不清，宁可不指。
+    """
+
+    trigger = await session.scalar(
+        select(AgentRun.trigger_message_id).where(AgentRun.id == run_id)
+    )
+    if trigger is None:
+        return None
+    found = (
+        await session.scalars(
+            select(MessageAttachment.id).where(
+                MessageAttachment.message_id == trigger,
+                MessageAttachment.mime_type == "application/pdf",
+            )
+        )
+    ).all()
+    return found[0] if len(found) == 1 else None
 
 
 def build_glucose_write_tool(
@@ -456,6 +483,10 @@ def build_glucose_report_tool(
                 very_high_percent=very_high_percent,
                 lbgi_level=lbgi_level,
                 note=(note or None) and note[:200],
+                # 患者这一轮发的那份 PDF 就是它的原文件，记下来「打开原报告」才有得开。
+                source_attachment_id=await _report_attachment_id(
+                    session, runtime.context.run_id
+                ),
             )
             await session.commit()
             report_id = str(report.id)

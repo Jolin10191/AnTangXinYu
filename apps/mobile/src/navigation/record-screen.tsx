@@ -27,6 +27,7 @@ import type {
 } from "./device-channels";
 import { EventTimeField } from "../ui/event-time-field";
 import { GlucoseReportDetail } from "../glucose/report-detail";
+import { openOriginalReport } from "../glucose/open-original";
 import Svg, { Line, Path, Polyline, Rect } from "react-native-svg";
 
 /**
@@ -310,6 +311,7 @@ type Props = {
     | "getCgmSamples"
     | "getGlucoseReports"
     | "deleteGlucoseReport"
+    | "saveChatAttachment"
     | "getWearableDashboard"
   >;
   onImport: () => void;
@@ -508,6 +510,15 @@ export function RecordScreen({
       setGlucoseReports((current) => current.filter((item) => item.id !== report.id));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "这份报告速览没删掉");
+    }
+  }
+
+  async function openReportOriginal(report: GlucoseReport) {
+    if (report.sourceAttachmentId === null) return;
+    try {
+      await openOriginalReport(api, report.sourceAttachmentId);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "原报告没打开");
     }
   }
 
@@ -1042,6 +1053,11 @@ export function RecordScreen({
         <GlucoseReportDetail
           onClose={() => setOpenReport(null)}
           onDelete={() => void removeReport(openReport)}
+          onOpenOriginal={
+            openReport.sourceAttachmentId === null
+              ? undefined
+              : () => void openReportOriginal(openReport)
+          }
           report={openReport}
         />
       )}

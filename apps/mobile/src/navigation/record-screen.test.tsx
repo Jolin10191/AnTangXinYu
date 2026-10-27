@@ -91,6 +91,10 @@ function fakeApi(overrides: Record<string, unknown> = {}) {
     getCgmSamples: jest.fn(async () => ({ days: 7, count: 0, samples: [] })),
     getGlucoseReports: jest.fn(async () => []),
     deleteGlucoseReport: jest.fn(async () => undefined),
+    saveChatAttachment: jest.fn(async () => ({
+      uri: "file:///cache/chat-attachment-attachment-2.pdf",
+      mimeType: "application/pdf",
+    })),
     ...overrides,
   };
 }
@@ -235,6 +239,7 @@ describe("RecordScreen", () => {
           highPercent: 1.6,
           veryHighPercent: 0,
           lbgiLevel: "high",
+          sourceAttachmentId: "attachment-2",
           note: "天津医科大学总医院",
           createdAt: "2026-10-27T00:12:00+00:00",
         },
@@ -259,6 +264,12 @@ describe("RecordScreen", () => {
     expect(detail).toContain("整体水平");
     expect(detail).toContain("时间花在哪");
     expect(detail).toContain("报告写的档位");
+
+    // 原文件取回来是为了交给系统的打开方式（分享面板里就有 PDF 阅读器）。
+    await act(async () => {
+      tree.root.findByProps({ accessibilityLabel: "打开原报告" }).props.onPress();
+    });
+    expect(api.saveChatAttachment).toHaveBeenCalledWith("attachment-2");
 
     const alert = jest
       .spyOn(Alert, "alert")

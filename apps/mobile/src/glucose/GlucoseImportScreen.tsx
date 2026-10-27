@@ -14,6 +14,7 @@ import { errorMessage } from "../api/client";
 import type {
   CgmImportPreview,
   CgmSourceSystem,
+  GlucoseReportPreview,
 } from "../api/types";
 
 const SOURCES: { value: CgmSourceSystem; label: string }[] = [
@@ -24,21 +25,35 @@ const SOURCES: { value: CgmSourceSystem; label: string }[] = [
   { value: "generic", label: "其他" },
 ];
 
+type Mode = "csv" | "pdf";
+
 type Props = {
-  api: Pick<ApiClient, "previewGlucoseImport" | "importGlucoseCsv">;
+  api: Pick<
+    ApiClient,
+    | "previewGlucoseImport"
+    | "importGlucoseCsv"
+    | "previewGlucoseReport"
+    | "createGlucoseReport"
+  >;
   onBack: () => void;
   onImported: (insertedCount: number) => void;
 };
 
 /**
- * 传感器数据导入：先预览再入库。
+ * 传感器／报告导入：先预览再入库。
  *
- * 厂家 App 导出的 CSV 常有单位混用、重复行、缺时区，所以不直接写库：
- * 先把「能用多少行、哪几行有问题、问题是什么」给患者看，确认后才存。
+ * 两条路分开：
+ * - CSV：厂家 App 导出的逐点数据，常有单位混用、重复行、缺时区，先给患者看能导入多少行。
+ * - PDF：医院给的「动态葡萄糖评估报告」只有汇总指标，服务端按版式读出数字，
+ *   读不到的项目会明说「没读到」，不会补 0。
  */
 export function GlucoseImportScreen({ api, onBack, onImported }: Props) {
+  const [mode, setMode] = useState<Mode>("csv");
   const [source, setSource] = useState<CgmSourceSystem>("sibionics");
   const [preview, setPreview] = useState<CgmImportPreview | null>(null);
+  const [reportPreview, setReportPreview] = useState<GlucoseReportPreview | null>(
+    null,
+  );
   const [pending, setPending] = useState<{
     mimeType: string;
     name: string;
@@ -47,9 +62,14 @@ export function GlucoseImportScreen({ api, onBack, onImported }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function pick() {
+  function reset() {
     setError(null);
     setPreview(null);
+    setReportPreview(null);
+  }
+
+  async function pickCsv() {
+    reset();
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ["text/csv", "text/comma-separated-values", "text/plain", "*/*"],
@@ -75,7 +95,34 @@ export function GlucoseImportScreen({ api, onBack, onImported }: Props) {
     }
   }
 
-  async function confirm() {
+  async function pickPdf() {
+    reset();
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ["application/pdf", "*/*"],
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled || result.assets.length === 0) {
+        return;
+      }
+      const asset = result.assets[0];
+      const file = {
+        mimeType: asset.mimeType ?? "application/pdf",
+        name: asset.name,
+        uri: asset.uri,
+      };
+      setPending(file);
+      setBusy(true);
+      setReportPreview(await api.previewGlucoseReport(file));
+    } catch (cause) {
+      setError(errorMessage(cause));
+      setPending(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmCsv() {
     if (pending === null) return;
     setBusy(true);
     setError(null);
@@ -88,6 +135,22 @@ export function GlucoseImportScreen({ api, onBack, onImported }: Props) {
       setBusy(false);
     }
   }
+
+  async function confirmPdf() {
+    if (reportPreview === null) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.createGlucoseReport(reportPreview);
+      onImported(1);
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const isCsv = mode === "csv";
 
   return (
     <ScrollView contentContainerStyle={styles.content}>
@@ -103,40 +166,85 @@ export function GlucoseImportScreen({ api, onBack, onImported }: Props) {
         <Text style={styles.title}>导入传感器数据</Text>
       </View>
 
+      <View style={styles.modeRow}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="导入 CSV 导出文件"
+          accessibilityState={{ selected: isCsv }}
+          onPress={() => {
+            setMode("csv");
+            reset();
+          }}
+          style={[styles.modeChip, isCsv ? styles.modeChipActive : null]}
+        >
+          <Text style={[styles.modeText, isCsv ? styles.modeTextActive : null]}>
+            CSV 导出文件
+          </Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="导入报告 PDF"
+          accessibilityState={{ selected: !isCsv }}
+          onPress={() => {
+            setMode("pdf");
+            reset();
+          }}
+          style={[styles.modeChip, !isCsv ? styles.modeChipActive : null]}
+        >
+          <Text style={[styles.modeText, !isCsv ? styles.modeTextActive : null]}>
+            报告 PDF
+          </Text>
+        </Pressable>
+      </View>
+
       <Text style={styles.lead}>
-        从厂家 App 导出 CSV，先核对能用的行与可疑行，确认后才存进档案。只支持 CSV，单次不超过 5 MB。
+        {isCsv
+          ? "从厂家 App 导出 CSV，先核对能用的行与可疑行，确认后才存进档案。只支持 CSV，单次不超过 5 MB。"
+          : "选医院给的「动态葡萄糖评估报告」PDF。先把读到的数字摆出来给你核对，确认了才存；读不到的项目会照实说，不会补 0。单次不超过 10 MB。"}
       </Text>
 
-      <Text style={styles.label}>数据来自</Text>
-      <View style={styles.chipRow}>
-        {SOURCES.map((option) => {
-          const active = option.value === source;
-          return (
-            <Pressable
-              key={option.value}
-              accessibilityRole="button"
-              accessibilityLabel={`数据来自${option.label}`}
-              accessibilityState={{ selected: active }}
-              onPress={() => setSource(option.value)}
-              style={[styles.chip, active ? styles.chipActive : null]}
-            >
-              <Text style={[styles.chipText, active ? styles.chipTextActive : null]}>
-                {option.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
+      {isCsv ? (
+        <>
+          <Text style={styles.label}>数据来自</Text>
+          <View style={styles.chipRow}>
+            {SOURCES.map((option) => {
+              const active = option.value === source;
+              return (
+                <Pressable
+                  key={option.value}
+                  accessibilityRole="button"
+                  accessibilityLabel={`数据来自${option.label}`}
+                  accessibilityState={{ selected: active }}
+                  onPress={() => setSource(option.value)}
+                  style={[styles.chip, active ? styles.chipActive : null]}
+                >
+                  <Text
+                    style={[styles.chipText, active ? styles.chipTextActive : null]}
+                  >
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </>
+      ) : null}
 
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="选择导出的 CSV 文件"
-        onPress={() => void pick()}
+        accessibilityLabel={isCsv ? "选择导出的 CSV 文件" : "选择报告 PDF"}
+        onPress={() => void (isCsv ? pickCsv() : pickPdf())}
         disabled={busy}
         style={[styles.primary, busy ? styles.disabled : null]}
       >
         <Text style={styles.primaryText}>
-          {preview === null ? "选择文件" : "换一个文件"}
+          {isCsv
+            ? preview === null
+              ? "选择文件"
+              : "换一个文件"
+            : reportPreview === null
+              ? "选择 PDF"
+              : "换一个 PDF"}
         </Text>
       </Pressable>
 
@@ -180,7 +288,7 @@ export function GlucoseImportScreen({ api, onBack, onImported }: Props) {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`确认导入 ${preview.usableRows} 行`}
-            onPress={() => void confirm()}
+            onPress={() => void confirmCsv()}
             disabled={busy || preview.usableRows === 0}
             style={[
               styles.primary,
@@ -196,8 +304,113 @@ export function GlucoseImportScreen({ api, onBack, onImported }: Props) {
           </Text>
         </>
       )}
+
+      {reportPreview === null ? null : (
+        <>
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>读到了这些</Text>
+            <Text style={styles.cardBody}>
+              {reportPeriodLine(reportPreview)}
+            </Text>
+            {reportMetaLine(reportPreview) === null ? null : (
+              <Text style={styles.cardBody}>{reportMetaLine(reportPreview)}</Text>
+            )}
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>报告上的数</Text>
+            {reportMetricLines(reportPreview).map((line) => (
+              <View key={line.label} style={styles.metricRow}>
+                <Text style={styles.metricLabel}>{line.label}</Text>
+                <Text style={styles.metricValue}>{line.value}</Text>
+              </View>
+            ))}
+            {reportPreview.missing.length === 0 ? null : (
+              <Text style={styles.missingLine}>
+                这几项没读到：{reportPreview.missing.join("、")}
+              </Text>
+            )}
+          </View>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="确认存进血糖记录"
+            onPress={() => void confirmPdf()}
+            disabled={busy}
+            style={[styles.primary, busy ? styles.disabled : null]}
+          >
+            <Text style={styles.primaryText}>确认存进血糖记录</Text>
+          </Pressable>
+          <Text style={styles.hint}>
+            存的是报告上的指标，不是逐点读数。之后在「血糖 · 传感器」里能看到这份速览，
+            原始图谱还是看你手机里那份 PDF。
+          </Text>
+        </>
+      )}
     </ScrollView>
   );
+}
+
+export function reportPeriodLine(preview: GlucoseReportPreview): string {
+  return `监测区间 ${shortDate(preview.periodStart)} 至 ${shortDate(preview.periodEnd)}`;
+}
+
+export function reportMetaLine(preview: GlucoseReportPreview): string | null {
+  const parts = [
+    preview.device,
+    preview.deviceSerial === "" ? "" : `序列号 ${preview.deviceSerial}`,
+    preview.reportGeneratedAt === null
+      ? ""
+      : `报告生成于 ${shortDate(preview.reportGeneratedAt)}`,
+  ].filter((part) => part.length > 0);
+  return parts.length === 0 ? null : parts.join(" · ");
+}
+
+function metricValue(value: number, unit: string): string {
+  return `${value} ${unit}`;
+}
+
+/** 只列报告上真有的项；没读到的不写，也不用 0 占位。 */
+export function reportMetricLines(
+  preview: GlucoseReportPreview,
+): { label: string; value: string }[] {
+  const lines: { label: string; value: string }[] = [];
+  if (preview.ehba1cPercent !== null) {
+    lines.push({
+      label: "预估糖化 HbA1c",
+      value: metricValue(preview.ehba1cPercent, "%"),
+    });
+  }
+  if (preview.meanMmol !== null) {
+    lines.push({ label: "平均", value: metricValue(preview.meanMmol, "mmol/L") });
+  }
+  if (preview.sdMmol !== null) {
+    lines.push({ label: "标准差", value: metricValue(preview.sdMmol, "mmol/L") });
+  }
+  if (preview.cvPercent !== null) {
+    lines.push({ label: "变异系数", value: metricValue(preview.cvPercent, "%") });
+  }
+  const bands: [string, number | null][] = [
+    ["正常", preview.normalPercent],
+    ["低", preview.lowPercent],
+    ["很低", preview.veryLowPercent],
+    ["高", preview.highPercent],
+    ["很高", preview.veryHighPercent],
+  ];
+  const printed = bands.filter((entry): entry is [string, number] => entry[1] !== null);
+  if (printed.length > 0) {
+    lines.push({
+      label: "分档",
+      value: printed.map(([label, value]) => `${label} ${value}%`).join(" · "),
+    });
+  }
+  return lines;
+}
+
+function shortDate(value: string): string {
+  // 后端给 2025-07-28 这种日期，只保留月-日，年份在同一份报告里重复四次没意义。
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  return match === null ? value : `${match[2]}-${match[3]}`;
 }
 
 const styles = StyleSheet.create({
@@ -206,6 +419,22 @@ const styles = StyleSheet.create({
   back: { paddingVertical: 6, paddingRight: 6 },
   backText: { fontSize: 14, color: "#20B894" },
   title: { fontSize: 20, fontWeight: "700", color: "#17302E" },
+  modeRow: {
+    flexDirection: "row",
+    backgroundColor: "#EDF5F3",
+    borderRadius: 999,
+    padding: 3,
+    gap: 3,
+  },
+  modeChip: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 999,
+    alignItems: "center",
+  },
+  modeChipActive: { backgroundColor: "#FFFFFF" },
+  modeText: { fontSize: 13, color: "#667875" },
+  modeTextActive: { color: "#17302E", fontWeight: "600" },
   lead: { fontSize: 13, lineHeight: 20, color: "#667875" },
   label: { fontSize: 12, color: "#667875", marginTop: 4 },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
@@ -242,6 +471,16 @@ const styles = StyleSheet.create({
   stat: { flex: 1, gap: 2 },
   statLabel: { fontSize: 11.5, color: "#91A19E" },
   statValue: { fontSize: 16, fontWeight: "600", color: "#17302E" },
+  metricRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#EDF5F3",
+  },
+  metricLabel: { fontSize: 13, color: "#475A57" },
+  metricValue: { fontSize: 13, fontWeight: "600", color: "#17302E" },
+  missingLine: { fontSize: 11.5, lineHeight: 17, color: "#8A5A12", marginTop: 6 },
   warnCard: {
     backgroundColor: "#FBF4E8",
     borderRadius: 16,

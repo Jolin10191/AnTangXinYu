@@ -285,6 +285,39 @@ SD 1.46、CV 23.27%、高 15.3% / 正常 84.5% / 低 0.2%。硬拆成读数就�
   要接「打开原文件」得先加一层关联。
 验证：后端 **554 passed**、ruff 干净；移动端 51 套 **311 用例**、`tsc` / lint 干净。
 
+### 2026-10-27 凌晨（五）：原报告打得开，报告 PDF 也能自己选
+
+两件事一起做，因为它们落在同一张表上。
+
+**原文件关联。** `glucose_reports.source_attachment_id`（迁移 `e9f1a2b3c4d5`，
+`ondelete="SET NULL"` 的外键）。模型不需要知道附件 id：工具运行时按
+`AgentRun.trigger_message_id` 反查那一轮用户消息挂的附件，**恰好一份 PDF** 才关联
+（两份以上分不清，就留空而不是猜）。于是「报告解读」存下来的速览，详情页会多一行
+「打开原报告」——`GET /chat/attachments/{id}/content` 拿字节 → 写缓存 → 系统分享面板，
+不在 App 内自己渲染 PDF。
+
+**导入页加 PDF 解析。** 患者从手机里直接选医院给的报告 PDF，不经过对话。
+解析放在服务端（`health_profile/report_parse.py`），用**模板正则**而不是大模型：
+20 份实测里模型读同一份会给出不同的分档，正则不会。踩到的三个细节：pypdf 抽出来的
+中文里混着**康熙部首**（`⾼ ⾎ ⻛`），必须 `unicodedata.normalize("NFKC", …)`；
+序列号被排版塞了空格（`L T2410FE3P`）要去空白；「低血糖风险」是四个并列标签，
+选中哪个只有图形位置标记，文字层拿不到 → 这条路**不猜风险档位**，留空。
+
+- 两个接口：`POST /health-profile/glucose-reports/preview`（multipart，≤10 MB，只收 .pdf，
+  **不落库**，返回读到的字段 + `missing` 名单）与 `POST /health-profile/glucose-reports`
+  （患者确认后才写库，百分比一律 `ge=0 le=100`）。
+- 导入页 `apps/mobile/src/glucose/GlucoseImportScreen.tsx` 顶部分成「CSV 导出文件」
+  /「报告 PDF」两路；PDF 那路先显示「读到了这些」和「报告上的数」，**没读到的项目
+  列成一句话**（「这几项没读到：高分档、很高分档」），不显示成 0；确认按钮写的是
+  「确认存进血糖记录」。
+- 依赖：镜像里的 venv 没有 pip（团队用 uv 装），`ensurepip` 在容器里也失败，所以
+  **把纯 Python 的 pypdf 直接放进 site-packages**（`deploy/vendor/pypdf`，
+  `Dockerfile.fast` 里一行 `COPY`）。`api/pyproject.toml` 同时声明 `pypdf>=6,<7`。
+- 顺手修掉一个定时炸弹：`tests/test_cgm_routes.py` 把 CSV 时间写死成 `2026-10-20`，
+  过了 7 天窗口就会在「某天早上」突然变红，改成按 `datetime.now(UTC) - 2h` 生成。
+验证：后端 **569 passed**、ruff / pyright 干净；移动端 52 套 **316 用例**、`tsc` / lint 干净。
+
+
 
 
 
