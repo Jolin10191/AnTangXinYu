@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -17,6 +18,10 @@ from datetime import date
 from io import BytesIO
 
 from pypdf import PdfReader
+
+# pypdf 遇到嵌入式 Type1 字体时会逐字警告（一条 PDF 能刷上百行），
+# 而我们的判断依据是「能不能读出来」，不是这些警告。
+logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 
 class UnreadableReport(Exception):
