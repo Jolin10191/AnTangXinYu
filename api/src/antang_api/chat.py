@@ -87,7 +87,11 @@ from antang_api.psychosocial import read_latest_assessment, render_guidance
 from antang_api.psychosocial.hypo_review import render_hypo_review_prompt
 from antang_api.behavioral import read_fear_summary, render_behavior_context
 from antang_api.settings import settings
-from antang_api.tools.glucose import RECORD_GLUCOSE_REPORT_TOOL_NAME, RECORD_GLUCOSE_TOOL_NAME
+from antang_api.tools.glucose import (
+    DELETE_GLUCOSE_REPORT_TOOL_NAME,
+    RECORD_GLUCOSE_REPORT_TOOL_NAME,
+    RECORD_GLUCOSE_TOOL_NAME,
+)
 from antang_api.tools.records import (
     RECORD_MEAL_TOOL_NAME,
     RECORD_MEDICATION_TOOL_NAME,
@@ -142,6 +146,7 @@ TOOL_ACTIVITY_PHASES: dict[str, ActivityPhase] = {
     "record_medication": "organizing",
     RECORD_GLUCOSE_TOOL_NAME: "organizing",
     RECORD_GLUCOSE_REPORT_TOOL_NAME: "organizing",
+    DELETE_GLUCOSE_REPORT_TOOL_NAME: "organizing",
 }
 
 

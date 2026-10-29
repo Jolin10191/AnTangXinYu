@@ -332,11 +332,13 @@ async def test_web_fetch_rejects_failed_or_non_http_result() -> None:
     _, fetch_tool = build_tools(client)
 
     # 网页读不出来是网站的常态，不是内部错误：交回一句话，别让整条回复失败。
-    content, artifact = await tool_coroutine(fetch_tool)(
+    result = await tool_coroutine(fetch_tool)(
         url="https://example.com",
         query="测试",
         runtime=fetch_runtime(url="https://example.com"),
     )
+    assert isinstance(result, tuple)
+    content, artifact = result
 
     assert "打不开" in content["content"]
     assert artifact is not None

@@ -26,10 +26,11 @@ from antang_api.health_profile.glucose import (
     measured_time_label,
     record_glucose_reading,
     record_glucose_report as save_glucose_report,
+    delete_glucose_report as drop_glucose_report,
     summarize_glucose,
     to_mmol,
 )
-from antang_api.models import AgentRun, MessageAttachment
+from antang_api.models import AgentRun, GlucoseReport, Message, MessageAttachment, MessageRole
 from antang_api.health_profile.report_parse import (
     ParsedReport,
     UnreadableReport,
@@ -50,6 +51,7 @@ Recheck = Callable[[MessageAttachment], Awaitable[dict[str, object]]]
 READ_GLUCOSE_TOOL_NAME = "read_glucose_readings"
 RECORD_GLUCOSE_TOOL_NAME = "record_glucose_readings"
 RECORD_GLUCOSE_REPORT_TOOL_NAME = "record_glucose_report"
+DELETE_GLUCOSE_REPORT_TOOL_NAME = "delete_glucose_report"
 
 # 患者发来的报告里能读出的一条读数：化验单一般几个点，CGM 报告最多一天几十个点。
 MAX_REPORT_READINGS = 120
@@ -719,3 +721,126 @@ def build_glucose_report_tool(
         }
 
     return record_glucose_report
+
+
+def _squash(text: str) -> str:
+    return "".join(text.split())
+
+
+async def _patient_agreed(
+    session: AsyncSession,
+    runtime: ToolRuntime[AgentContext],
+    consent_quote: str,
+) -> bool:
+    """患者这一轮真的说了这句话，才算同意删。
+
+    删记录是不可逆的写操作，所以「同意」不能由模型自述：`consent_quote` 必须是这一轮
+    患者原话的一部分（去空白后比对）。模型要是自己编一句「好，删吧」，这里对不上。
+    """
+
+    quote = _squash(consent_quote)
+    if not quote:
+        return False
+    run = await session.get(AgentRun, runtime.context.run_id)
+    if run is None or run.trigger_message_id is None:
+        return False
+    message = await session.get(Message, run.trigger_message_id)
+    if message is None or message.role != MessageRole.USER:
+        return False
+    return quote in _squash(message.content or "")
+
+
+def build_glucose_report_delete_tool(
+    sessions: async_sessionmaker[AsyncSession] = default_session_factory,
+) -> BaseTool:
+    """创建「患者同意后删掉一份报告速览」的工具。"""
+
+    @tool(DELETE_GLUCOSE_REPORT_TOOL_NAME)
+    async def delete_glucose_report(
+        runtime: ToolRuntime[AgentContext],
+        period_start: Annotated[
+            str,
+            Field(description="要删的报告的监测开始日，ISO 日期，例如 2025-07-28。"),
+        ],
+        period_end: Annotated[
+            str,
+            Field(description="要删的报告的监测结束日，ISO 日期，例如 2025-07-31。"),
+        ],
+        consent_quote: Annotated[
+            str,
+            Field(
+                description=(
+                    "患者这一轮表示同意删除的原话，逐字复制（例如「别人的，删了吧」）。"
+                    "必须是患者自己说要删，不能是你替他说的。"
+                )
+            ),
+        ],
+    ) -> dict[str, object]:
+        """删掉之前存进记录的一份报告速览。
+
+        用之前必须先问一次：「要删掉 07-28 至 07-31 那份报告吗？」——患者明确说要删，
+        才把区间和他的原话一起传进来。患者没说话、只是说「这份是别人的」但没有说删，
+        就不要调，先问一句。
+        不能替患者决定删哪一份：区间要和他说的那份对得上。删完说一句「删了」，不要报 id。
+        删掉的只是我们替他存的摘要；他当时发进对话的那条消息和文件还在聊天里。
+        """
+
+        async with sessions() as session:
+            if not await _patient_agreed(session, runtime, consent_quote):
+                raise ValueError(
+                    "删记录得患者自己点头：先问一句「要删掉这份报告吗？」，"
+                    "等他说了要删，再把他的原话放进 consent_quote 调一次。"
+                )
+
+            start = _date_field(period_start, "监测开始日")
+            end = _date_field(period_end, "监测结束日")
+            if start is None or end is None:
+                raise ValueError(
+                    "要删哪一份得写清区间：把报告的开始日和结束日写成 2025-07-28 这种格式。"
+                )
+
+            found = await session.scalar(
+                select(GlucoseReport)
+                .where(
+                    GlucoseReport.user_id == runtime.context.user_id,
+                    GlucoseReport.period_start == start,
+                    GlucoseReport.period_end == end,
+                )
+                .limit(1)
+            )
+            if found is None:
+                raise ValueError(
+                    f"记录里没有 {start.isoformat()} 至 {end.isoformat()} 这份报告。"
+                    "先问清是哪一份（哪段时间的、哪台设备的），别删错。"
+                )
+
+            attachment = (
+                await session.get(MessageAttachment, found.source_attachment_id)
+                if found.source_attachment_id is not None
+                else None
+            )
+            # 从导入页传进来的文件没挂在任何聊天消息上，删了就真没了；
+            # 聊天里发的那份要留着——那是患者自己说的话，不能替他抹掉。
+            orphan_attachment = (
+                attachment
+                if attachment is not None and attachment.message_id is None
+                else None
+            )
+
+            removed = await drop_glucose_report(
+                session, user_id=runtime.context.user_id, report_id=found.id
+            )
+            if not removed:
+                raise ValueError("这份报告没删成功，让患者自己去记录页删一下试试。")
+            if orphan_attachment is not None:
+                await session.delete(orphan_attachment)
+            await session.commit()
+
+        return {
+            "deleted": True,
+            "period": f"{start.isoformat()}~{end.isoformat()}",
+            "file_removed": orphan_attachment is not None,
+        }
+
+    return delete_glucose_report
+
