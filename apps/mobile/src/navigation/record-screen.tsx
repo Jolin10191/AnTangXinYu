@@ -316,7 +316,10 @@ export function trendSeries(
   return readings
     .filter((reading) => reading.revokedAt === null)
     .map((reading) => ({
-      reported: reading.source === "report",
+      // 空心 = 报告 / 导入进来的数字；实心 = 自己量的。判据和下面「手动 / 传感器」
+      // 两个子栏完全一致（`manualReadings` 排除的正是这两类），否则同一份数据在
+      // 列表里算「手动」、在图里算「报告」，患者会觉得哪里不对。
+      reported: reading.source === "report" || reading.source === "cgm",
       time: new Date(reading.measuredAt).getTime(),
       value: reading.valueMgDl / 18,
     }))

@@ -406,6 +406,12 @@ describe("glucose trend series", () => {
         },
         {
           ...READING,
+          id: "imported",
+          measuredAt: "2026-10-29T06:00:00+08:00",
+          source: "cgm",
+        },
+        {
+          ...READING,
           id: "revoked",
           measuredAt: "2026-10-27T09:00:00+08:00",
           revokedAt: "2026-10-27T10:00:00+08:00",
@@ -414,7 +420,8 @@ describe("glucose trend series", () => {
       now,
     );
 
-    expect(series.map((point) => point.reported)).toEqual([true, false]);
+    // 报告和导入的读数都算「报告里记下的」，和「手动 / 传感器」两个子栏的划分一致。
+    expect(series.map((point) => point.reported)).toEqual([true, true, false]);
     expect(series[0].value).toBeCloseTo(5.5, 1);
   });
 });
