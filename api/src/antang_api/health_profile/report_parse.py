@@ -62,6 +62,43 @@ class ParsedReport:
         }
 
 
+_FACT_FIELDS: tuple[tuple[str, str, str], ...] = (
+    ("mean_mmol", "平均葡萄糖", "mmol/L"),
+    ("sd_mmol", "标准差", "mmol/L"),
+    ("cv_percent", "变异系数", "%"),
+    ("ehba1c_percent", "预估糖化", "%"),
+    ("normal_percent", "正常档", "%"),
+    ("low_percent", "偏低档", "%"),
+    ("very_low_percent", "很低档", "%"),
+    ("high_percent", "偏高档", "%"),
+    ("very_high_percent", "很高档", "%"),
+)
+
+
+def render_parsed_facts(parsed: ParsedReport) -> str:
+    """把模板解析出来的字段写成给模型看的「既成事实」。
+
+    模型看到这段就不必自己去数一遍：数字是程序从文件里读的，比看图稳。
+    """
+
+    lines = [
+        f"监测区间 {parsed.period_start.isoformat()} 至 {parsed.period_end.isoformat()}",
+    ]
+    if parsed.device:
+        serial = f"（{parsed.device_serial}）" if parsed.device_serial else ""
+        lines.append(f"设备 {parsed.device}{serial}")
+    if parsed.generated_at is not None:
+        lines.append(f"报告生成于 {parsed.generated_at.isoformat()}")
+    if parsed.hospital:
+        lines.append(f"出具单位 {parsed.hospital}")
+    for field_name, label, unit in _FACT_FIELDS:
+        value: float | None = getattr(parsed, field_name)
+        if value is None:
+            continue
+        lines.append(f"{label} {value:g}{unit}")
+    return "；".join(lines)
+
+
 _DATE = r"(\d{4})\s*[/\-年]\s*(\d{1,2})\s*[/\-月]\s*(\d{1,2})"
 _PERIOD = re.compile(rf"监测时间\s*[:：]?\s*{_DATE}\s*-{_DATE}")
 _GENERATED = re.compile(rf"报告生成时间\s*[:：]?\s*{_DATE}")

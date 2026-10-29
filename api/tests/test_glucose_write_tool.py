@@ -35,8 +35,14 @@ from antang_api.models import (
 from antang_api.tools.glucose import (
     RECORD_GLUCOSE_REPORT_TOOL_NAME,
     RECORD_GLUCOSE_TOOL_NAME,
+    Recheck,
     build_glucose_report_tool,
     build_glucose_write_tool,
+)
+from antang_api.health_profile.report_parse import ParsedReport
+from antang_api.health_profile.report_verify import (
+    UnreadableScreenshot,
+    compare_reads,
 )
 
 
@@ -311,11 +317,24 @@ async def test_the_agent_loop_can_write_a_report(db_session: AsyncSession) -> No
     assert rows[0].source == "cgm"
 
 
-def _report_tool(session: AsyncSession) -> Callable[..., Awaitable[dict[str, object]]]:
+async def _no_second_read(_attachment: MessageAttachment) -> dict[str, object]:
+    """默认的第二遍读数：这些用例里不该被调用（没有附件，或附件是模板认得的 PDF）。"""
+
+    raise AssertionError("这条用例不该走第二遍读数")
+
+
+def _report_tool(
+    session: AsyncSession,
+    *,
+    recheck: Recheck | None = None,
+) -> Callable[..., Awaitable[dict[str, object]]]:
     def sessions() -> _KeepOpen:
         return _KeepOpen(session)
 
-    tool = build_glucose_report_tool(sessions=cast(Any, sessions))
+    tool = build_glucose_report_tool(
+        sessions=cast(Any, sessions),
+        recheck=recheck or _no_second_read,
+    )
     assert isinstance(tool, StructuredTool)
     assert tool.coroutine is not None
     return cast("Callable[..., Awaitable[dict[str, object]]]", tool.coroutine)
@@ -502,6 +521,14 @@ async def test_the_report_remembers_which_pdf_it_came_from(
 ) -> None:
     """患者发的那份 PDF 要记下来：详情页的「打开原报告」靠这一列才有得开。"""
 
+    async def agreeing(_attachment: MessageAttachment) -> dict[str, object]:
+        return {
+            "period_start": "2024-05-30",
+            "period_end": "2024-06-11",
+            "mean_mmol": 6.29,
+            "tir_percent": 84.5,
+        }
+
     user = await _create_user(db_session, "glucose_source")
     attachment = MessageAttachment(
         user_id=user.id,
@@ -522,7 +549,7 @@ async def test_the_report_remembers_which_pdf_it_came_from(
     )
     await db_session.commit()
 
-    result = await _report_tool(db_session)(
+    result = await _report_tool(db_session, recheck=agreeing)(
         period_start="2024-05-30",
         period_end="2024-06-11",
         mean_mmol=6.29,
@@ -555,4 +582,171 @@ async def test_a_report_typed_in_by_hand_has_no_source_file(
 
     reports = await list_glucose_reports(db_session, user_id=user.id)
     assert [report.source_attachment_id for report in reports] == [None]
+
+
+async def _screenshot_run(
+    session: AsyncSession,
+    prefix: str,
+    *,
+    mime_type: str = "image/jpeg",
+) -> tuple[User, MessageAttachment, UUID]:
+    user = await _create_user(session, prefix)
+    attachment = MessageAttachment(
+        user_id=user.id,
+        kind=MessageAttachmentKind.REPORT,
+        filename="report.jpg",
+        mime_type=mime_type,
+        size_bytes=8,
+        data=b"\xff\xd8\xff\xe0",
+    )
+    session.add(attachment)
+    await session.flush()
+    prepared_run = await prepare_chat_run(
+        session,
+        user.id,
+        uuid4(),
+        "帮我看看这张报告",
+        attachment_id=attachment.id,
+    )
+    await session.commit()
+    return user, attachment, prepared_run.run_id
+
+
+_PARSED = ParsedReport(
+    period_start=date(2025, 7, 28),
+    period_end=date(2025, 7, 31),
+    generated_at=date(2025, 7, 31),
+    device="硅基动感Pro",
+    device_serial="LT2410FE3P",
+    hospital="示例医院",
+    mean_mmol=5.81,
+    sd_mmol=0.9,
+    cv_percent=15.53,
+    ehba1c_percent=5.34,
+    normal_percent=99.6,
+    low_percent=0.4,
+)
+
+
+async def test_the_pdf_template_wins_over_what_the_model_read(
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: AsyncSession,
+) -> None:
+    """模板认得的报告，存哪几个数由程序决定，模型读的那遍不参与。"""
+
+    monkeypatch.setattr(
+        "antang_api.tools.glucose.parse_report_pdf", lambda _data: _PARSED
+    )
+    user, attachment, run_id = await _screenshot_run(
+        db_session, "glucose_template", mime_type="application/pdf"
+    )
+
+    result = await _report_tool(db_session)(
+        # 模型读的是另一组数（连区间都不一样），不该被采用。
+        period_start="2024-05-30",
+        period_end="2024-06-11",
+        mean_mmol=6.29,
+        tir_percent=84.5,
+        runtime=_runtime_of(user.id, run_id),
+    )
+
+    assert result["verified"] == "pdf-template"
+    reports = await list_glucose_reports(db_session, user_id=user.id)
+    assert len(reports) == 1
+    kept = reports[0]
+    assert kept.period_start == date(2025, 7, 28)
+    assert kept.period_end == date(2025, 7, 31)
+    assert float(cast(Any, kept.mean_mmol)) == 5.81
+    assert float(cast(Any, kept.normal_percent)) == 99.6
+    # 三档由五档相加得出（系统算，不靠模型），所以 TIR 跟着 normal 走；
+    # 「低血糖风险」这类文字层看不出选中项的东西一律留空。
+    assert float(cast(Any, kept.tir_percent)) == 99.6
+    assert kept.lbgi_level == ""
+    assert kept.source_attachment_id == attachment.id
+
+
+async def test_a_screenshot_read_the_same_way_twice_is_kept(
+    db_session: AsyncSession,
+) -> None:
+    """截图没有文字层：模型读一遍、服务端再读一遍，两遍一致才存。"""
+
+    async def agreeing(_attachment: MessageAttachment) -> dict[str, object]:
+        return {
+            "period_start": "2025-07-28",
+            "period_end": "2025-07-31",
+            "device": "硅基动感Pro",
+            "mean_mmol": 5.81,
+            "tir_percent": 99.6,
+        }
+
+    user, _attachment, run_id = await _screenshot_run(db_session, "glucose_agree")
+
+    result = await _report_tool(db_session, recheck=agreeing)(
+        period_start="2025-07-28",
+        period_end="2025-07-31",
+        device="硅基动感Pro",
+        mean_mmol=5.81,
+        tir_percent=99.6,
+        runtime=_runtime_of(user.id, run_id),
+    )
+
+    assert result["verified"] == "cross-checked"
+    reports = await list_glucose_reports(db_session, user_id=user.id)
+    assert [float(cast(Any, report.mean_mmol)) for report in reports] == [5.81]
+
+
+async def test_a_screenshot_that_reads_differently_is_not_kept(
+    db_session: AsyncSession,
+) -> None:
+    """两遍读出来的数不一样，宁可这条不存——记录里不能有错的数。"""
+
+    async def disagreeing(_attachment: MessageAttachment) -> dict[str, object]:
+        return {
+            "period_start": "2025-07-28",
+            "period_end": "2025-07-31",
+            "mean_mmol": 5.18,
+        }
+
+    user, _attachment, run_id = await _screenshot_run(db_session, "glucose_disagree")
+
+    with pytest.raises(ValueError, match="读了两遍"):
+        await _report_tool(db_session, recheck=disagreeing)(
+            period_start="2025-07-28",
+            period_end="2025-07-31",
+            mean_mmol=5.81,
+            runtime=_runtime_of(user.id, run_id),
+        )
+
+    assert await list_glucose_reports(db_session, user_id=user.id) == []
+
+
+async def test_a_screenshot_that_cannot_be_read_twice_is_not_kept(
+    db_session: AsyncSession,
+) -> None:
+    async def broken(_attachment: MessageAttachment) -> dict[str, object]:
+        raise UnreadableScreenshot("第二遍没读到")
+
+    user, _attachment, run_id = await _screenshot_run(db_session, "glucose_unreadable")
+
+    with pytest.raises(ValueError, match="没读准"):
+        await _report_tool(db_session, recheck=broken)(
+            period_start="2025-07-28",
+            period_end="2025-07-31",
+            mean_mmol=5.81,
+            runtime=_runtime_of(user.id, run_id),
+        )
+
+    assert await list_glucose_reports(db_session, user_id=user.id) == []
+
+
+def test_two_reads_only_disagree_about_what_the_first_one_claimed() -> None:
+    first = {"mean_mmol": 5.81, "device": "硅基动感Pro", "tir_percent": None}
+    assert compare_reads(first, {"mean_mmol": 5.82, "device": "硅基动感Pro"}) == []
+    mismatched = compare_reads(first, {"mean_mmol": 5.81, "device": "雅培"})
+    assert [item.field_name for item in mismatched] == ["device"]
+    # 第二遍没读出来的项也算对不上：只有一遍支持的数字不写进记录。
+    assert [item.field_name for item in compare_reads(first, {})] == [
+        "device",
+        "mean_mmol",
+    ]
 

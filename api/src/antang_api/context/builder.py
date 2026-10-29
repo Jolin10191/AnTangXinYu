@@ -46,6 +46,36 @@ PDF_TEXT_LAYER_NOTICE = (
     "表格、曲线和版式不在其中；需要看图时请让患者把那一页发成截图。】"
 )
 
+# 图表型报告（CGM 评估报告那种）文字层很薄，整份 base64 又贵又容易读歪，
+# 而模板解析恰好只认这类报告——那就把解析结果当既成事实给模型。
+REPORT_FACTS_NOTICE = (
+    "【这份 PDF 已经按报告模板解析过，下面的数字是程序从文件里读出来的，不是猜的。】"
+)
+REPORT_FACTS_TAIL = (
+    "要记这份报告时直接调用记录工具，存下来的以这些数字为准：不要再自己读一遍，"
+    "也不要改动这些数字。曲线和版式不在其中，患者要看图就请他把那一页发成截图。"
+)
+
+
+def _report_facts_part(attachment: MessageAttachment) -> dict[str, object] | None:
+    """报告模板认得出来时，把字段拼成文本块；认不出来返回 None。"""
+
+    from antang_api.health_profile.report_parse import (
+        UnreadableReport,
+        parse_report_pdf,
+        render_parsed_facts,
+    )
+
+    try:
+        parsed = parse_report_pdf(attachment.data)
+    except UnreadableReport:
+        return None
+    facts = render_parsed_facts(parsed)
+    return {
+        "type": "text",
+        "text": f"{REPORT_FACTS_NOTICE}{facts}。{REPORT_FACTS_TAIL}",
+    }
+
 
 def _pdf_text_part(attachment: MessageAttachment) -> dict[str, object] | None:
     """把 PDF 的文字层抽成文本块；抽不动或文字太少就返回 None。"""
@@ -90,6 +120,8 @@ def to_model_message(
                 if attachment.mime_type == "application/pdf":
                     # 先试文字层：读得动就不必把整份 PDF 编码进请求。
                     part = _pdf_text_part(attachment)
+                    if part is None:
+                        part = _report_facts_part(attachment)
                 if part is None:
                     encoded = base64.b64encode(attachment.data).decode("ascii")
                     if attachment.mime_type == "application/pdf":

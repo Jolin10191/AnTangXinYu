@@ -220,6 +220,52 @@ async def test_a_chart_heavy_pdf_still_goes_in_whole(
     assert first["file"]["filename"] == "指南.pdf"
 
 
+async def test_a_chart_heavy_report_goes_in_as_parsed_facts(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """模板认得的报告直接把解析结果当事实给模型：别让它自己去数图上的数字。"""
+
+    from datetime import date
+
+    from antang_api.health_profile.report_parse import ParsedReport
+
+    parsed = ParsedReport(
+        period_start=date(2025, 7, 28),
+        period_end=date(2025, 7, 31),
+        generated_at=date(2025, 7, 31),
+        device="硅基动感Pro",
+        device_serial="LT2410FE3P",
+        hospital="示例医院",
+        mean_mmol=5.81,
+        normal_percent=99.6,
+        low_percent=0.4,
+    )
+    monkeypatch.setattr(
+        "antang_api.health_profile.report_parse.extract_pdf_text",
+        lambda _data: "监测时间:2025/07/28-2025/07/31",
+    )
+    monkeypatch.setattr(
+        "antang_api.health_profile.report_parse.parse_report_pdf",
+        lambda _data: parsed,
+    )
+    user, message = await _pdf_message(db_session, b"%PDF-1.4 fake")
+
+    context = await build_chat_context(db_session, user.id, message.id)
+
+    content = context.messages[-1].content
+    assert isinstance(content, list)
+    first = content[0]
+    assert isinstance(first, dict)
+    assert first["type"] == "text"
+    text = first["text"]
+    assert isinstance(text, str)
+    assert "按报告模板解析" in text
+    assert "平均葡萄糖 5.81mmol/L" in text
+    assert "正常档 99.6%" in text
+    assert "base64" not in text
+
+
 async def test_a_pdf_without_a_text_layer_still_goes_in_whole(
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,

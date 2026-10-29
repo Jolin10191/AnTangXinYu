@@ -168,7 +168,8 @@ class GlucoseReport(Base):
     device_serial: Mapped[str] = mapped_column(String(32), server_default=text("''"))
     report_generated_at: Mapped[date | None] = mapped_column(Date, default=None)
     # 指标一律可空：报告里没写的那一项就空着，不猜、不补默认值。
-    mean_mmol: Mapped[float | None] = mapped_column(Numeric(4, 1), default=None)
+    # 均值按两位小数存：报告上印的就是 5.81，只留一位会把它抹成 5.8。
+    mean_mmol: Mapped[float | None] = mapped_column(Numeric(4, 2), default=None)
     sd_mmol: Mapped[float | None] = mapped_column(Numeric(4, 2), default=None)
     cv_percent: Mapped[float | None] = mapped_column(Numeric(5, 2), default=None)
     ehba1c_percent: Mapped[float | None] = mapped_column(Numeric(4, 2), default=None)

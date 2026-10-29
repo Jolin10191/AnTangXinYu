@@ -6,6 +6,8 @@
 """
 
 from datetime import UTC, date, datetime, timedelta
+import logging
+from collections.abc import Awaitable, Callable
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -27,6 +29,21 @@ from antang_api.health_profile.glucose import (
     to_mmol,
 )
 from antang_api.models import AgentRun, MessageAttachment
+from antang_api.health_profile.report_parse import (
+    ParsedReport,
+    UnreadableReport,
+    parse_report_pdf,
+)
+from antang_api.health_profile.report_verify import (
+    UnreadableScreenshot,
+    compare_reads,
+    read_report_again,
+)
+
+logger = logging.getLogger(__name__)
+
+# 第二遍读数：把附件再读一次，返回字段字典（键名和工具参数一致）。
+Recheck = Callable[[MessageAttachment], Awaitable[dict[str, object]]]
 
 READ_GLUCOSE_TOOL_NAME = "read_glucose_readings"
 RECORD_GLUCOSE_TOOL_NAME = "record_glucose_readings"
@@ -174,6 +191,18 @@ async def _report_attachment_id(
     只在「恰好一份」时认：一条消息里挂了两份 PDF，谁是谁说不清，宁可不指。
     """
 
+    attachment = await _run_report_attachment(session, run_id)
+    return attachment.id if attachment is not None else None
+
+
+async def _run_report_attachment(
+    session: AsyncSession, run_id: UUID
+) -> MessageAttachment | None:
+    """这一轮用户消息里挂着的那份报告（PDF 或截图）。
+
+    同样只在「恰好一份」时认：两份一起发过来，谁对应哪段数字说不清，就不猜。
+    """
+
     trigger = await session.scalar(
         select(AgentRun.trigger_message_id).where(AgentRun.id == run_id)
     )
@@ -181,13 +210,75 @@ async def _report_attachment_id(
         return None
     found = (
         await session.scalars(
-            select(MessageAttachment.id).where(
+            select(MessageAttachment)
+            .where(
                 MessageAttachment.message_id == trigger,
-                MessageAttachment.mime_type == "application/pdf",
+                MessageAttachment.mime_type.in_(
+                    ("application/pdf", "image/jpeg", "image/png")
+                ),
             )
+            .order_by(MessageAttachment.id)
         )
     ).all()
     return found[0] if len(found) == 1 else None
+
+
+def _parsed_fields(parsed: ParsedReport) -> dict[str, object]:
+    """模板解析出来的字段，键名和工具参数一致，后面按同一套规则校验。"""
+
+    return {
+        "period_start": parsed.period_start,
+        "period_end": parsed.period_end,
+        "report_generated_at": parsed.generated_at,
+        "device": parsed.device,
+        "device_serial": parsed.device_serial,
+        "mean_mmol": parsed.mean_mmol,
+        "sd_mmol": parsed.sd_mmol,
+        "cv_percent": parsed.cv_percent,
+        "ehba1c_percent": parsed.ehba1c_percent,
+        # 这类报告只按五档印占比，TIR/TAR/TBR 不单独出现：不拿五档拼三档。
+        "tir_percent": None,
+        "tar_percent": None,
+        "tbr_percent": None,
+        "normal_percent": parsed.normal_percent,
+        "low_percent": parsed.low_percent,
+        "very_low_percent": parsed.very_low_percent,
+        "high_percent": parsed.high_percent,
+        "very_high_percent": parsed.very_high_percent,
+        # 「低血糖风险」是四个并列标签，选中哪个只靠图形位置，文字层读不出来。
+        "lbgi_level": "",
+    }
+
+
+def _date_field(raw: object, label: str) -> date | None:
+    if raw is None:
+        return None
+    if isinstance(raw, date) and not isinstance(raw, datetime):
+        return raw
+    text = str(raw).strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text)
+    except ValueError as error:
+        raise ValueError(
+            f"{label}要写成 2024-05-30 这种格式：先问清监测的起止日期，再存这份报告。"
+        ) from error
+
+
+def _float_field(raw: object) -> float | None:
+    if isinstance(raw, bool) or raw is None:
+        return None
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    text = str(raw).strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
 
 
 def build_glucose_write_tool(
@@ -300,11 +391,16 @@ def build_glucose_write_tool(
 
 def build_glucose_report_tool(
     sessions: async_sessionmaker[AsyncSession] = default_session_factory,
+    *,
+    recheck: Recheck = read_report_again,
 ) -> BaseTool:
     """创建把「一份报告说了什么」存进记录的工具。
 
     报告常常只有 AGP 图谱和汇总指标（均值、SD、CV、TIR/TAR/TBR、eHbA1c），没有
     逐点读数。硬拆成读数会变成一堆编出来的时间点，所以这一条只存指标本身。
+
+    `recheck` 是截图那条路的第二次读数：模板解析认不出的文件，要让服务端自己再读
+    一遍和模型对账，两遍对上才存。
     """
 
     @tool(RECORD_GLUCOSE_REPORT_TOOL_NAME)
@@ -415,78 +511,130 @@ def build_glucose_report_tool(
         存完告诉患者「这份报告我记在血糖记录里了」。
         """
 
-        try:
-            start = date.fromisoformat(period_start)
-            end = date.fromisoformat(period_end)
-        except ValueError as error:
-            raise ValueError(
-                "日期要写成 2024-05-30 这种格式：先问清监测的起止日期，再存这份报告。"
-            ) from error
-        if end < start:
-            raise ValueError(
-                "监测区间的结束日不能早于开始日。先跟患者确认这两个日期，再存。"
-            )
-        if end > datetime.now(UTC).date() + timedelta(days=1):
-            raise ValueError(
-                "结束日在将来，这份报告的时间还没到。先问清是哪一段时间的报告。"
-            )
-        generated: date | None = None
-        if report_generated_at:
-            try:
-                generated = date.fromisoformat(report_generated_at)
-            except ValueError as error:
-                raise ValueError(
-                    "报告生成日期要写成 2025-07-31 这种格式；读不准就留空。"
-                ) from error
-            if generated > datetime.now(UTC).date() + timedelta(days=1):
-                raise ValueError("报告生成日期在将来，先跟患者核对一遍。")
-        metrics = [
-            mean_mmol,
-            sd_mmol,
-            cv_percent,
-            ehba1c_percent,
-            tir_percent,
-            tar_percent,
-            tbr_percent,
-            normal_percent,
-            low_percent,
-            very_low_percent,
-            high_percent,
-            very_high_percent,
-        ]
-        if all(value is None for value in metrics):
-            raise ValueError(
-                "一个指标都没给：至少要读出一个（平均值、TIR、eHbA1c 都可以）。"
-                "读不清就跟患者说你没读清，不要存空壳。"
-            )
-
         async with sessions() as session:
+            # 数字从哪来，决定了能不能信：
+            # 1) 报告 PDF 且模板解析成功 → 用程序读出来的，模型给的一律不看；
+            # 2) 截图/认不出的 PDF → 模型读一遍、服务端再独立读一遍，逐项对上才存；
+            # 3) 患者自己念的数字（没有附件）→ 按他说的存。
+            attachment = await _run_report_attachment(session, runtime.context.run_id)
+            parsed: ParsedReport | None = None
+            if attachment is not None and attachment.mime_type == "application/pdf":
+                try:
+                    parsed = parse_report_pdf(attachment.data)
+                except UnreadableReport:
+                    parsed = None
+
+            if parsed is not None:
+                fields = _parsed_fields(parsed)
+                verified = "pdf-template"
+                source_note = "报告上的数字是按原始 PDF 的模板读出来的，不是模型猜的。"
+            else:
+                fields = {
+                    "period_start": period_start,
+                    "period_end": period_end,
+                    "report_generated_at": report_generated_at,
+                    "device": device,
+                    "device_serial": device_serial,
+                    "mean_mmol": mean_mmol,
+                    "sd_mmol": sd_mmol,
+                    "cv_percent": cv_percent,
+                    "ehba1c_percent": ehba1c_percent,
+                    "tir_percent": tir_percent,
+                    "tar_percent": tar_percent,
+                    "tbr_percent": tbr_percent,
+                    "normal_percent": normal_percent,
+                    "low_percent": low_percent,
+                    "very_low_percent": very_low_percent,
+                    "high_percent": high_percent,
+                    "very_high_percent": very_high_percent,
+                    "lbgi_level": lbgi_level,
+                }
+                verified = "typed"
+                source_note = ""
+                if attachment is not None:
+                    try:
+                        second = await recheck(attachment)
+                    except UnreadableScreenshot as error:
+                        raise ValueError(
+                            "这张报告我没读准。为了不把错的数字记进你的记录，这条先"
+                            "不存：麻烦把原始 PDF 发我（记录页 → 血糖 → 传感器 → "
+                            "导入报告 PDF），或者你自己手动记一条。"
+                        ) from error
+                    mismatches = compare_reads(fields, second)
+                    if mismatches:
+                        logger.warning(
+                            "报告截图两遍读数对不上（run=%s，字段=%s）",
+                            runtime.context.run_id,
+                            [item.field_name for item in mismatches],
+                        )
+                        raise ValueError(
+                            "这张截图我读了两遍，两遍对不上（"
+                            + "、".join(item.label for item in mismatches[:3])
+                            + "）。为了不把错的数字记进你的记录，这条先不存："
+                            "麻烦把原始 PDF 发我（记录页 → 血糖 → 传感器 → 导入报告 PDF），"
+                            "或者你自己手动记一条。"
+                        )
+                    verified = "cross-checked"
+                    source_note = "截图我读了两遍，两遍一致才存。"
+
+            start = _date_field(fields["period_start"], "监测开始日")
+            end = _date_field(fields["period_end"], "监测结束日")
+            if start is None or end is None:
+                raise ValueError(
+                    "日期要写成 2024-05-30 这种格式：先问清监测的起止日期，再存这份报告。"
+                )
+            if end < start:
+                raise ValueError(
+                    "监测区间的结束日不能早于开始日。先跟患者确认这两个日期，再存。"
+                )
+            if end > datetime.now(UTC).date() + timedelta(days=1):
+                raise ValueError(
+                    "结束日在将来，这份报告的时间还没到。先问清是哪一段时间的报告。"
+                )
+            generated = _date_field(
+                fields["report_generated_at"], "报告生成日期"
+            )
+            if generated is not None and generated > datetime.now(UTC).date() + timedelta(
+                days=1
+            ):
+                raise ValueError("报告生成日期在将来，先跟患者核对一遍。")
+
+            numbers = {
+                key: _float_field(fields[key])
+                for key in (
+                    "mean_mmol",
+                    "sd_mmol",
+                    "cv_percent",
+                    "ehba1c_percent",
+                    "tir_percent",
+                    "tar_percent",
+                    "tbr_percent",
+                    "normal_percent",
+                    "low_percent",
+                    "very_low_percent",
+                    "high_percent",
+                    "very_high_percent",
+                )
+            }
+            if all(value is None for value in numbers.values()):
+                raise ValueError(
+                    "一个指标都没给：至少要读出一个（平均值、TIR、eHbA1c 都可以）。"
+                    "读不清就跟患者说你没读清，不要存空壳。"
+                )
+
             report = await save_glucose_report(
                 session,
                 user_id=runtime.context.user_id,
                 period_start=start,
                 period_end=end,
-                device=device[:64],
-                device_serial=device_serial[:32],
+                device=str(fields["device"] or "")[:64],
+                device_serial=str(fields["device_serial"] or "")[:32],
                 report_generated_at=generated,
-                mean_mmol=mean_mmol,
-                sd_mmol=sd_mmol,
-                cv_percent=cv_percent,
-                ehba1c_percent=ehba1c_percent,
-                tir_percent=tir_percent,
-                tar_percent=tar_percent,
-                tbr_percent=tbr_percent,
-                normal_percent=normal_percent,
-                low_percent=low_percent,
-                very_low_percent=very_low_percent,
-                high_percent=high_percent,
-                very_high_percent=very_high_percent,
-                lbgi_level=lbgi_level,
+                lbgi_level=str(fields["lbgi_level"] or ""),
                 note=(note or None) and note[:200],
-                # 患者这一轮发的那份 PDF 就是它的原文件，记下来「打开原报告」才有得开。
-                source_attachment_id=await _report_attachment_id(
-                    session, runtime.context.run_id
-                ),
+                # 患者这一轮发的那份文件就是它的原文件，记下来「打开原报告」才有得开。
+                source_attachment_id=attachment.id if attachment else None,
+                **numbers,
             )
             await session.commit()
             report_id = str(report.id)
@@ -494,10 +642,11 @@ def build_glucose_report_tool(
         return {
             "recorded": True,
             "id": report_id,
+            "verified": verified,
             "period": f"{start.isoformat()}~{end.isoformat()}",
             "note": (
                 "这份报告的速览已经存进血糖记录，患者能在记录页看到；"
-                "解释的时候按报告自己的目标范围说。"
+                "解释的时候按报告自己的目标范围说。" + source_note
             ),
         }
 
