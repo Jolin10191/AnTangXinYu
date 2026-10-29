@@ -12,6 +12,7 @@ import {
 import type { ApiClient } from '../api/client';
 import type { GlucoseReading, GlucoseSummary } from '../api/types';
 import { EventTimeField } from '../ui/event-time-field';
+import { measuredTimeLabel } from './measured-time';
 
 const CONTEXTS: { value: string; label: string }[] = [
   { value: 'fasting', label: '空腹' },
@@ -372,7 +373,7 @@ export function GlucoseScreen({ api }: Props) {
                       <Text style={styles.rowUnit}> mg/dL</Text>
                     </Text>
                     <Text style={styles.rowMeta}>
-                      测量 {formatTime(item.measuredAt)} ·{' '}
+                      测量 {measuredTimeLabel(item.measuredAt, item.measuredPrecision)} ·{' '}
                       {SOURCE_LABELS[item.source] ?? '手动'}
                       {item.sourceDevice
                         ? `（${DEVICE_LABELS[item.sourceDevice] ?? item.sourceDevice}）`

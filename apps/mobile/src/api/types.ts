@@ -2150,6 +2150,12 @@ export type GlucoseReading = {
   source: string;
   /** 指尖血用的哪台血糖仪（roche/abbott/sannuo/other），没选是空串。 */
   sourceDevice: string;
+  /**
+   * 测量时间的精度。`daypart` 表示患者只说得出「早上 / 晚上」这类时段，
+   * 时间是该时段的代表时刻，界面上必须写成「早上（大概）」，
+   * 不能让它冒充一个精确到分钟的读数。
+   */
+  measuredPrecision: "exact" | "daypart";
   note: string | null;
   revokedAt: string | null;
   createdAt: string;
@@ -2203,6 +2209,9 @@ export function parseGlucoseReading(value: unknown): GlucoseReading {
     source: glucoseString(data, "source"),
     // 旧后端没有这个字段时给空串，不报错。
     sourceDevice: typeof data.source_device === "string" ? data.source_device : "",
+    // 旧后端没有这个字段：按精确处理，和它的行为一致。
+    measuredPrecision:
+      data.measured_precision === "daypart" ? "daypart" : "exact",
     note: typeof note === "string" ? note : null,
     revokedAt: typeof revoked === "string" ? revoked : null,
     createdAt: glucoseString(data, "created_at"),

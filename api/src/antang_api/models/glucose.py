@@ -33,6 +33,11 @@ GLUCOSE_CONTEXTS: tuple[str, ...] = (
 # lab = 化验单；report = 从报告解析出来。永远带着 source，免得拿解析结果去冒充手工测量。
 GLUCOSE_SOURCES: tuple[str, ...] = ("manual", "fingerstick", "cgm", "lab", "report")
 
+# 测量时间的精度。exact = 有时刻（自己挑的、报告上印的）；
+# daypart = 患者只说得出「早上 / 晚上 / 半夜」这种时段，存的是该时段的代表时刻，
+# 界面上要写成「早上（大概）」，不能显示成一个精确到分钟的钟点。
+GLUCOSE_PRECISIONS: tuple[str, ...] = ("exact", "daypart")
+
 # 数据来自哪个系统。手工录入留空；导入时必填，方便回溯"这份数据是从哪来的"。
 GLUCOSE_SOURCE_SYSTEMS: tuple[str, ...] = (
     "sibionics",
@@ -101,6 +106,7 @@ class GlucoseImport(Base):
 
 _CONTEXTS_SQL = ", ".join(f"'{value}'" for value in GLUCOSE_CONTEXTS)
 _SOURCES_SQL = ", ".join(f"'{value}'" for value in GLUCOSE_SOURCES)
+_PRECISIONS_SQL = ", ".join(f"'{value}'" for value in GLUCOSE_PRECISIONS)
 
 
 class GlucoseReading(Base):
@@ -109,6 +115,10 @@ class GlucoseReading(Base):
         CheckConstraint("value_mg_dl BETWEEN 20 AND 600", name="ck_glucose_value_range"),
         CheckConstraint(f"context IN ({_CONTEXTS_SQL})", name="ck_glucose_context"),
         CheckConstraint(f"source IN ({_SOURCES_SQL})", name="ck_glucose_source"),
+        CheckConstraint(
+            f"measured_precision IN ({_PRECISIONS_SQL})",
+            name="ck_glucose_measured_precision",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -119,6 +129,11 @@ class GlucoseReading(Base):
     )
     value_mg_dl: Mapped[int] = mapped_column(Integer)
     measured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    # 这条时间是精确的钟点，还是只说了「早上 / 晚上」：daypart 时界面上要写
+    # 「早上（大概）」，别让一个编出来的 07:00 冒充精确数据。
+    measured_precision: Mapped[str] = mapped_column(
+        String(16), server_default=text("'exact'")
+    )
     context: Mapped[str] = mapped_column(String(32), server_default=text("'other'"))
     source: Mapped[str] = mapped_column(String(16), server_default=text("'manual'"))
     # 哪台血糖仪测的。只对手指血有意义（化验单没有机器、传感器走 cgm_samples 的

@@ -28,6 +28,7 @@ import type {
 import { EventTimeField } from "../ui/event-time-field";
 import { GlucoseReportDetail } from "../glucose/report-detail";
 import { openOriginalReport } from "../glucose/open-original";
+import { measuredTimeLabel } from "../glucose/measured-time";
 import Svg, { Circle, Line, Path, Polyline, Rect } from "react-native-svg";
 
 /**
@@ -297,7 +298,13 @@ function CgmCurve({ samples }: { samples: CgmSample[] }) {
   );
 }
 
-type TrendPoint = { reported: boolean; time: number; value: number };
+type TrendPoint = {
+  /** 患者只说得出时段（早上 / 晚上），横轴位置是近似的。 */
+  approximate: boolean;
+  reported: boolean;
+  time: number;
+  value: number;
+};
 
 /** 趋势图看多久：和血糖摘要同一个窗口，患者不需要再学一个新的时间概念。 */
 export const TREND_DAYS = 7;
@@ -316,6 +323,7 @@ export function trendSeries(
   return readings
     .filter((reading) => reading.revokedAt === null)
     .map((reading) => ({
+      approximate: reading.measuredPrecision === "daypart",
       // 空心 = 报告 / 导入进来的数字；实心 = 自己量的。判据和下面「手动 / 传感器」
       // 两个子栏完全一致（`manualReadings` 排除的正是这两类），否则同一份数据在
       // 列表里算「手动」、在图里算「报告」，患者会觉得哪里不对。
@@ -423,6 +431,11 @@ function GlucoseTrend({
       <Text style={styles.cardHint}>
         实心点是你自己量的，空心点是报告里记下的；没有测量的时段留空，不插值。
       </Text>
+      {points.some((point) => point.approximate) ? (
+        <Text style={styles.cardHint}>
+          标成「大概」的点是只说得出时段的，横轴位置按该时段起点画，不代表那一刻。
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -766,7 +779,12 @@ export function RecordScreen({
                   <View key={reading.id} style={styles.card}>
                     <Text style={styles.cardTitle}>{formatGlucose(reading)}</Text>
                     <Text style={styles.cardBody}>
-                      测量 {formatMeasuredAt(reading.measuredAt)} ·{" "}
+                       测量{" "}
+                       {measuredTimeLabel(
+                         reading.measuredAt,
+                         reading.measuredPrecision,
+                       )}{" "}
+                       ·{" "}
                       {SOURCE_LABELS[reading.source] ?? "手动"} ·{" "}
                       {GLUCOSE_CONTEXT_LABELS[reading.context] ?? reading.context}
                       {reading.note === null ? "" : ` ·「${reading.note}」`}
@@ -828,8 +846,11 @@ export function RecordScreen({
                   <View key={reading.id} style={styles.card}>
                     <Text style={styles.cardTitle}>{formatGlucose(reading)}</Text>
                     <Text style={styles.cardBody}>
-                      {formatMeasuredAt(reading.measuredAt)} ·{" "}
-                      {SOURCE_LABELS[reading.source] ?? "传感器"}
+                      {measuredTimeLabel(
+                        reading.measuredAt,
+                        reading.measuredPrecision,
+                      )}{" "}
+                      · {SOURCE_LABELS[reading.source] ?? "传感器"}
                       {reading.note === null ? "" : ` ·「${reading.note}」`}
                     </Text>
                   </View>

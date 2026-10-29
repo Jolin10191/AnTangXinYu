@@ -1188,4 +1188,53 @@ describe('ApiClient glucose readings', () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect(body.source_device).toBeNull();
   });
+
+  test('reads back whether the measurement time was only a daypart', async () => {
+    const store = new MemoryTokenStore(oldTokens);
+    const fetchMock = jest.fn().mockResolvedValueOnce(
+      jsonResponse(201, {
+        ...readingBody('manual', ''),
+        measured_at: '2026-10-25T07:00:00+08:00',
+        measured_precision: 'daypart',
+      }),
+    );
+    const client = new ApiClient(
+      'http://api.test',
+      store,
+      jest.fn(),
+      fetchMock as unknown as FetchFunction,
+    );
+
+    const reading = await client.createGlucoseReading({
+      valueMgDl: 96,
+      measuredAt: '2026-10-25T07:00:00+08:00',
+      context: 'fasting',
+      source: 'manual',
+    });
+
+    // 没有这个字段，界面就会把「早上 07:00」当一个精确读数显示。
+    expect(reading.measuredPrecision).toBe('daypart');
+  });
+
+  test('treats a reading from a backend without the field as exact', async () => {
+    const store = new MemoryTokenStore(oldTokens);
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(201, readingBody('manual', '')));
+    const client = new ApiClient(
+      'http://api.test',
+      store,
+      jest.fn(),
+      fetchMock as unknown as FetchFunction,
+    );
+
+    const reading = await client.createGlucoseReading({
+      valueMgDl: 96,
+      measuredAt: '2026-10-25T12:00:00+08:00',
+      context: 'fasting',
+      source: 'manual',
+    });
+
+    expect(reading.measuredPrecision).toBe('exact');
+  });
 });

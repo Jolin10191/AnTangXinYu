@@ -23,6 +23,7 @@ from antang_api.health_profile.glucose import (
     GLUCOSE_CONTEXT_LABELS,
     GLUCOSE_DEVICE_LABELS,
     list_glucose_readings,
+    measured_time_label,
     record_glucose_reading,
     record_glucose_report as save_glucose_report,
     summarize_glucose,
@@ -131,7 +132,10 @@ def build_glucose_read_tool(
             "below_70_count": summary["below_70_count"],
             "readings": [
                 {
-                    "measured_at": reading.measured_at.isoformat(),
+                    "measured_at": measured_time_label(
+                        reading.measured_at, reading.measured_precision
+                    ),
+                    "approximate": reading.measured_precision == "daypart",
                     "value_mmol": to_mmol(reading.value_mg_dl),
                     "context": GLUCOSE_CONTEXT_LABELS.get(
                         reading.context, reading.context
@@ -182,6 +186,19 @@ class GlucosePoint(BaseModel):
         str | None,
         Field(default=None, description="一条备注，例如「报告日均值」「化验单」"),
     ] = None
+    time_precision: Annotated[
+        Literal["exact", "daypart"],
+        Field(
+            default="exact",
+            description=(
+                "这条时间有多准。患者或报告给了钟点就 exact；患者只说得出"
+                "「早上 / 中午 / 下午 / 晚上 / 半夜」这种时段就填 daypart，"
+                "并把 measured_at 写成该时段的代表时刻（早上 07:00、中午 12:00、"
+                "下午 15:00、晚上 20:00、半夜 02:00），分钟必须是 00。"
+                "宁可按大概记，也不要自己编一个几点几分。"
+            ),
+        ),
+    ] = "exact"
 
 
 async def _report_attachment_id(
@@ -323,11 +340,12 @@ def build_glucose_write_tool(
             GlucoseReportSource,
             Field(
                 description=(
-                    "这批数字从哪来：传感器/CGM 报告用 cgm，医院化验单用 lab，"
-                    "患者念自己血糖仪的数字用 fingerstick。"
+                    "这批数字从哪来：CGM 报告或传感器导出用 cgm，医院化验单用 lab，"
+                    "患者念自己血糖仪的数字用 fingerstick。**没有默认值：患者没说清、"
+                    "你也问不出来源时，填 manual（其它），不要猜成 cgm。**"
                 )
             ),
-        ] = "cgm",
+        ],
         device: Annotated[
             GlucoseReportDevice | None,
             Field(default=None, description="只有指尖血才需要填，其它来源忽略。"),
@@ -338,6 +356,10 @@ def build_glucose_write_tool(
         患者发 CGM 报告/化验单/血糖记录截图，或者念出一串数字，并且希望「记下来、
         以后能看」的时候调用。只写库、不判读：解释和安慰在对话里说，不要让患者
         因为你念了一遍数字就以为已经存好了。
+        **患者只报了一个数字、没说什么时候测的、也没说怎么测的时候，先问清楚再调
+        这个工具**：先问「什么时候测的」，再问「怎么测的（指尖血 / 医院抽血 /
+        手环传感器）」，一次只问一件。患者说「记不清」就把时段记成大概时间
+        （time_precision=daypart），不要自己编钟点。
         写完后告诉患者「已经记进血糖记录，记录页能看到，也可以撤回」，不要编造
         没读到的数字，读不清的就不记并说明读不清。
         """
@@ -368,6 +390,14 @@ def build_glucose_write_tool(
             if measured_at > future_limit or measured_at < oldest:
                 skipped += 1
                 continue
+            if point.time_precision == "daypart" and measured_at.minute:
+                # 只说了「早上」，却给了一个 07:23 这种钟点，等于替患者编了精度。
+                # 整批退回让他按整点重来，而不是悄悄改成整点。
+                raise ValueError(
+                    "只说了「早上 / 晚上」这类时段的时间，要记成该时段的整点"
+                    "（早上 07:00、中午 12:00、下午 15:00、晚上 20:00、半夜 02:00），"
+                    "分钟必须是 00；不要把编出来的钟点当成患者说的。"
+                )
             value_mg_dl = round(point.value_mmol * 18)
             key = (measured_at.isoformat(), value_mg_dl)
             if key in seen:
@@ -398,18 +428,24 @@ def build_glucose_write_tool(
                     context=point.context,
                     source=source,
                     source_device=device or "",
+                    measured_precision=point.time_precision,
                     note=point.note,
                 )
             await session.commit()
 
+        rough = sum(1 for _, point in cleaned if point.time_precision == "daypart")
+        note = "已经写进血糖记录，患者能在记录页看到，也能逐条撤回。"
+        if rough:
+            note += f"其中 {rough} 条只有时段（早上/晚上这种），记的是大概时间，回答里要说一句。"
         return {
             "recorded": True,
             "count": len(cleaned),
             "skipped": skipped,
             "source": source,
+            "approximate": rough,
             "first_at": cleaned[0][0].isoformat(),
             "last_at": cleaned[-1][0].isoformat(),
-            "note": "已经写进血糖记录，患者能在记录页看到，也能逐条撤回。",
+            "note": note,
         }
 
     return record_glucose_readings

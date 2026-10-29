@@ -26,6 +26,7 @@ async def record_glucose_reading(
     context: str = "other",
     source: str = "manual",
     source_device: str = "",
+    measured_precision: str = "exact",
     note: str | None = None,
 ) -> GlucoseReading:
     reading = GlucoseReading(
@@ -37,6 +38,7 @@ async def record_glucose_reading(
         # 化验单和传感器没有"哪台血糖仪"，调用方就算传了也不存，免得出现
         # 「静脉血 · 罗氏」这种自相矛盾的记录。
         source_device=source_device if source == "fingerstick" else "",
+        measured_precision=measured_precision,
         note=note,
     )
     session.add(reading)
@@ -215,6 +217,27 @@ def to_mmol(value_mg_dl: int) -> str:
     return f"{value_mg_dl / 18:.1f}"
 
 
+# 患者只说得出「早上 / 晚上 / 半夜」时，条目的时间就是该时段的代表时刻；
+# 展示上必须写成「早上（大概）」，不能显示成一个精确钟点。
+GLUCOSE_DAYPART_LABELS: dict[int, str] = {
+    0: "半夜",
+    2: "半夜",
+    7: "早上",
+    12: "中午",
+    15: "下午",
+    20: "晚上",
+}
+
+
+def measured_time_label(measured_at: datetime, precision: str) -> str:
+    """把一条读数的时间写成给人看的样子。"""
+
+    if precision == "daypart":
+        daypart = GLUCOSE_DAYPART_LABELS.get(measured_at.hour, "大概时段")
+        return f"{measured_at:%m-%d} {daypart}（大概）"
+    return f"{measured_at:%m-%d %H:%M}"
+
+
 def render_glucose_context(
     *,
     days: int,
@@ -252,7 +275,7 @@ def render_glucose_context(
         for reading in recent:
             label = GLUCOSE_CONTEXT_LABELS.get(reading.context, reading.context)
             lines.append(
-                f"- {reading.measured_at:%m-%d %H:%M} | "
+                f"- {measured_time_label(reading.measured_at, reading.measured_precision)} | "
                 f"{to_mmol(reading.value_mg_dl)} | {label}"
             )
 

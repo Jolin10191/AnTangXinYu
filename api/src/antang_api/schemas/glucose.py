@@ -15,6 +15,8 @@ GlucoseInputSource = Literal["fingerstick", "cgm", "lab", "manual"]
 # 指尖血的机器品牌。它不是来源（来源是"指尖血"），只是"用哪台测的"，
 # 所以只在 source=fingerstick 时有意义，其余情况存空字符串。
 GlucoseDevice = Literal["roche", "abbott", "sannuo", "other"]
+# 测量时间的精度：exact = 有时刻；daypart = 只说了「早上 / 晚上」，界面上要写「（大概）」。
+GlucosePrecision = Literal["exact", "daypart"]
 
 
 class GlucoseReadingCreate(BaseModel):
@@ -59,6 +61,7 @@ class GlucoseReadingResponse(BaseModel):
     id: UUID
     value_mg_dl: int
     measured_at: datetime
+    measured_precision: GlucosePrecision
     context: GlucoseContext
     source: GlucoseSource
     source_device: str
