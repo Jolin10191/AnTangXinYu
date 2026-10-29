@@ -476,6 +476,31 @@ ruff / pyright 干净；`test_unified_schema_has_one_head` 通过（head = `f1a2
 验证：后端 **585 passed**（+1：`test_core_prompt_records_beliefs_and_fear_behaviors_instead_of_only_noticing_them`）、
 ruff / pyright 干净。
 
+### 2026-10-30 凌晨（三）：提示词加完了，模型还是没调——把信念工具的参数改成平铺
+
+提示词上线后先在线上试了一遍（测试账号 `rt_belief_1030`，两轮：讲古代皇帝糖尿病 → 「我怕我会像
+他们一样」）：回复接住了情绪，`agent_tool_calls` 里却只有 `search_diabetes_knowledge`，`fear-summary`
+的 `beliefs` 还是空的。也就是说**不是「调了失败」，是模型根本没调**。
+
+两个工具原来的签名是 `request: BeliefRequest` / `request: FearBehaviorRequest`——一层嵌套对象，
+模型要在里面再拼 `{"request": {...}}`。这和当初 `record_meal` 出事时是同一类摩擦（那次是 `**kwargs`
+把 runtime 注入弄丢、线上报 `missing 1 required positional argument`）。改成平铺后：
+
+- `api/src/antang_api/tools/behavior.py`：抽出模块级别名 `BehaviorKind` / `BehaviorCount` /
+  `BehaviorOccurredAt` / `BehaviorNote`，`BeliefCode` / `BeliefQuote` / `BeliefOccurrence` /
+  `BeliefTriggerContext` / `BeliefIntensity`；`FearBehaviorRequest`、`BeliefRequest` 与两个工具签名
+  共用同一批别名字段（`runtime` 在第一个位置），工具里再 `FearBehaviorRequest(...)` 组装以复用校验。
+- 提示词那条「回答顺序不能反」后面补一句放宽判据：只要患者用第一人称说出对低血糖的怕
+  （哪怕话很短、哪怕是在讲别人之后接一句「我也会那样」），就算灾难化信念；拿不准宁可记一条。
+
+验证：后端 **586 passed**（+1 平铺 schema 断言 `set(belief_tool.args) == {...}`）、ruff 干净；
+镜像 `antang-api:deploy-20261030-002940` healthy。线上复测（`rt_belief_1031`）：
+`fear-summary` 返回 `{"belief_code":"hypo_causes_death","label":"低血糖会导致死亡","mentions":1,
+"latest_quote":"我怕我会像他们一样"}` → **ok**。
+
+教训：**「提示词写了要调」不等于「模型调得出来」**。工具参数越平越容易调；一层嵌套就够让它在
+情绪对话里选择「先安慰、不折腾工具」。验证要看 `agent_tool_calls`，不是看回复写得好不好。
+
 
 
 
