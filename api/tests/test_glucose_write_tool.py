@@ -317,6 +317,12 @@ async def test_the_agent_loop_can_write_a_report(db_session: AsyncSession) -> No
     assert rows[0].source == "cgm"
 
 
+async def _no_risk_read(_attachment: MessageAttachment) -> dict[str, object]:
+    """只读「低血糖风险」的第二遍读数：这次什么也没读到。"""
+
+    return {}
+
+
 async def _no_second_read(_attachment: MessageAttachment) -> dict[str, object]:
     """默认的第二遍读数：这些用例里不该被调用（没有附件，或附件是模板认得的 PDF）。"""
 
@@ -641,7 +647,7 @@ async def test_the_pdf_template_wins_over_what_the_model_read(
         db_session, "glucose_template", mime_type="application/pdf"
     )
 
-    result = await _report_tool(db_session)(
+    result = await _report_tool(db_session, recheck=_no_risk_read)(
         # 模型读的是另一组数（连区间都不一样），不该被采用。
         period_start="2024-05-30",
         period_end="2024-06-11",
@@ -749,4 +755,99 @@ def test_two_reads_only_disagree_about_what_the_first_one_claimed() -> None:
         "device",
         "mean_mmol",
     ]
+
+
+def _risk_reader(*levels: object) -> Recheck:
+    """按顺序返回每一遍读到的风险档：第一次给第一个，第二次给第二个。"""
+
+    remaining = list(levels)
+
+    async def read(_attachment: MessageAttachment) -> dict[str, object]:
+        return {"lbgi_level": remaining.pop(0) if remaining else None}
+
+    return read
+
+
+async def _template_run(
+    session: AsyncSession, prefix: str
+) -> tuple[User, UUID]:
+    """一份模板认得的 PDF 报告 + 一次运行，给「低血糖风险」这几条用例共用。"""
+
+    user, _attachment, run_id = await _screenshot_run(
+        session, prefix, mime_type="application/pdf"
+    )
+    return user, run_id
+
+
+async def test_a_risk_level_is_kept_when_two_reads_agree(
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: AsyncSession,
+) -> None:
+    """这一档文字层读不出，只能读两遍；两遍说同一档才留。"""
+
+    monkeypatch.setattr(
+        "antang_api.tools.glucose.parse_report_pdf", lambda _data: _PARSED
+    )
+    user, run_id = await _template_run(db_session, "g_risk_agree")
+
+    result = await _report_tool(db_session, recheck=_risk_reader("高", "高"))(
+        period_start="2025-07-28",
+        period_end="2025-07-31",
+        runtime=_runtime_of(user.id, run_id),
+    )
+
+    assert result["verified"] == "pdf-template"
+    reports = await list_glucose_reports(db_session, user_id=user.id)
+    assert [report.lbgi_level for report in reports] == ["high"]
+    # 模板解析出来的数照旧是程序给的，风险档是读两遍补上去的。
+    assert float(cast(Any, reports[0].mean_mmol)) == 5.81
+    assert "两遍一致" in str(result["note"])
+
+
+async def test_a_risk_level_that_reads_differently_is_left_blank(
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: AsyncSession,
+) -> None:
+    """两遍读成不同的档位，就留空——标错风险比不标更糟。"""
+
+    monkeypatch.setattr(
+        "antang_api.tools.glucose.parse_report_pdf", lambda _data: _PARSED
+    )
+    user, run_id = await _template_run(db_session, "g_risk_diff")
+
+    result = await _report_tool(db_session, recheck=_risk_reader("高", "最低"))(
+        period_start="2025-07-28",
+        period_end="2025-07-31",
+        runtime=_runtime_of(user.id, run_id),
+    )
+
+    assert result["verified"] == "pdf-template"
+    reports = await list_glucose_reports(db_session, user_id=user.id)
+    assert [report.lbgi_level for report in reports] == [""]
+    assert "两遍一致" not in str(result["note"])
+
+
+async def test_a_risk_level_nobody_can_read_is_left_blank(
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: AsyncSession,
+) -> None:
+    """读不出风险档不该把整份报告退回去：报告本身是模板读的，仍然可信。"""
+
+    monkeypatch.setattr(
+        "antang_api.tools.glucose.parse_report_pdf", lambda _data: _PARSED
+    )
+    user, run_id = await _template_run(db_session, "g_risk_unread")
+
+    async def broken(_attachment: MessageAttachment) -> dict[str, object]:
+        raise UnreadableScreenshot("第二遍没读到")
+
+    result = await _report_tool(db_session, recheck=broken)(
+        period_start="2025-07-28",
+        period_end="2025-07-31",
+        runtime=_runtime_of(user.id, run_id),
+    )
+
+    assert result["recorded"] is True
+    reports = await list_glucose_reports(db_session, user_id=user.id)
+    assert [report.lbgi_level for report in reports] == [""]
 

@@ -15,8 +15,6 @@ GlucoseInputSource = Literal["fingerstick", "cgm", "lab", "manual"]
 # 指尖血的机器品牌。它不是来源（来源是"指尖血"），只是"用哪台测的"，
 # 所以只在 source=fingerstick 时有意义，其余情况存空字符串。
 GlucoseDevice = Literal["roche", "abbott", "sannuo", "other"]
-# 报告上的百分比分档：0–100，超出就当读错了，不硬存。
-GlucoseReportBand = Annotated[float, Field(ge=0, le=100)]
 
 
 class GlucoseReadingCreate(BaseModel):
@@ -133,25 +131,3 @@ class GlucoseReportPreview(BaseModel):
     very_high_percent: float | None
     # 报告上没印、或者版式里读不出来的字段，界面照实说「没读到」。
     missing: list[str]
-
-
-class GlucoseReportCreate(BaseModel):
-    """患者确认之后才写库；数值必须是预览里给过的那几个。"""
-
-    model_config = ConfigDict(extra="forbid")
-
-    period_start: date
-    period_end: date
-    report_generated_at: date | None = None
-    device: Annotated[str, Field(max_length=64)] = ""
-    device_serial: Annotated[str, Field(max_length=64)] = ""
-    mean_mmol: Annotated[float | None, Field(gt=0, lt=50)] = None
-    sd_mmol: Annotated[float | None, Field(ge=0, lt=20)] = None
-    cv_percent: GlucoseReportBand | None = None
-    ehba1c_percent: Annotated[float | None, Field(gt=0, lt=25)] = None
-    normal_percent: GlucoseReportBand | None = None
-    low_percent: GlucoseReportBand | None = None
-    very_low_percent: GlucoseReportBand | None = None
-    high_percent: GlucoseReportBand | None = None
-    very_high_percent: GlucoseReportBand | None = None
-    note: Annotated[str | None, Field(max_length=200)] = None

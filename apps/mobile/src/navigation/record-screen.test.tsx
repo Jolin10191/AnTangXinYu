@@ -2,7 +2,7 @@ import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { Alert } from "react-native";
 
 import type { GlucoseReading, GlucoseSummary, MealLog, MedicationLog } from "../api/types";
-import { RecordScreen, formatGlucose, formatMeasuredAt } from "./record-screen";
+import { RecordScreen, formatGlucose, formatMeasuredAt, trendSeries } from "./record-screen";
 import { fakeGadgetbridge, fakeHealthConnect } from "./device-controllers.fake";
 
 const READING: GlucoseReading = {
@@ -358,6 +358,64 @@ describe("RecordScreen", () => {
       tree.root.findByProps({ accessibilityLabel: "睡眠分类" }).props.onPress();
     });
     expect(JSON.stringify(tree.toJSON())).toContain("约 6 小时");
+  });
+
+  it("puts manual readings and report points on one trend line", async () => {
+    // 时间按「现在」往前推：写死日期会在几天后掉出 7 天窗口，变成定时炸弹。
+    const hoursAgo = (hours: number) =>
+      new Date(Date.now() - hours * 3600 * 1000).toISOString();
+    const api = fakeApi({
+      getGlucoseReadings: jest.fn(async () => [
+        { ...READING, id: "m-1", measuredAt: hoursAgo(5), valueMgDl: 126 },
+        { ...READING, id: "r-1", measuredAt: hoursAgo(2), source: "report", valueMgDl: 74 },
+      ]),
+    });
+    const tree = await mount(api);
+
+    const body = JSON.stringify(tree.toJSON());
+    // 标题是「近 {天数} 天 · 血糖趋势」，模板字符串会被拆成多个子节点，断言看后半段。
+    expect(body).toContain("· 血糖趋势");
+    expect(body).toContain("自己量的 1 次");
+    expect(body).toContain("报告里 1 条");
+  });
+
+  it("draws no trend from a single point", async () => {
+    const api = fakeApi({
+      getGlucoseReadings: jest.fn(async () => [
+        { ...READING, measuredAt: new Date().toISOString() },
+      ]),
+    });
+    const tree = await mount(api);
+
+    expect(JSON.stringify(tree.toJSON())).not.toContain("血糖趋势");
+  });
+});
+
+describe("glucose trend series", () => {
+  it("keeps the last week, oldest first, and marks report points", () => {
+    const now = Date.parse("2026-10-29T12:00:00+08:00");
+    const series = trendSeries(
+      [
+        { ...READING, id: "new", measuredAt: "2026-10-29T09:00:00+08:00" },
+        { ...READING, id: "old", measuredAt: "2026-10-01T09:00:00+08:00" },
+        {
+          ...READING,
+          id: "report",
+          measuredAt: "2026-10-28T09:00:00+08:00",
+          source: "report",
+        },
+        {
+          ...READING,
+          id: "revoked",
+          measuredAt: "2026-10-27T09:00:00+08:00",
+          revokedAt: "2026-10-27T10:00:00+08:00",
+        },
+      ],
+      now,
+    );
+
+    expect(series.map((point) => point.reported)).toEqual([true, false]);
+    expect(series[0].value).toBeCloseTo(5.5, 1);
   });
 });
 

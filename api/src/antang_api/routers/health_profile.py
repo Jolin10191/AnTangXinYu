@@ -48,7 +48,6 @@ from antang_api.health_profile.report_parse import UnreadableReport, parse_repor
 from antang_api.schemas.glucose import (
     GlucoseReadingCreate,
     GlucoseReadingResponse,
-    GlucoseReportCreate,
     GlucoseReportPreview,
     GlucoseReportResponse,
     GlucoseReportsResponse,
@@ -98,6 +97,8 @@ from antang_api.models import (
     HealthProfileChange,
     MealLog,
     MedicationLog,
+    MessageAttachment,
+    MessageAttachmentKind,
     ProfileChangeMode,
     ProfileChangeStatus,
     PsychosocialAssessment,
@@ -984,34 +985,55 @@ async def preview_glucose_report(
     status_code=status.HTTP_201_CREATED,
 )
 async def create_glucose_report(
-    payload: GlucoseReportCreate,
+    file: Annotated[UploadFile, File()],
     user: Annotated[User, Depends(get_patient_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> GlucoseReportResponse:
-    """确认导入：把预览里那几个数字存成一份报告速览。
+    """确认导入：把这份 PDF 留下来，再按模板把指标存成一份报告速览。
 
-    这份速览没有对应的附件（文件是患者从手机里选的，没进对话），
-    所以 `source_attachment_id` 留空，详情页也就不会显示「打开原报告」。
+    文件要吃两遍：**存下来的不是预览时那几个数，而是重新按模板读一遍的结果**，
+    这样客户端改不了数，也和「从对话发进来」那条路走同一份解析。
+    原文件存成一条没有 message 的附件记录，详情页的「打开原报告」因此也能用。
     """
+
+    data = await file.read()
+    _read_report_pdf(file, data)
+    try:
+        parsed = parse_report_pdf(data)
+    except UnreadableReport as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    attachment = MessageAttachment(
+        user_id=user.id,
+        # 这份文件不是从对话发来的：没有 message，只挂在这份报告速览上。
+        message_id=None,
+        kind=MessageAttachmentKind.REPORT,
+        filename=(file.filename or "report.pdf").strip()[:255] or "report.pdf",
+        mime_type="application/pdf",
+        size_bytes=len(data),
+        data=data,
+    )
+    session.add(attachment)
+    await session.flush()
 
     report = await record_glucose_report(
         session,
         user_id=user.id,
-        period_start=payload.period_start,
-        period_end=payload.period_end,
-        device=payload.device,
-        device_serial=payload.device_serial,
-        report_generated_at=payload.report_generated_at,
-        mean_mmol=payload.mean_mmol,
-        sd_mmol=payload.sd_mmol,
-        cv_percent=payload.cv_percent,
-        ehba1c_percent=payload.ehba1c_percent,
-        normal_percent=payload.normal_percent,
-        low_percent=payload.low_percent,
-        very_low_percent=payload.very_low_percent,
-        high_percent=payload.high_percent,
-        very_high_percent=payload.very_high_percent,
-        note=payload.note,
+        period_start=parsed.period_start,
+        period_end=parsed.period_end,
+        device=parsed.device,
+        device_serial=parsed.device_serial,
+        report_generated_at=parsed.generated_at,
+        mean_mmol=parsed.mean_mmol,
+        sd_mmol=parsed.sd_mmol,
+        cv_percent=parsed.cv_percent,
+        ehba1c_percent=parsed.ehba1c_percent,
+        normal_percent=parsed.normal_percent,
+        low_percent=parsed.low_percent,
+        very_low_percent=parsed.very_low_percent,
+        high_percent=parsed.high_percent,
+        very_high_percent=parsed.very_high_percent,
+        source_attachment_id=attachment.id,
     )
     await session.commit()
     return GlucoseReportResponse.model_validate(report)

@@ -137,11 +137,12 @@ export function GlucoseImportScreen({ api, onBack, onImported }: Props) {
   }
 
   async function confirmPdf() {
-    if (reportPreview === null) return;
+    if (pending === null) return;
     setBusy(true);
     setError(null);
     try {
-      await api.createGlucoseReport(reportPreview);
+      // 传的是文件本身：服务端重新读一遍再存，原件也留下来（以后还能打开）。
+      await api.createGlucoseReport(pending);
       onImported(1);
     } catch (cause) {
       setError(errorMessage(cause));
@@ -336,14 +337,14 @@ export function GlucoseImportScreen({ api, onBack, onImported }: Props) {
             accessibilityRole="button"
             accessibilityLabel="确认存进血糖记录"
             onPress={() => void confirmPdf()}
-            disabled={busy}
-            style={[styles.primary, busy ? styles.disabled : null]}
+            disabled={busy || pending === null}
+            style={[styles.primary, busy || pending === null ? styles.disabled : null]}
           >
             <Text style={styles.primaryText}>确认存进血糖记录</Text>
           </Pressable>
           <Text style={styles.hint}>
-            存的是报告上的指标，不是逐点读数。之后在「血糖 · 传感器」里能看到这份速览，
-            原始图谱还是看你手机里那份 PDF。
+            存的是报告上的指标，不是逐点读数。这份 PDF 会一起留下来：之后在「血糖 ·
+            传感器」里点开这份速览，还能打开原始报告看图谱。
           </Text>
         </>
       )}

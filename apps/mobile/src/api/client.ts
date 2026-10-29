@@ -1282,32 +1282,20 @@ export class ApiClient {
     return parseGlucoseReportPreview(await responseJson(response));
   }
 
-  /** 患者确认之后才写库：把预览里那几个数字原样传回去。 */
-  async createGlucoseReport(
-    preview: GlucoseReportPreview,
-  ): Promise<GlucoseReport> {
+  /**
+   * 患者确认之后才写库：把**这份文件**再传一遍。
+   *
+   * 存下来的不是预览里那几个数字，而是服务端重新按模板读一遍的结果——
+   * 文件本身也留在服务端，所以详情页的「打开原报告」有得开。
+   */
+  async createGlucoseReport(file: {
+    mimeType: string;
+    name: string;
+    uri: string;
+  }): Promise<GlucoseReport> {
     const response = await this.authorizedFetch(
       "/api/v1/health-profile/glucose-reports",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          period_start: preview.periodStart,
-          period_end: preview.periodEnd,
-          report_generated_at: preview.reportGeneratedAt,
-          device: preview.device,
-          device_serial: preview.deviceSerial,
-          mean_mmol: preview.meanMmol,
-          sd_mmol: preview.sdMmol,
-          cv_percent: preview.cvPercent,
-          ehba1c_percent: preview.ehba1cPercent,
-          normal_percent: preview.normalPercent,
-          low_percent: preview.lowPercent,
-          very_low_percent: preview.veryLowPercent,
-          high_percent: preview.highPercent,
-          very_high_percent: preview.veryHighPercent,
-        }),
-      },
+      { body: uploadForm(file), method: "POST" },
     );
     if (!response.ok) throw await this.apiError(response);
     return parseGlucoseReport(await responseJson(response));

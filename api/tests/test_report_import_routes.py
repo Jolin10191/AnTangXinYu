@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from antang_api.database import get_session
 from antang_api.health_profile.report_parse import ParsedReport
-from antang_api.models import GlucoseReport
+from antang_api.models import GlucoseReport, MessageAttachment
 from antang_api.routers.auth import router as auth_router
 from antang_api.routers.health_profile import router as health_profile_router
 
@@ -144,36 +144,36 @@ async def test_an_unreadable_report_says_why(
         assert "扫描件" in response.json()["detail"]
 
 
-async def test_confirming_a_preview_saves_one_report(
-    db_session: AsyncSession,
+async def test_confirming_a_report_keeps_the_file_and_saves_one_summary(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """确认导入要吃两样东西：这份 PDF 自己（以后还能打开），和它的指标速览。"""
+
+    monkeypatch.setattr(
+        "antang_api.routers.health_profile.parse_report_pdf", lambda _: PARSED
+    )
     async for client in _client(db_session):
         headers = await _patient_headers(client)
         created = await client.post(
             "/api/v1/health-profile/glucose-reports",
-            json={
-                "period_start": "2025-07-28",
-                "period_end": "2025-07-31",
-                "report_generated_at": "2025-07-31",
-                "device": "硅基动感Pro",
-                "device_serial": "LT2410FE3P",
-                "mean_mmol": 5.81,
-                "sd_mmol": 0.9,
-                "cv_percent": 15.53,
-                "ehba1c_percent": 5.34,
-                "normal_percent": 99.6,
-                "low_percent": 0.4,
-            },
+            files={"file": ("cgm.pdf", b"%PDF-1.7 fake", "application/pdf")},
             headers=headers,
         )
 
         assert created.status_code == 201
         body = created.json()
         assert body["period_end"] == "2025-07-31"
-        # 从手机里选文件导入的报告没有对话附件，所以「打开原报告」不出现。
-        assert body["source_attachment_id"] is None
+        assert body["mean_mmol"] == pytest.approx(5.81)
         # 高位百分比不写进去，TAR 就只算「高」这一档（报告没印就是没印）。
         assert body["tbr_percent"] == pytest.approx(0.4)
+        # 文件留下来了，所以详情页的「打开原报告」有得开。
+        assert body["source_attachment_id"] is not None
+
+        attachment = await db_session.get(MessageAttachment, body["source_attachment_id"])
+        assert attachment is not None
+        assert attachment.message_id is None
+        assert attachment.data == b"%PDF-1.7 fake"
+        assert attachment.filename == "cgm.pdf"
 
         listed = await client.get(
             "/api/v1/health-profile/glucose-reports", headers=headers
@@ -190,19 +190,43 @@ async def test_confirming_a_preview_saves_one_report(
         assert theirs.json()["items"] == []
 
 
-async def test_a_percentage_above_a_hundred_is_refused(
-    db_session: AsyncSession,
-) -> None:
+async def test_confirming_refuses_a_csv_file(db_session: AsyncSession) -> None:
     async for client in _client(db_session):
         headers = await _patient_headers(client)
         response = await client.post(
             "/api/v1/health-profile/glucose-reports",
-            json={
-                "period_start": "2025-07-28",
-                "period_end": "2025-07-31",
-                "normal_percent": 155,
-            },
+            files={"file": ("export.csv", b"time,value\n", "text/csv")},
+            headers=headers,
+        )
+
+        assert response.status_code == 415
+        assert "PDF" in response.json()["detail"]
+
+
+async def test_confirming_an_unreadable_report_saves_nothing(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from antang_api.health_profile.report_parse import UnreadableReport
+
+    def explode(_: bytes) -> ParsedReport:
+        raise UnreadableReport("这个 PDF 里没有文字层（大概率是扫描件或截图），读不出数字。")
+
+    monkeypatch.setattr("antang_api.routers.health_profile.parse_report_pdf", explode)
+    async for client in _client(db_session):
+        headers = await _patient_headers(client)
+        response = await client.post(
+            "/api/v1/health-profile/glucose-reports",
+            files={"file": ("scan.pdf", b"%PDF-1.7 fake", "application/pdf")},
             headers=headers,
         )
 
         assert response.status_code == 422
+        assert "扫描件" in response.json()["detail"]
+        assert (
+            await db_session.scalar(select(func.count()).select_from(GlucoseReport))
+        ) == 0
+        assert (
+            await db_session.scalar(
+                select(func.count()).select_from(MessageAttachment)
+            )
+        ) == 0

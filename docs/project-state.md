@@ -387,6 +387,25 @@ PDF 那条省的是服务端编码，照片这条路省的是**手机上传流�
 两遍不一致不存、第二遍读不出不存、`compare_reads` 只比第一遍声称的项、上下文走解析事实），
 ruff / pyright 干净；`test_unified_schema_has_one_head` 通过（head = `f1a2b3c4d5e6`）。
 
+### 2026-10-29 深夜：血糖三件事（趋势图 / PDF 留原件 / 风险档位）
+
+1. **趋势图**（`apps/mobile/src/navigation/record-screen.tsx`）：`TREND_DAYS = 7`、
+   `trendSeries(readings, now)`、`GlucoseTrend` 卡片放在「手动 / 传感器」分段控件之下，
+   两个子栏共用。一条折线：实心点 = 自己量的，空心点 = 报告里记下的；绿带 3.9–10.0，
+   少于 2 个点不画。时间轴锚点 `trendNow` 在取到数据时算一次（`Date.now()` 不能写在渲染里，
+   `react-hooks/purity` 会拦），否则每次重渲染图都会抖。
+2. **导入页选的 PDF 留原件**：`POST /api/v1/health-profile/glucose-reports` 改成收 multipart
+   文件，服务端**重新解析**一遍再存（客户端改不了数），同时写一条 `message_id` 为空的
+   `message_attachments`（`kind=report`），`source_attachment_id` 指向它——所以从导入页
+   存进来的报告也能在详情页「打开原报告」。`GlucoseReportCreate` 随之删除。
+3. **PDF 的「低血糖风险」档位**：报告里四档是并列标签、被选中的那档不是矢量填充
+   （13.pdf 内容流里该区域填充路径数为 0，pypdf 也拿不到字体名/填色），所以改成
+   **两次独立读数一致才留**（`report_verify.normalize_lbgi` / 工具里的 `_agreed_risk_level`），
+   不一致或读不出就留空，不影响报告本身入库。
+
+验证：后端 **582 passed**、ruff / pyright 干净（无新迁移，head 仍 `f1a2b3c4d5e6`）；
+移动端 **53 套 326 用例**、`tsc --noEmit` 无输出、`expo lint` 干净。
+
 
 
 

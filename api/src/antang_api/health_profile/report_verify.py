@@ -54,8 +54,31 @@ mean_mmol：平均葡萄糖（mmol/L，不是 mg/dL）；sd_mmol：标准差；
 cv_percent：变异系数（百分数，只写数字）；ehba1c_percent：预估糖化血红蛋白；
 tir_percent / tar_percent / tbr_percent：目标范围内 / 高于 / 低于的占比；
 normal_percent / low_percent / very_low_percent / high_percent / very_high_percent：
-五档占比（报告按「正常/偏低/很低/偏高/很高」给的时候）。
+五档占比（报告按「正常/偏低/很低/偏高/很高」给的时候）；
+lbgi_level：「低血糖风险」这四个并列标签里**被标出的那一档**，只填 高 / 中 / 低 / 最低
+之一。报告没标出哪一档、或者你看不出标记落在哪个标签上，就填 null，不要挑一个填。
 报告用 mg/dL 作单位时，先除以 18 再填。看不清的数字一定要填 null，不要凑。"""
+
+# 「低血糖风险」四档：报告用中文标签，库里存英文键。四档是并列标签，
+# 选中哪个只靠图形位置——所以这一项只能靠「读两遍、两遍一致」来定。
+_LBGI_LEVELS: Final[dict[str, str]] = {
+    "高": "high",
+    "中": "moderate",
+    "低": "low",
+    "最低": "lowest",
+    "high": "high",
+    "moderate": "moderate",
+    "low": "low",
+    "lowest": "lowest",
+}
+
+
+def normalize_lbgi(value: object) -> str | None:
+    """把读数里的风险档归一成库里的键；读不出或者不在四档里就当作没读到。"""
+
+    text = _as_text(value)
+    return _LBGI_LEVELS.get(text) if text else None
+
 
 
 class UnreadableScreenshot(Exception):

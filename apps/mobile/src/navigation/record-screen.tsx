@@ -28,7 +28,7 @@ import type {
 import { EventTimeField } from "../ui/event-time-field";
 import { GlucoseReportDetail } from "../glucose/report-detail";
 import { openOriginalReport } from "../glucose/open-original";
-import Svg, { Line, Path, Polyline, Rect } from "react-native-svg";
+import Svg, { Circle, Line, Path, Polyline, Rect } from "react-native-svg";
 
 /**
  * 五个分类各给一个小图标。
@@ -297,6 +297,133 @@ function CgmCurve({ samples }: { samples: CgmSample[] }) {
   );
 }
 
+type TrendPoint = { reported: boolean; time: number; value: number };
+
+/** 趋势图看多久：和血糖摘要同一个窗口，患者不需要再学一个新的时间概念。 */
+export const TREND_DAYS = 7;
+
+/**
+ * 手输的血糖和报告里记下的点，排成一条按时间的序列。
+ *
+ * 只留近 7 天、按测量时间升序；作废的记录不算。做纯函数是为了能单独验证
+ * 「报告的点确实进得来」，而不用去数图上的像素。
+ */
+export function trendSeries(
+  readings: readonly GlucoseReading[],
+  now: number = Date.now(),
+): TrendPoint[] {
+  const since = now - TREND_DAYS * 24 * 60 * 60 * 1000;
+  return readings
+    .filter((reading) => reading.revokedAt === null)
+    .map((reading) => ({
+      reported: reading.source === "report",
+      time: new Date(reading.measuredAt).getTime(),
+      value: reading.valueMgDl / 18,
+    }))
+    .filter(
+      (point) =>
+        Number.isFinite(point.time) &&
+        point.time >= since &&
+        point.time <= now + 60 * 1000,
+    )
+    .sort((left, right) => left.time - right.time);
+}
+
+/**
+ * 近 7 天的手输血糖 + 报告读数，一条线。
+ *
+ * 两个来源要是分成两张图，患者会问「我报告里的数去哪了」；混在一起又得能分清
+ * 哪个点是自己扎手指量的、哪个是报告里的。所以一条折线、两种点：
+ * 实心 = 自己量的，空心 = 报告里记下的。没有测量的时段留空，不插值。
+ */
+function GlucoseTrend({
+  now,
+  readings,
+}: {
+  now: number | null;
+  readings: readonly GlucoseReading[];
+}) {
+  const points = now === null ? [] : trendSeries(readings, now);
+  if (now === null || points.length < 2) return null;
+
+  const since = now - TREND_DAYS * 24 * 60 * 60 * 1000;
+  const span = Math.max(now - since, 1);
+  const x = (time: number) => ((time - since) / span) * CHART_W;
+  const y = (value: number) => {
+    const clamped = Math.min(Math.max(value, CGM_FLOOR), CGM_CEIL);
+    return CHART_H - ((clamped - CGM_FLOOR) / (CGM_CEIL - CGM_FLOOR)) * CHART_H;
+  };
+  const bandTop = y(10);
+  const bandBottom = y(3.9);
+  const line = points
+    .map((point) => `${x(point.time)},${y(point.value)}`)
+    .join(" ");
+  const measured = points.filter((point) => !point.reported).length;
+  const reported = points.length - measured;
+
+  return (
+    <View style={styles.card}>
+      <Text style={styles.cardTitle}>近 {TREND_DAYS} 天 · 血糖趋势</Text>
+      <Svg height={CHART_H} viewBox={`0 0 ${CHART_W} ${CHART_H}`} width="100%">
+        <Rect
+          fill="#E7F7F2"
+          height={bandBottom - bandTop}
+          width={CHART_W}
+          x={0}
+          y={bandTop}
+        />
+        <Line
+          stroke="#9BC9BB"
+          strokeDasharray="4 4"
+          strokeWidth={1}
+          x1={0}
+          x2={CHART_W}
+          y1={bandTop}
+          y2={bandTop}
+        />
+        <Line
+          stroke="#9BC9BB"
+          strokeDasharray="4 4"
+          strokeWidth={1}
+          x1={0}
+          x2={CHART_W}
+          y1={bandBottom}
+          y2={bandBottom}
+        />
+        <Polyline
+          fill="none"
+          points={line}
+          stroke="#11866F"
+          strokeLinejoin="round"
+          strokeWidth={1.8}
+        />
+        {points.map((point) => (
+          <Circle
+            cx={x(point.time)}
+            cy={y(point.value)}
+            fill={point.reported ? colors.paper : "#11866F"}
+            key={`${point.time}-${point.value}`}
+            r={point.reported ? 2.6 : 3}
+            stroke="#11866F"
+            strokeWidth={1.4}
+          />
+        ))}
+      </Svg>
+      <View style={styles.curveLegend}>
+        <Text style={styles.cardHint}>绿带 3.9–10.0 mmol/L</Text>
+        <Text style={styles.cardHint}>
+          {measured > 0 ? `自己量的 ${measured} 次` : ""}
+          {measured > 0 && reported > 0 ? " · " : ""}
+          {reported > 0 ? `报告里 ${reported} 条` : ""}
+        </Text>
+      </View>
+      <Text style={styles.cardHint}>
+        实心点是你自己量的，空心点是报告里记下的；没有测量的时段留空，不插值。
+      </Text>
+    </View>
+  );
+}
+
 type Props = {
   api: Pick<
     ApiClient,
@@ -350,6 +477,8 @@ export function RecordScreen({
   const [dashboard, setDashboard] = useState<WearableDashboard | null>(null);
   const [cgmSamples, setCgmSamples] = useState<CgmSample[]>([]);
   const [glucoseReports, setGlucoseReports] = useState<GlucoseReport[]>([]);
+  // 趋势图的时间轴锚点：取到数据时记一次，不在渲染期间读钟。
+  const [trendNow, setTrendNow] = useState<number | null>(null);
   // 点开哪一份报告速览；null 表示详情页没开着。
   const [openReport, setOpenReport] = useState<GlucoseReport | null>(null);
 
@@ -393,6 +522,9 @@ export function RecordScreen({
         setDashboard(nextDashboard);
         setCgmSamples(series.samples);
         setGlucoseReports(reports);
+        // 趋势图的「近 7 天」以取到数据的那一刻为锚点：放在渲染里算 Date.now()
+        // 会让每次重渲染都换一个时间轴，图会自己抖。
+        setTrendNow(Date.now());
         setError(null);
       })
       .catch((cause: unknown) => {
@@ -600,6 +732,10 @@ export function RecordScreen({
                 </Pressable>
               ))}
             </View>
+
+            {/* 两个子栏共用一张趋势图：手输的点、报告里的点都在这条线上，
+                切到哪一栏都看得见自己最近的高低起伏。 */}
+            <GlucoseTrend now={trendNow} readings={readings} />
 
             {source === "manual" ? (
               <>

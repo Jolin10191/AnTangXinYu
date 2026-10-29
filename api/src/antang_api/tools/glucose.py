@@ -37,6 +37,7 @@ from antang_api.health_profile.report_parse import (
 from antang_api.health_profile.report_verify import (
     UnreadableScreenshot,
     compare_reads,
+    normalize_lbgi,
     read_report_again,
 )
 
@@ -248,6 +249,31 @@ def _parsed_fields(parsed: ParsedReport) -> dict[str, object]:
         # 「低血糖风险」是四个并列标签，选中哪个只靠图形位置，文字层读不出来。
         "lbgi_level": "",
     }
+
+
+async def _agreed_risk_level(
+    recheck: Recheck,
+    attachment: MessageAttachment,
+) -> str:
+    """报告的「低血糖风险」只能靠读两遍定。
+
+    这一项在 PDF 里是四个并列的中文标签，画面上靠图形标记标出被选中的那档——
+    文字层拿不到这个标记（既没有字体名也没有填色信息），模板解析只能读到四个标签本身。
+    所以这一项单独交给模型独立读两次：两次都读出同一档才留，否则留空，
+    界面上干脆不显示这一行。宁可不显示，也不要标错患者属于哪一档风险。
+    """
+
+    reads: list[str] = []
+    for _ in range(2):
+        try:
+            read = await recheck(attachment)
+        except UnreadableScreenshot:
+            return ""
+        level = normalize_lbgi(read.get("lbgi_level"))
+        if level is None:
+            return ""
+        reads.append(level)
+    return reads[0] if reads[0] == reads[1] else ""
 
 
 def _date_field(raw: object, label: str) -> date | None:
@@ -524,10 +550,16 @@ def build_glucose_report_tool(
                 except UnreadableReport:
                     parsed = None
 
-            if parsed is not None:
+            if parsed is not None and attachment is not None:
                 fields = _parsed_fields(parsed)
+                # 只有「低血糖风险」这一档文字层读不出，单独让模型读两遍定。
+                fields["lbgi_level"] = await _agreed_risk_level(recheck, attachment)
                 verified = "pdf-template"
                 source_note = "报告上的数字是按原始 PDF 的模板读出来的，不是模型猜的。"
+                if fields["lbgi_level"]:
+                    source_note += (
+                        "低血糖风险那一档我另外读了两遍，两遍一致才留。"
+                    )
             else:
                 fields = {
                     "period_start": period_start,

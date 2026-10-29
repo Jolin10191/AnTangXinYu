@@ -109,7 +109,7 @@ describe("GlucoseImportScreen", () => {
     expect(api.createGlucoseReport).not.toHaveBeenCalled();
   });
 
-  it("saves the preview only after the patient confirms", async () => {
+  it("saves the file itself only after the patient confirms", async () => {
     DocumentPicker.getDocumentAsync.mockResolvedValue({
       assets: [{ mimeType: "application/pdf", name: "report.pdf", uri: "file:///r.pdf" }],
       canceled: false,
@@ -127,7 +127,12 @@ describe("GlucoseImportScreen", () => {
       find(tree, "确认存进血糖记录").props.onPress();
     });
 
-    expect(api.createGlucoseReport).toHaveBeenCalledWith(PREVIEW);
+    // 确认时传的是选中的那份文件：服务端重新读一遍，原件也留下来。
+    expect(api.createGlucoseReport).toHaveBeenCalledWith({
+      mimeType: "application/pdf",
+      name: "report.pdf",
+      uri: "file:///r.pdf",
+    });
     expect(onImported).toHaveBeenCalledWith(1);
   });
 
