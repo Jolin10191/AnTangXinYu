@@ -12,7 +12,7 @@ from tavily import AsyncTavilyClient
 from antang_api.agents.core import build_core_agent
 from antang_api.agents.health_profile import build_profile_agent
 from antang_api.agents.tool_middleware import ToolPersistenceMiddleware
-from antang_api.chat import recover_interrupted_chat_runs
+from antang_api.chat import TOOL_ACTIVITY_PHASES, recover_interrupted_chat_runs
 from antang_api.companion_memory import CompanionMemory
 from antang_api.database import engine, session_factory
 from antang_api.knowledge import warm_knowledge_index
@@ -127,6 +127,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     max_tool_rounds=settings.agent_max_tool_rounds,
                     max_parallel_tool_calls=(settings.agent_max_parallel_tool_calls),
                 )
+
+                # 每个工具都得有活动阶段，聊天流才知道状态栏该显示什么。
+                # 少配一个，患者那条消息会在模型开始调它的时候整个报错失败
+                # （线上真的这样挂过三次），所以在启动时就拦住，别等聊天里炸。
+                missing_phases = sorted(
+                    tool.name
+                    for tool in core_tools
+                    if tool.name not in TOOL_ACTIVITY_PHASES
+                )
+                if missing_phases:
+                    raise RuntimeError(f"工具缺少活动阶段配置：{missing_phases}")
 
                 app.state.chat_model = chat_model
                 app.state.core_tools = core_tools

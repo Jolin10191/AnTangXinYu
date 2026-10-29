@@ -140,6 +140,8 @@ TOOL_ACTIVITY_PHASES: dict[str, ActivityPhase] = {
     "record_hypoglycemia_belief": "organizing",
     "record_meal": "organizing",
     "record_medication": "organizing",
+    RECORD_GLUCOSE_TOOL_NAME: "organizing",
+    RECORD_GLUCOSE_REPORT_TOOL_NAME: "organizing",
 }
 
 
