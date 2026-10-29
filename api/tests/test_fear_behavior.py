@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
+from langchain_core.tools import StructuredTool
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,7 +17,11 @@ from antang_api.behavioral import (
     render_behavior_context,
 )
 from antang_api.models import PsychosocialAssessment, User
-from antang_api.tools.behavior import BeliefRequest, FearBehaviorRequest
+from antang_api.tools.behavior import (
+    BeliefRequest,
+    FearBehaviorRequest,
+    build_behavior_tools,
+)
 
 NOW = datetime(2026, 10, 20, 12, tzinfo=timezone.utc)
 
@@ -318,6 +323,23 @@ def test_belief_request_rejects_unknown_code() -> None:
 def test_belief_request_rejects_empty_quote() -> None:
     with pytest.raises(ValidationError):
         BeliefRequest.model_validate({"belief_code": "hypo_is_fault", "quote": ""})
+
+
+def test_the_belief_tool_takes_flat_arguments() -> None:
+    """模型在嵌套 request 上犹豫过，改成平铺参数后它才愿意调。"""
+
+    behavior_tool, belief_tool = build_behavior_tools()
+
+    assert isinstance(belief_tool, StructuredTool)
+    assert set(belief_tool.args) == {
+        "belief_code",
+        "quote",
+        "occurrence",
+        "trigger_context",
+        "fear_intensity",
+    }
+    assert isinstance(behavior_tool, StructuredTool)
+    assert set(behavior_tool.args) == {"kind", "count", "occurred_at", "note"}
 
 def _summary_with(mentions: int) -> FearSummary:
     now = datetime(2026, 10, 20, 12, tzinfo=timezone.utc)
