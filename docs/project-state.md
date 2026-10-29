@@ -406,6 +406,32 @@ ruff / pyright 干净；`test_unified_schema_has_one_head` 通过（head = `f1a2
 验证：后端 **582 passed**、ruff / pyright 干净（无新迁移，head 仍 `f1a2b3c4d5e6`）；
 移动端 **53 套 326 用例**、`tsc --noEmit` 无输出、`expo lint` 干净。
 
+### 2026-10-29 深夜（二）：写血糖的工具没配活动阶段，患者一发血糖就「回复失败」
+
+线上 akaa 三条消息连挂（23:15、23:16、23:37），`agent_runs.error_message` 是
+`工具缺少活动阶段配置：record_glucose_readings`。聊天流每收到一次工具活动事件都要用
+`TOOL_ACTIVITY_PHASES` 查状态栏阶段（`api/src/antang_api/chat.py:1093`），查不到就
+`raise RuntimeError` —— 于是模型一想记血糖，整条回复就失败。写血糖的两个工具
+（`record_glucose_readings`、`record_glucose_report`）加进来时漏了这一条。
+
+修法两处：
+- `TOOL_ACTIVITY_PHASES` 补 `RECORD_GLUCOSE_TOOL_NAME` 与 `RECORD_GLUCOSE_REPORT_TOOL_NAME`
+  两个 `organizing`。
+- `api/src/antang_api/main.py` 启动时核对：`core_tools` 里每个工具名都必须有阶段配置，
+  少了直接 `RuntimeError` 让部署失败回滚，而不是等患者在聊天里撞上。
+- 新增 `api/tests/test_tool_phases.py`：把能构造的工具全建一遍，断言名字都在
+  `TOOL_ACTIVITY_PHASES` 里（联网与健康档案委派那两个构造需要模型/网络，单独核对名字）。
+
+验证：后端 **584 passed**（+2）、ruff / pyright 干净；镜像
+`antang-api:deploy-20261029-234447` healthy。线上实测（`deploy/check_glucose_chat.py`，
+测试账号 `rt_check_1029`）：`phases: ['thinking', 'organizing']`、无错误事件、
+`glucose-readings` 里落了 `value_mg_dl 130`（7.2 mmol/L）、`source fingerstick`、
+`context fasting`。
+
+教训：**给工具加注册项，等于给聊天流加一条必须存在的映射**。凡是「工具名 → 某个配置」
+的表，都要么有测试扫全量工具名，要么在启动时校验；否则漏一条就是线上整条回复失败。
+
+
 
 
 
