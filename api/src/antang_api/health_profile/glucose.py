@@ -15,6 +15,40 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from antang_api.models.glucose import GlucoseReading, GlucoseReport
+from antang_api.models.health_profile import PersonalProfile
+
+# 没设过目标范围的患者用这两个值：多数成人 T1DM 的常用目标（3.9–10.0 mmol/L）。
+# 设过之后一切以患者自己的为准——这是设置，不是常量。
+GLUCOSE_TARGET_LOW_DEFAULT = 70
+GLUCOSE_TARGET_HIGH_DEFAULT = 180
+
+
+async def glucose_targets(session: AsyncSession, *, user_id: UUID) -> tuple[int, int]:
+    """患者自己设的血糖目标范围（mg/dL）；没设过就是默认的 70–180。"""
+
+    profile = await session.get(PersonalProfile, user_id)
+    if profile is None:
+        return GLUCOSE_TARGET_LOW_DEFAULT, GLUCOSE_TARGET_HIGH_DEFAULT
+    low = profile.glucose_target_low_mg_dl or GLUCOSE_TARGET_LOW_DEFAULT
+    high = profile.glucose_target_high_mg_dl or GLUCOSE_TARGET_HIGH_DEFAULT
+    return int(low), int(high)
+
+
+async def set_glucose_targets(
+    session: AsyncSession, *, user_id: UUID, low_mg_dl: int, high_mg_dl: int
+) -> tuple[int, int]:
+    """改目标范围。数据库里还有 low < high 的 CHECK，这里先挡一次好给中文错。"""
+
+    if low_mg_dl <= 0 or high_mg_dl <= low_mg_dl:
+        raise ValueError("目标范围的下限要小于上限，而且都得大于 0。")
+    profile = await session.get(PersonalProfile, user_id)
+    if profile is None:
+        profile = PersonalProfile(user_id=user_id)
+        session.add(profile)
+    profile.glucose_target_low_mg_dl = low_mg_dl
+    profile.glucose_target_high_mg_dl = high_mg_dl
+    await session.flush()
+    return low_mg_dl, high_mg_dl
 
 
 async def record_glucose_reading(
@@ -107,7 +141,13 @@ class GlucoseSummary(TypedDict):
     average_mg_dl: float | None
     minimum_mg_dl: int | None
     maximum_mg_dl: int | None
-    below_70_count: int
+    # 三条按患者自己的目标范围切出来的计数；范围本身也一起回给界面，
+    # 免得界面再去猜「3.9 是哪来的」。
+    target_low_mg_dl: int
+    target_high_mg_dl: int
+    below_target_count: int
+    in_target_count: int
+    above_target_count: int
 
 
 async def summarize_glucose(
@@ -116,9 +156,10 @@ async def summarize_glucose(
     user_id: UUID,
     days: int = 7,
 ) -> GlucoseSummary:
-    """窗口内的读数统计。低于 70 mg/dL 的条数单独给出，供界面展示。"""
+    """窗口内的读数统计，按患者自己的目标范围切出偏低 / 目标内 / 偏高。"""
 
     since = datetime.now(UTC) - timedelta(days=days)
+    low, high = await glucose_targets(session, user_id=user_id)
     row = (
         await session.execute(
             select(
@@ -126,7 +167,16 @@ async def summarize_glucose(
                 func.avg(GlucoseReading.value_mg_dl),
                 func.min(GlucoseReading.value_mg_dl),
                 func.max(GlucoseReading.value_mg_dl),
-                func.count(GlucoseReading.id).filter(GlucoseReading.value_mg_dl < 70),
+                func.count(GlucoseReading.id).filter(
+                    GlucoseReading.value_mg_dl < low
+                ),
+                func.count(GlucoseReading.id).filter(
+                    GlucoseReading.value_mg_dl >= low,
+                    GlucoseReading.value_mg_dl <= high,
+                ),
+                func.count(GlucoseReading.id).filter(
+                    GlucoseReading.value_mg_dl > high
+                ),
             ).where(
                 GlucoseReading.user_id == user_id,
                 GlucoseReading.revoked_at.is_(None),
@@ -147,7 +197,11 @@ async def summarize_glucose(
         "average_mg_dl": average,
         "minimum_mg_dl": minimum,
         "maximum_mg_dl": maximum,
-        "below_70_count": int(row[4] or 0),
+        "target_low_mg_dl": low,
+        "target_high_mg_dl": high,
+        "below_target_count": int(row[4] or 0),
+        "in_target_count": int(row[5] or 0),
+        "above_target_count": int(row[6] or 0),
     }
 
 
@@ -190,7 +244,6 @@ async def mark_hypo_reviewed(
 
 
 GLUCOSE_CONTEXT_DAYS = 7
-GLUCOSE_LOW_MG_DL = 70
 
 GLUCOSE_CONTEXT_LABELS: dict[str, str] = {
     "fasting": "空腹",
@@ -264,11 +317,25 @@ def render_glucose_context(
     maximum = summary["maximum_mg_dl"]
     if maximum is not None:
         parts.append(f"最高 {to_mmol(maximum)}")
-    low_count = summary["below_70_count"]
+    low_count = summary["below_target_count"]
+    high_count = summary["above_target_count"]
     if low_count > 0:
-        parts.append(f"低于 3.9 的 {low_count} 次")
+        parts.append(f"低于 {to_mmol(summary['target_low_mg_dl'])} 的 {low_count} 次")
+    if high_count > 0:
+        parts.append(f"高于 {to_mmol(summary['target_high_mg_dl'])} 的 {high_count} 次")
     if parts:
         lines.append("，".join(parts) + " mmol/L。")
+
+    low_target = summary["target_low_mg_dl"]
+    high_target = summary["target_high_mg_dl"]
+    if (low_target, high_target) != (
+        GLUCOSE_TARGET_LOW_DEFAULT,
+        GLUCOSE_TARGET_HIGH_DEFAULT,
+    ):
+        lines.append(
+            f"他自己设的目标范围是 {to_mmol(low_target)}–{to_mmol(high_target)} mmol/L，"
+            "说高低就按这个范围说，不要拿 3.9–10.0 套他。"
+        )
 
     if recent:
         lines.append("最近几次（时间 | 数值 | 情境）：")

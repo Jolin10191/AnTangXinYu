@@ -24,7 +24,11 @@ const SUMMARY: GlucoseSummary = {
   averageMgDl: 99,
   minimumMgDl: 99,
   maximumMgDl: 99,
-  below70Count: 0,
+  targetLowMgDl: 70,
+  targetHighMgDl: 180,
+  belowTargetCount: 0,
+  inTargetCount: 1,
+  aboveTargetCount: 0,
 };
 
 const MEAL: MealLog = {
@@ -82,6 +86,11 @@ function fakeApi(overrides: Record<string, unknown> = {}) {
   return {
     getGlucoseReadings: jest.fn(async () => [READING]),
     getGlucoseSummary: jest.fn(async () => SUMMARY),
+    getGlucoseTarget: jest.fn(async () => ({ lowMgDl: 70, highMgDl: 180 })),
+    setGlucoseTarget: jest.fn(async (lowMgDl: number, highMgDl: number) => ({
+      lowMgDl,
+      highMgDl,
+    })),
     getMealLogs: jest.fn(async () => [MEAL]),
     createMealLog: jest.fn(async () => MEAL),
     deleteMealLog: jest.fn(async () => undefined),
@@ -413,6 +422,51 @@ describe("RecordScreen", () => {
 
     expect(body).toContain("（大概）");
     expect(body).toContain("横轴位置按该时段起点画");
+  });
+
+  it("reads the low line from the patient's own target range", async () => {
+    // 医生把目标放宽到 4.4–8.9：界面不能再写 3.9，也不能按 70 数「低于」。
+    const api = fakeApi({
+      getGlucoseTarget: jest.fn(async () => ({ lowMgDl: 80, highMgDl: 160 })),
+      getGlucoseSummary: jest.fn(async () => ({
+        ...SUMMARY,
+        targetLowMgDl: 80,
+        targetHighMgDl: 160,
+        belowTargetCount: 2,
+      })),
+    });
+    const tree = await mount(api);
+    const body = JSON.stringify(tree.toJSON());
+
+    expect(body).toContain("目标范围 4.4–8.9 mmol/L");
+    expect(body).toContain("低于 4.4 共 2 次");
+  });
+
+  it("saves the range the patient typed into the target sheet", async () => {
+    const api = fakeApi();
+    const tree = await mount(api);
+
+    await act(async () => {
+      tree.root
+        .findByProps({ accessibilityLabel: "修改血糖目标范围" })
+        .props.onPress();
+    });
+    // 上限从 10.0 往上调两格（一格 0.1）。
+    for (let step = 0; step < 2; step += 1) {
+      await act(async () => {
+        tree.root
+          .findByProps({ accessibilityLabel: "上限加 0.1" })
+          .props.onPress();
+      });
+    }
+    await act(async () => {
+      tree.root
+        .findByProps({ accessibilityLabel: "保存目标范围" })
+        .props.onPress();
+    });
+
+    expect(api.setGlucoseTarget).toHaveBeenCalledWith(70, 184);
+    expect(JSON.stringify(tree.toJSON())).toContain("目标范围 3.9–10.2 mmol/L");
   });
 });
 

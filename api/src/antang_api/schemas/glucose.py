@@ -1,10 +1,12 @@
 """血糖记录的请求与响应模型。"""
 
+from __future__ import annotations
+
 from datetime import date, datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 GlucoseContext = Literal[
     "fasting", "pre_meal", "post_meal", "bedtime", "night", "other"
@@ -75,7 +77,35 @@ class GlucoseSummaryResponse(BaseModel):
     average_mg_dl: float | None
     minimum_mg_dl: int | None
     maximum_mg_dl: int | None
-    below_70_count: int
+    # 目标范围是患者自己设的（见 /glucose-target），所以一起回给界面：
+    # 界面不用再自己写死 3.9 / 10.0。
+    target_low_mg_dl: int
+    target_high_mg_dl: int
+    below_target_count: int
+    in_target_count: int
+    above_target_count: int
+
+
+class GlucoseTargetResponse(BaseModel):
+    """患者自己的血糖目标范围（库里存 mg/dL，界面自己换成 mmol/L）。"""
+
+    low_mg_dl: int
+    high_mg_dl: int
+
+
+class GlucoseTargetUpdate(BaseModel):
+    """改目标范围：医生给的范围因人而异，所以是参数，不是常量。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    low_mg_dl: int = Field(ge=36, le=180)
+    high_mg_dl: int = Field(ge=100, le=360)
+
+    @model_validator(mode="after")
+    def _low_below_high(self) -> GlucoseTargetUpdate:
+        if self.low_mg_dl >= self.high_mg_dl:
+            raise ValueError("目标范围的下限要小于上限。")
+        return self
 
 
 class GlucoseReportResponse(BaseModel):

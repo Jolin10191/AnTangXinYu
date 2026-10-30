@@ -37,11 +37,13 @@ from antang_api.schemas.cgm import (
 )
 from antang_api.health_profile.glucose import (
     delete_glucose_report,
+    glucose_targets,
     list_glucose_readings,
     list_glucose_reports,
     record_glucose_reading,
     record_glucose_report,
     revoke_glucose_reading,
+    set_glucose_targets,
     summarize_glucose,
 )
 from antang_api.health_profile.report_parse import UnreadableReport, parse_report_pdf
@@ -52,6 +54,8 @@ from antang_api.schemas.glucose import (
     GlucoseReportResponse,
     GlucoseReportsResponse,
     GlucoseSummaryResponse,
+    GlucoseTargetResponse,
+    GlucoseTargetUpdate,
 )
 from antang_api.schemas.nutrition import (
     MealLogRequest,
@@ -695,6 +699,40 @@ async def get_glucose_summary(
 
     summary = await summarize_glucose(session, user_id=user.id, days=days)
     return GlucoseSummaryResponse.model_validate(summary)
+
+
+@router.get("/glucose-target", response_model=GlucoseTargetResponse)
+async def get_glucose_target(
+    user: Annotated[User, Depends(get_patient_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> GlucoseTargetResponse:
+    """患者自己的血糖目标范围；没设过就是默认的 70–180 mg/dL。"""
+
+    low, high = await glucose_targets(session, user_id=user.id)
+    return GlucoseTargetResponse(low_mg_dl=low, high_mg_dl=high)
+
+
+@router.put("/glucose-target", response_model=GlucoseTargetResponse)
+async def put_glucose_target(
+    payload: GlucoseTargetUpdate,
+    user: Annotated[User, Depends(get_patient_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> GlucoseTargetResponse:
+    """按患者（或他的医生）给的数字改目标范围，别替他决定用哪个标准。"""
+
+    try:
+        low, high = await set_glucose_targets(
+            session,
+            user_id=user.id,
+            low_mg_dl=payload.low_mg_dl,
+            high_mg_dl=payload.high_mg_dl,
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
+    await session.commit()
+    return GlucoseTargetResponse(low_mg_dl=low, high_mg_dl=high)
 
 
 @router.delete("/glucose-readings/{reading_id}", status_code=status.HTTP_204_NO_CONTENT)

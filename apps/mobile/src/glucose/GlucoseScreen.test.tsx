@@ -14,7 +14,11 @@ function fakeApi(readings: unknown[]) {
       averageMgDl: null,
       minimumMgDl: null,
       maximumMgDl: null,
-      below70Count: 0,
+      targetLowMgDl: 70,
+      targetHighMgDl: 180,
+      belowTargetCount: 0,
+      inTargetCount: 0,
+      aboveTargetCount: 0,
     }),
     createGlucoseReading: async () => {
       throw new Error('not used');

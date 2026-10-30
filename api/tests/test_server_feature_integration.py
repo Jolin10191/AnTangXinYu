@@ -219,3 +219,41 @@ async def test_a_patient_can_delete_a_report_summary_but_not_someone_elses(
         await client.delete(f"{path}/{report_id}", headers=headers)
     ).status_code == 404
 
+
+async def test_a_patient_sets_their_own_glucose_target_range(client):
+    """目标范围是患者的设置：改完统计和界面都按他的算，别人的不受影响。"""
+
+    target = "/api/v1/health-profile/glucose-target"
+    assert (await client.get(target)).status_code == 401
+
+    _, headers = await signup(client)
+    _, second_headers = await signup(client)
+
+    default = await client.get(target, headers=headers)
+    assert default.status_code == 200, default.text
+    assert default.json() == {"low_mg_dl": 70, "high_mg_dl": 180}
+
+    changed = await client.put(
+        target, headers=headers, json={"low_mg_dl": 80, "high_mg_dl": 160}
+    )
+    assert changed.status_code == 200, changed.text
+    assert changed.json() == {"low_mg_dl": 80, "high_mg_dl": 160}
+
+    summary = await client.get(
+        "/api/v1/health-profile/glucose-readings/summary", headers=headers
+    )
+    assert summary.status_code == 200, summary.text
+    assert summary.json()["target_low_mg_dl"] == 80
+    assert summary.json()["target_high_mg_dl"] == 160
+
+    # 别人的范围没被改。
+    other = await client.get(target, headers=second_headers)
+    assert other.json() == {"low_mg_dl": 70, "high_mg_dl": 180}
+
+    # 下限不小于上限是错，不是悄悄修好。
+    assert (
+        await client.put(
+            target, headers=headers, json={"low_mg_dl": 200, "high_mg_dl": 100}
+        )
+    ).status_code == 422
+

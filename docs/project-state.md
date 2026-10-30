@@ -530,6 +530,34 @@ ruff 干净、pyright 0 errors。
 教训：不可逆写操作的「同意」要从患者原文里取证据，而不是让模型报告它得到了同意——和
 「模型说做了不算做完」是同一条。
 
+### 2026-10-30 凌晨（五）：血糖的「高低」按患者自己的目标范围算
+
+以前「低于 3.9 共 N 次」那个 3.9 是写死在代码里的（`GLUCOSE_LOW_MG_DL = 70`，绿带也写死
+3.9–10.0）。老年人常被放宽到 4.4–8.9，孕妇要更严，写死就等于替他定了标准。
+
+- 数据：`PersonalProfile` 加 `glucose_target_low_mg_dl` / `glucose_target_high_mg_dl`
+  （默认 70 / 180，`ck_personal_profiles_glucose_target` 保证下限大于 0 且小于上限），
+  迁移 `h1c2d3e4f5a6`。
+- 服务层：`glucose_targets()` / `set_glucose_targets()`；`summarize_glucose()` 改成
+  `target_low_mg_dl` / `target_high_mg_dl` / `below_target_count` / `in_target_count` /
+  `above_target_count`；`render_glucose_context()` 按患者的目标说高低，目标不是默认值时
+  额外告诉模型「不要拿 3.9–10.0 套他」。
+- 接口：`GET/PUT /api/v1/health-profile/glucose-target`（下限 36–180、上限 100–360，下限
+  不小于上限返回 422）。
+- 工具：`read_glucose_readings` 返回值跟着换成 `target_low_mmol` / `target_high_mmol` 与
+  三个计数；`record_glucose_readings` 的 `device` 收紧成 `roche / abbott / sannuo | null`，
+  提示词写明**没说牌子就留空，不要用「其它血糖仪」占位**（线上实测就见过把没提的牌子填成
+  other）。
+- 手机端：血糖区多一张「目标范围 4.4–8.9 mmol/L · 按医生给的改」的卡，点开
+  `apps/mobile/src/glucose/target-sheet.tsx` 用 0.1 一格调上下限；趋势图绿带、曲线绿带、
+  「低于 X」计数、摘要行全部读患者自己的范围；旧后端不返回这些字段时退回默认。
+- 验证：后端 **596 passed**、ruff 干净、pyright 0 errors；移动端 **55 套 339 用例**、
+  `tsc --noEmit` 无输出、`expo lint` 干净。
+
+教训：临床阈值不要写进常量——同一个数字对 30 岁和 75 岁不是一回事；能让患者（和他的医生）
+自己定，就别替他定。
+
+
 
 
 

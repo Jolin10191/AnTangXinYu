@@ -344,7 +344,8 @@ export function GlucoseScreen({ api }: Props) {
                 {summary.maximumMgDl === null ? '—' : Math.round(summary.maximumMgDl)}
               </Text>
               <Text style={styles.summaryLine}>
-                低于 70 的 {summary.below70Count} 条
+                低于 {(summary.targetLowMgDl / 18).toFixed(1)} 的{" "}
+                {summary.belowTargetCount} 条
               </Text>
             </View>
           ) : null}

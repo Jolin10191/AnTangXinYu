@@ -2167,7 +2167,23 @@ export type GlucoseSummary = {
   averageMgDl: number | null;
   minimumMgDl: number | null;
   maximumMgDl: number | null;
-  below70Count: number;
+  /** 目标范围是患者自己设的，所以统计跟着一起回来：界面不用再写死 3.9 / 10.0。 */
+  targetLowMgDl: number;
+  targetHighMgDl: number;
+  belowTargetCount: number;
+  inTargetCount: number;
+  aboveTargetCount: number;
+};
+
+/** 患者自己的血糖目标范围（mg/dL）。 */
+export type GlucoseTarget = {
+  lowMgDl: number;
+  highMgDl: number;
+};
+
+export const DEFAULT_GLUCOSE_TARGET: GlucoseTarget = {
+  lowMgDl: 70,
+  highMgDl: 180,
 };
 
 function glucoseObject(value: unknown): Record<string, unknown> {
@@ -2231,7 +2247,25 @@ export function parseGlucoseSummary(value: unknown): GlucoseSummary {
     averageMgDl: glucoseNullableNumber(data, "average_mg_dl"),
     minimumMgDl: glucoseNullableNumber(data, "minimum_mg_dl"),
     maximumMgDl: glucoseNullableNumber(data, "maximum_mg_dl"),
-    below70Count: glucoseNumber(data, "below_70_count"),
+    targetLowMgDl:
+      glucoseNullableNumber(data, "target_low_mg_dl") ??
+      DEFAULT_GLUCOSE_TARGET.lowMgDl,
+    targetHighMgDl:
+      glucoseNullableNumber(data, "target_high_mg_dl") ??
+      DEFAULT_GLUCOSE_TARGET.highMgDl,
+    belowTargetCount: glucoseNumber(data, "below_target_count"),
+    inTargetCount: glucoseNumber(data, "in_target_count"),
+    aboveTargetCount: glucoseNumber(data, "above_target_count"),
+  };
+}
+
+/** 目标范围接口：旧后端没有这个接口，读不到就当默认的 70–180。 */
+export function parseGlucoseTarget(value: unknown): GlucoseTarget {
+  const data = glucoseObject(value);
+  return {
+    lowMgDl: glucoseNullableNumber(data, "low_mg_dl") ?? DEFAULT_GLUCOSE_TARGET.lowMgDl,
+    highMgDl:
+      glucoseNullableNumber(data, "high_mg_dl") ?? DEFAULT_GLUCOSE_TARGET.highMgDl,
   };
 }
 

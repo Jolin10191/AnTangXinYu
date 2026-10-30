@@ -59,6 +59,8 @@ MAX_REPORT_READINGS = 120
 OLDEST_REPORT_DAYS = 400
 
 GlucoseReportSource = Literal["cgm", "lab", "fingerstick", "manual"]
+# 工具里只收「点得出牌子」的三种：没点名的留空，别拿 other 占位。
+GlucoseMeter = Literal["roche", "abbott", "sannuo"]
 GlucoseReportDevice = Literal["roche", "abbott", "sannuo", "other"]
 GlucoseReportContext = Literal[
     "fasting", "pre_meal", "post_meal", "bedtime", "night", "other"
@@ -125,13 +127,19 @@ def build_glucose_read_tool(
         average = summary["average_mg_dl"]
         minimum = summary["minimum_mg_dl"]
         maximum = summary["maximum_mg_dl"]
+        low_target = summary["target_low_mg_dl"]
+        high_target = summary["target_high_mg_dl"]
         return {
             "days": request.days,
             "count": summary["count"],
             "average_mmol": None if average is None else to_mmol(round(average)),
             "minimum_mmol": None if minimum is None else to_mmol(minimum),
             "maximum_mmol": None if maximum is None else to_mmol(maximum),
-            "below_70_count": summary["below_70_count"],
+            "target_low_mmol": to_mmol(low_target),
+            "target_high_mmol": to_mmol(high_target),
+            "below_target_count": summary["below_target_count"],
+            "in_target_count": summary["in_target_count"],
+            "above_target_count": summary["above_target_count"],
             "readings": [
                 {
                     "measured_at": measured_time_label(
@@ -349,8 +357,15 @@ def build_glucose_write_tool(
             ),
         ],
         device: Annotated[
-            GlucoseReportDevice | None,
-            Field(default=None, description="只有指尖血才需要填，其它来源忽略。"),
+            GlucoseMeter | None,
+            Field(
+                default=None,
+                description=(
+                    "患者**点名牌子的**血糖仪：罗氏 roche / 雅培 abbott / 三诺 sannuo。"
+                    "他没说牌子就留空（None）——不要用「其它血糖仪」占位，"
+                    "空着才是真话，填 other 等于替患者编了台机器。"
+                ),
+            ),
         ] = None,
     ) -> dict[str, object]:
         """把患者发来的报告里的血糖数值写进血糖记录。

@@ -7,14 +7,17 @@
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from antang_api.agents.core import render_core_system_prompt
 from antang_api.health_profile.glucose import (
     GlucoseSummary,
+    glucose_targets,
     list_glucose_readings,
     record_glucose_reading,
     render_glucose_context,
+    set_glucose_targets,
     summarize_glucose,
     to_mmol,
 )
@@ -75,7 +78,11 @@ def test_render_says_what_was_measured_and_where_it_came_from() -> None:
             average_mg_dl=58.0,
             minimum_mg_dl=58,
             maximum_mg_dl=58,
-            below_70_count=1,
+            target_low_mg_dl=70,
+            target_high_mg_dl=180,
+            below_target_count=1,
+            in_target_count=0,
+            above_target_count=0,
         ),
         recent=[reading],
     )
@@ -98,7 +105,11 @@ def test_no_readings_means_no_context_block() -> None:
             average_mg_dl=None,
             minimum_mg_dl=None,
             maximum_mg_dl=None,
-            below_70_count=0,
+            target_low_mg_dl=70,
+            target_high_mg_dl=180,
+            below_target_count=0,
+            in_target_count=0,
+            above_target_count=0,
         ),
         recent=[],
     )
@@ -130,7 +141,8 @@ async def test_a_patient_reading_reaches_the_summary(
     rendered = render_glucose_context(days=7, summary=summary, recent=recent)
 
     assert summary["count"] == 2
-    assert summary["below_70_count"] == 1
+    assert summary["below_target_count"] == 1
+    assert summary["target_low_mg_dl"] == 70
     assert [reading.value_mg_dl for reading in recent] == [162, 58]
     assert "近 7 天 2 次" in rendered
     assert "餐后" in rendered
@@ -147,6 +159,58 @@ async def test_a_revoked_reading_stays_out_of_the_context(
     summary = await summarize_glucose(db_session, user_id=user.id, days=7)
 
     assert summary["count"] == 0
+
+
+async def test_the_patients_own_target_range_decides_what_counts_as_low(
+    db_session: AsyncSession,
+) -> None:
+    """医生把目标放宽到 4.4–8.9 的人，4.6 不该被算成「偏低」。"""
+
+    user = await create_user(db_session, "glucose_target")
+    low, high = await set_glucose_targets(
+        db_session, user_id=user.id, low_mg_dl=80, high_mg_dl=160
+    )
+    assert (low, high) == (80, 160)
+    assert await glucose_targets(db_session, user_id=user.id) == (80, 160)
+
+    await add_reading(db_session, user.id, value_mg_dl=78, hours_ago=6)
+    await add_reading(db_session, user.id, value_mg_dl=120, hours_ago=4)
+    await add_reading(db_session, user.id, value_mg_dl=170, hours_ago=2)
+
+    summary = await summarize_glucose(db_session, user_id=user.id, days=7)
+    recent = await list_glucose_readings(db_session, user_id=user.id, days=7, limit=5)
+    rendered = render_glucose_context(days=7, summary=summary, recent=recent)
+
+    assert summary["below_target_count"] == 1
+    assert summary["in_target_count"] == 1
+    assert summary["above_target_count"] == 1
+    assert "低于 4.4 的 1 次" in rendered
+    assert "高于 8.9 的 1 次" in rendered
+    # 模型必须知道这是患者自己设的范围，别拿 3.9–10.0 套他。
+    assert "他自己设的目标范围是 4.4–8.9" in rendered
+
+
+async def test_a_target_range_the_patient_did_not_set_falls_back_to_the_usual_one(
+    db_session: AsyncSession,
+) -> None:
+    user = await create_user(db_session, "glucose_no_target")
+    await add_reading(db_session, user.id, value_mg_dl=60, hours_ago=3)
+
+    assert await glucose_targets(db_session, user_id=user.id) == (70, 180)
+    summary = await summarize_glucose(db_session, user_id=user.id, days=7)
+
+    assert summary["below_target_count"] == 1
+
+
+async def test_a_nonsense_target_range_is_refused(
+    db_session: AsyncSession,
+) -> None:
+    user = await create_user(db_session, "glucose_bad_target")
+
+    with pytest.raises(ValueError, match="下限要小于上限"):
+        await set_glucose_targets(
+            db_session, user_id=user.id, low_mg_dl=180, high_mg_dl=70
+        )
 
 
 def test_the_read_tool_is_named_for_the_activity_map() -> None:

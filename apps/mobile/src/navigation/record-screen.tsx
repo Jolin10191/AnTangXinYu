@@ -15,10 +15,12 @@ import type {
   GlucoseReading,
   GlucoseReport,
   GlucoseSummary,
+  GlucoseTarget,
   MealLog,
   MedicationLog,
   WearableDashboard,
 } from "../api/types";
+import { DEFAULT_GLUCOSE_TARGET } from "../api/types";
 import { colors, radii, spacing, typefaces } from "../ui/theme";
 import { DeviceChannels } from "./device-channels";
 import type {
@@ -27,6 +29,7 @@ import type {
 } from "./device-channels";
 import { EventTimeField } from "../ui/event-time-field";
 import { GlucoseReportDetail } from "../glucose/report-detail";
+import { GlucoseTargetSheet } from "../glucose/target-sheet";
 import { openOriginalReport } from "../glucose/open-original";
 import { measuredTimeLabel } from "../glucose/measured-time";
 import Svg, { Circle, Line, Path, Polyline, Rect } from "react-native-svg";
@@ -130,6 +133,11 @@ export function formatGlucose(reading: GlucoseReading): string {
   return `${(reading.valueMgDl / 18).toFixed(1)} mmol/L`;
 }
 
+/** mg/dL → mmol/L 的一位数文本，目标范围与绿带图例都走它。 */
+export function mmolValue(mgDl: number): string {
+  return (mgDl / 18).toFixed(1);
+}
+
 export function formatMeasuredAt(iso: string): string {
   const date = new Date(iso);
   const month = date.getMonth() + 1;
@@ -210,13 +218,19 @@ function dayStartOf(value: string): number {
 }
 
 /**
- * 传感器曲线：一天一条线，绿色带是 3.9–10.0 的目标区间。
+ * 传感器曲线：一天一条线，绿色带是患者自己的目标区间（默认 3.9–10.0）。
  *
  * 只画「最新那天」而不是把 7 天叠在一张图上：叠图看起来很热闹，但患者真正要判断
  * 的是「今天什么时候低过、什么时候冲上去」，多天叠在一起反而读不出来。
  * 缺口就是缺口——没有采样的时段保持空白，不做插值。
  */
-function CgmCurve({ samples }: { samples: CgmSample[] }) {
+function CgmCurve({
+  samples,
+  target,
+}: {
+  samples: CgmSample[];
+  target: GlucoseTarget;
+}) {
   if (samples.length === 0) return null;
   const newest = samples.reduce(
     (latest, sample) =>
@@ -245,8 +259,8 @@ function CgmCurve({ samples }: { samples: CgmSample[] }) {
     const clamped = Math.min(Math.max(value, CGM_FLOOR), CGM_CEIL);
     return CHART_H - ((clamped - CGM_FLOOR) / (CGM_CEIL - CGM_FLOOR)) * CHART_H;
   };
-  const bandTop = y(10);
-  const bandBottom = y(3.9);
+  const bandTop = y(target.highMgDl / 18);
+  const bandBottom = y(target.lowMgDl / 18);
   const points = daySamples.map((sample) => `${x(sample.time)},${y(sample.value)}`).join(" ");
   const dayLabel = `${new Date(dayStart).getMonth() + 1} 月 ${new Date(dayStart).getDate()} 日`;
 
@@ -288,7 +302,9 @@ function CgmCurve({ samples }: { samples: CgmSample[] }) {
         />
       </Svg>
       <View style={styles.curveLegend}>
-        <Text style={styles.cardHint}>绿色带 3.9–10.0 mmol/L</Text>
+        <Text style={styles.cardHint}>
+          绿色带 {mmolValue(target.lowMgDl)}–{mmolValue(target.highMgDl)} mmol/L
+        </Text>
         <Text style={styles.cardHint}>{daySamples.length} 个采样</Text>
       </View>
       <Text style={styles.cardHint}>
@@ -350,9 +366,11 @@ export function trendSeries(
 function GlucoseTrend({
   now,
   readings,
+  target,
 }: {
   now: number | null;
   readings: readonly GlucoseReading[];
+  target: GlucoseTarget;
 }) {
   const points = now === null ? [] : trendSeries(readings, now);
   if (now === null || points.length < 2) return null;
@@ -364,8 +382,8 @@ function GlucoseTrend({
     const clamped = Math.min(Math.max(value, CGM_FLOOR), CGM_CEIL);
     return CHART_H - ((clamped - CGM_FLOOR) / (CGM_CEIL - CGM_FLOOR)) * CHART_H;
   };
-  const bandTop = y(10);
-  const bandBottom = y(3.9);
+  const bandTop = y(target.highMgDl / 18);
+  const bandBottom = y(target.lowMgDl / 18);
   const line = points
     .map((point) => `${x(point.time)},${y(point.value)}`)
     .join(" ");
@@ -421,7 +439,9 @@ function GlucoseTrend({
         ))}
       </Svg>
       <View style={styles.curveLegend}>
-        <Text style={styles.cardHint}>绿带 3.9–10.0 mmol/L</Text>
+        <Text style={styles.cardHint}>
+          绿带 {mmolValue(target.lowMgDl)}–{mmolValue(target.highMgDl)} mmol/L
+        </Text>
         <Text style={styles.cardHint}>
           {measured > 0 ? `自己量的 ${measured} 次` : ""}
           {measured > 0 && reported > 0 ? " · " : ""}
@@ -445,6 +465,8 @@ type Props = {
     ApiClient,
     | "getGlucoseReadings"
     | "getGlucoseSummary"
+    | "getGlucoseTarget"
+    | "setGlucoseTarget"
     | "getMealLogs"
     | "createMealLog"
     | "deleteMealLog"
@@ -497,6 +519,9 @@ export function RecordScreen({
   const [trendNow, setTrendNow] = useState<number | null>(null);
   // 点开哪一份报告速览；null 表示详情页没开着。
   const [openReport, setOpenReport] = useState<GlucoseReport | null>(null);
+  // 患者自己的目标范围：绿带、统计口径、对话里说的「高低」都按它算。
+  const [target, setTarget] = useState<GlucoseTarget>(DEFAULT_GLUCOSE_TARGET);
+  const [targetSheetOpen, setTargetSheetOpen] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -526,23 +551,36 @@ export function RecordScreen({
       api.getWearableDashboard(),
       api.getCgmSamples().catch(() => ({ days: 7, count: 0, samples: [] })),
       api.getGlucoseReports().catch(() => [] as GlucoseReport[]),
+      api.getGlucoseTarget().catch(() => DEFAULT_GLUCOSE_TARGET),
     ])
-      .then(([rows, nextSummary, nextMeals, nextMedications, nextDashboard, series, reports]) => {
-        if (!active) {
-          return;
-        }
-        setReadings(rows);
-        setSummary(nextSummary);
-        setMeals(nextMeals);
-        setMedications(nextMedications);
-        setDashboard(nextDashboard);
-        setCgmSamples(series.samples);
-        setGlucoseReports(reports);
-        // 趋势图的「近 7 天」以取到数据的那一刻为锚点：放在渲染里算 Date.now()
-        // 会让每次重渲染都换一个时间轴，图会自己抖。
-        setTrendNow(Date.now());
-        setError(null);
-      })
+      .then(
+        ([
+          rows,
+          nextSummary,
+          nextMeals,
+          nextMedications,
+          nextDashboard,
+          series,
+          reports,
+          nextTarget,
+        ]) => {
+          if (!active) {
+            return;
+          }
+          setReadings(rows);
+          setSummary(nextSummary);
+          setMeals(nextMeals);
+          setMedications(nextMedications);
+          setDashboard(nextDashboard);
+          setCgmSamples(series.samples);
+          setGlucoseReports(reports);
+          setTarget(nextTarget);
+          // 趋势图的「近 7 天」以取到数据的那一刻为锚点：放在渲染里算 Date.now()
+          // 会让每次重渲染都换一个时间轴，图会自己抖。
+          setTrendNow(Date.now());
+          setError(null);
+        },
+      )
       .catch((cause: unknown) => {
         if (active) {
           setError(cause instanceof Error ? cause.message : "记录读取失败");
@@ -576,8 +614,22 @@ export function RecordScreen({
             cgmSamples.length /
             18
           ).toFixed(1),
-          low: cgmSamples.filter((sample) => sample.valueMgDl < 70).length,
+          low: cgmSamples.filter((sample) => sample.valueMgDl < target.lowMgDl)
+            .length,
         };
+
+  async function saveTarget(next: GlucoseTarget) {
+    setTargetSheetOpen(false);
+    try {
+      const saved = await api.setGlucoseTarget(next.lowMgDl, next.highMgDl);
+      setTarget(saved);
+      // 统计口径跟着变，重新拉一次摘要，别让「低于 4.4 的 N 次」停在旧数字上。
+      const refreshed = await api.getGlucoseSummary();
+      setSummary(refreshed);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "目标范围没存上");
+    }
+  }
 
   const totalSteps =
     dashboard?.sources.reduce(
@@ -751,7 +803,21 @@ export function RecordScreen({
 
             {/* 两个子栏共用一张趋势图：手输的点、报告里的点都在这条线上，
                 切到哪一栏都看得见自己最近的高低起伏。 */}
-            <GlucoseTrend now={trendNow} readings={readings} />
+            <GlucoseTrend now={trendNow} readings={readings} target={target} />
+
+            {/* 目标范围是医生给的数字，患者自己能改；绿带与统计都按它算。 */}
+            <Pressable
+              accessibilityLabel="修改血糖目标范围"
+              onPress={() => setTargetSheetOpen(true)}
+              style={styles.card}
+            >
+              <View style={styles.targetRow}>
+                <Text style={styles.cardBody}>
+                  {`目标范围 ${mmolValue(target.lowMgDl)}–${mmolValue(target.highMgDl)} mmol/L`}
+                </Text>
+                <Text style={styles.targetAction}>按医生给的改</Text>
+              </View>
+            </Pressable>
 
             {source === "manual" ? (
               <>
@@ -759,11 +825,13 @@ export function RecordScreen({
                   <View style={styles.card}>
                     <Text style={styles.cardTitle}>最近 7 天</Text>
                     <Text style={styles.cardBody}>
-                      平均{" "}
-                      {summary.averageMgDl === null
-                        ? "—"
-                        : `${(summary.averageMgDl / 18).toFixed(1)} mmol/L`}{" "}
-                      · 记录 {summary.count} 次 · 低于 3.9 共 {summary.below70Count} 次
+                      {`平均 ${
+                        summary.averageMgDl === null
+                          ? "—"
+                          : `${(summary.averageMgDl / 18).toFixed(1)} mmol/L`
+                      } · 记录 ${summary.count} 次 · 低于 ${mmolValue(
+                        summary.targetLowMgDl,
+                      )} 共 ${summary.belowTargetCount} 次`}
                     </Text>
                   </View>
                 ) : null}
@@ -855,7 +923,9 @@ export function RecordScreen({
                     </Text>
                   </View>
                 ))}
-                {cgmSamples.length === 0 ? null : <CgmCurve samples={cgmSamples} />}
+                {cgmSamples.length === 0 ? null : (
+                  <CgmCurve samples={cgmSamples} target={target} />
+                )}
                 {cgmSampleStats === null ? null : (
                   <View style={styles.metricRow}>
                     <View style={[styles.metricSmall, styles.metricSmallPrimary]}>
@@ -865,7 +935,9 @@ export function RecordScreen({
                       </Text>
                     </View>
                     <View style={[styles.metricSmall, styles.metricSmallSleep]}>
-                      <Text style={styles.metricSmallLabel}>低于 3.9</Text>
+                      <Text style={styles.metricSmallLabel}>
+                        低于 {mmolValue(target.lowMgDl)}
+                      </Text>
                       <Text style={styles.metricSmallValue}>
                         {cgmSampleStats.low} 次
                       </Text>
@@ -1221,6 +1293,13 @@ export function RecordScreen({
           report={openReport}
         />
       )}
+
+      <GlucoseTargetSheet
+        onCancel={() => setTargetSheetOpen(false)}
+        onSave={(next) => void saveTarget(next)}
+        target={target}
+        visible={targetSheetOpen}
+      />
     </View>
   );
 }
@@ -1362,6 +1441,16 @@ const styles = StyleSheet.create({
   },
   cardAction: {
     marginTop: 8,
+    color: colors.primary,
+    fontFamily: typefaces.sansMedium,
+    fontSize: 12.5,
+  },
+  targetRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  targetAction: {
     color: colors.primary,
     fontFamily: typefaces.sansMedium,
     fontSize: 12.5,

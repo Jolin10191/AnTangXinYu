@@ -70,8 +70,10 @@ import {
   type MealLog,
   type MedicationLog,
   type GlucoseSummary,
+  type GlucoseTarget,
   type GlucoseReport,
   parseGlucoseSummary,
+  parseGlucoseTarget,
   parseGlucoseReports,
   parseGlucoseReport,
   parseGlucoseReportPreview,
@@ -1367,6 +1369,34 @@ export class ApiClient {
     );
     if (!response.ok) throw await this.apiError(response);
     return parseGlucoseSummary(await responseJson(response));
+  }
+
+  /** 患者自己的血糖目标范围；读到就用它，读不到（旧后端）就当 70–180。 */
+  async getGlucoseTarget(signal?: AbortSignal): Promise<GlucoseTarget> {
+    const response = await this.authorizedFetch(
+      "/api/v1/health-profile/glucose-target",
+      { signal },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseGlucoseTarget(await responseJson(response));
+  }
+
+  async setGlucoseTarget(
+    lowMgDl: number,
+    highMgDl: number,
+    signal?: AbortSignal,
+  ): Promise<GlucoseTarget> {
+    const response = await this.authorizedFetch(
+      "/api/v1/health-profile/glucose-target",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ low_mg_dl: lowMgDl, high_mg_dl: highMgDl }),
+        signal,
+      },
+    );
+    if (!response.ok) throw await this.apiError(response);
+    return parseGlucoseTarget(await responseJson(response));
   }
 
   async revokeGlucoseReading(id: string): Promise<void> {
